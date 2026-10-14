@@ -1,0 +1,20 @@
+project_name: "<project>"
+backlog_directory: ".pm/backlog"
+default_status: "Ready"
+statuses: ["Ready", "Active", "Owner check", "Done"]
+labels: ["urgent"]
+types: ["epic", "package", "task", "bug"]
+date_format: yyyy-mm-dd
+max_column_width: 20
+auto_open_browser: false
+default_port: 6420
+remote_operations: false
+auto_commit: false
+filesystem_only: false
+bypass_git_hooks: false
+check_active_branches: false
+active_branch_days: 30
+task_prefix: "task"
+definition_of_done:
+  - "Living docs this task affects are updated, and the final summary says so in one line: Doc impact: <docs> (or Doc impact: none)"
+  - "The final summary also says in three short lines what the owner said or corrected, what was found, and what comes next"

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Runs the project's own commit message check in .githooks/commit-msg, if the project has one.
+if [ -f .githooks/commit-msg ]; then
+  exec sh .githooks/commit-msg "$1"
+fi
+exit 0

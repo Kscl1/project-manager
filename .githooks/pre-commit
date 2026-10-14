@@ -1,0 +1,34 @@
+#!/bin/sh
+# This repo's own checks (D-86), run by .pm/hooks/pre-commit after the doc check.
+# 1. gitleaks: no secret in the staged changes. 2. ruff: staged Python passes lint and format.
+# Tool versions: tools/dev-tools.txt. A missing tool blocks the commit; it never skips silently.
+
+need() {
+  command -v "$1" >/dev/null 2>&1 && return
+  echo "$1 not found, commit blocked. Install it: see tools/dev-tools.txt" >&2
+  exit 1
+}
+
+need gitleaks
+if ! gitleaks git --pre-commit --staged --redact --no-banner --log-level warn; then
+  echo "gitleaks: a staged change looks like a secret, commit blocked." >&2
+  echo "Remove it from the change. If it was ever real, rotate the key and tell the owner." >&2
+  exit 1
+fi
+
+# Checks the staged version of each file (git show :path), not the working copy.
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.py')
+[ -z "$files" ] && exit 0
+need ruff
+status=0
+while IFS= read -r f; do
+  git show ":$f" | ruff check --quiet --stdin-filename "$f" - || status=1
+  if ! git show ":$f" | ruff format --check --quiet --stdin-filename "$f" -; then
+    echo "ruff format: $f is not formatted; run: ruff format \"$f\"" >&2
+    status=1
+  fi
+done <<LIST
+$files
+LIST
+[ $status -eq 0 ] || echo "ruff: fix the findings above, then stage again; commit blocked." >&2
+exit $status

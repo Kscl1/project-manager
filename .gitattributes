@@ -1,0 +1,7 @@
+* text=auto eol=lf
+
+# project-management package (D-55)
+.pm/** text eol=lf
+AGENTS.md text eol=lf
+CLAUDE.md text eol=lf
+backlog.config.yml text eol=lf

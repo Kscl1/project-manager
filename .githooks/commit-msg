@@ -1,0 +1,59 @@
+#!/bin/sh
+# The product repo's commit message check, run as the commit-msg hook (git config core.hooksPath .githooks):
+# - title: type(scope): subject, types feat fix docs refactor test chore, no trailing period
+#   (git's own "Merge ..." and "Revert ..." titles are allowed)
+# - ends with Assisted-by: <model> (<thinking level>); a squash lists each model once (D-71);
+#   merge commits may omit it; work done without a model ends with: Assisted-by: none (human)
+# - no Co-authored-by and no "Generated with" lines
+# - one line 'Refs: #<issue>' (several comma-separated) or 'Refs: none' before the Assisted-by line(s);
+#   merge and revert commits may omit it
+
+# Drop git's comment lines and everything below the scissors line of `commit -v`.
+msg=$(sed -e '/^# -* >8 -*$/,$d' -e '/^#/d' "$1")
+title=$(printf '%s\n' "$msg" | sed -n '/[^[:space:]]/{p;q;}')
+problems=""
+revert=0
+add() { problems="$problems
+  - $1"; }
+
+if printf '%s\n' "$msg" | grep -qi '^co-authored-by:'; then add "remove the Co-authored-by line (D-71 uses Assisted-by)"; fi
+if printf '%s\n' "$msg" | grep -qi 'generated with'; then add "remove the \"Generated with\" line"; fi
+
+case "$title" in
+  "Merge "*) merge=1 ;;
+  "Revert "*) merge=0; revert=1 ;;
+  *) merge=0
+     if ! printf '%s\n' "$title" | grep -Eq '^(feat|fix|docs|refactor|test|chore)(\([^()]+\))?: [^ ]'; then
+       add "title must look like 'type(scope): subject' with a type from: feat fix docs refactor test chore"
+     elif printf '%s\n' "$title" | grep -q '\.$'; then
+       add "no period at the end of the title"
+     fi ;;
+esac
+
+trailers=$(printf '%s\n' "$msg" | grep -i '^assisted-by' || true)
+if [ -n "$trailers" ]; then
+  bad=$(printf '%s\n' "$trailers" | grep -Ev '^Assisted-by: [^()]+ \([^()]+\)$' || true)
+  [ -n "$bad" ] && add "write the trailer as 'Assisted-by: <model> (<thinking level>)', got: $(printf '%s' "$bad" | head -1)"
+  [ "$(printf '%s\n' "$trailers" | sort | uniq -d)" ] && add "each model appears once in Assisted-by"
+  last=$(printf '%s\n' "$msg" | sed '/^[[:space:]]*$/d' | tail -1)
+  case "$last" in Assisted-by:*) ;; *) add "the message must end with the Assisted-by line(s)" ;; esac
+elif [ "$merge" -eq 0 ]; then
+  add "end the message with 'Assisted-by: <model> (<thinking level>)', or 'Assisted-by: none (human)'"
+fi
+
+refs=$(printf '%s\n' "$msg" | grep -i '^refs:' || true)
+if [ -n "$refs" ]; then
+  [ "$(printf '%s\n' "$refs" | wc -l)" -gt 1 ] && add "write one Refs line; list several tasks comma-separated"
+  bad=$(printf '%s\n' "$refs" | grep -Ev '^Refs: (none|#[0-9]+(, #[0-9]+)*)$' || true)
+  [ -n "$bad" ] && add "write 'Refs: #12' or 'Refs: #12, #13' or 'Refs: none', got: $(printf '%s' "$bad" | head -1)"
+  above=$(printf '%s\n' "$msg" | grep -i -B1 -m1 '^assisted-by' | head -1)
+  [ -n "$trailers" ] && ! printf '%s\n' "$above" | grep -qi '^refs:' && add "put the Refs line directly above the Assisted-by line(s) "
+elif [ "$merge" -eq 0 ] && [ "$revert" -eq 0 ]; then
+  add "add a line 'Refs: #<issue>' (or 'Refs: none') before the Assisted-by line"
+fi
+
+if [ -n "$problems" ]; then
+  echo "commit message does not follow AGENTS.md (Commits), commit blocked:$problems" >&2
+  exit 1
+fi
+exit 0

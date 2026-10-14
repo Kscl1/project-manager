@@ -1,0 +1,6 @@
+# Developer tools the commit hooks and CI use (D-86). Versions are pinned; CI installs exactly these.
+# ruff:      python -m pip install -r tools/dev-tools.txt
+# gitleaks:  https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1
+#            Windows: unzip gitleaks_8.30.1_windows_x64.zip and put gitleaks.exe in a folder on PATH.
+#            Check the zip against gitleaks_8.30.1_checksums.txt from the same release.
+ruff==0.16.10

@@ -1,0 +1,15 @@
+#!/bin/sh
+# Blocks the commit when staged docs are inconsistent. See .pm/tools/pm_check.py.
+# Then runs the project's own checks in .githooks/pre-commit, if the project has one.
+# Try each name until one is a real Python 3 (Windows ships a fake python3 alias).
+for PY in python python3; do
+  if "$PY" -c "import sys; sys.exit(sys.version_info < (3, 8))" 2>/dev/null; then
+    "$PY" .pm/tools/pm_check.py --staged || exit 1
+    if [ -f .githooks/pre-commit ]; then
+      exec sh .githooks/pre-commit
+    fi
+    exit 0
+  fi
+done
+echo "pm_check: Python 3.8+ not found, commit blocked" >&2
+exit 1
