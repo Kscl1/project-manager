@@ -169,12 +169,19 @@ def send(root, report, yes, repo):
     print(text)
     if not yes:
         try:
-            answer = input(f"Send this report to github.com/{repo} as a public issue? [y/N] ")
+            print(
+                f"It becomes an issue in the package's home repo (github.com/{repo}); anyone with access can read it,"
+            )
+            print("and it becomes public when the repo does.")
+            answer = input("Send it? [y/N] ")
         except EOFError:
             answer = ""
         if answer.strip().lower() not in ("y", "yes"):
             print("Nothing sent.")
             return 0
+    if not shutil.which("gh"):
+        print(f"gh is missing or not signed in; nothing sent. The report is saved at {report.as_posix()}.")
+        return 1
     title = title.lstrip("# ").strip()
     command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
     return subprocess.run(command, input=body.strip() + "\n", text=True).returncode

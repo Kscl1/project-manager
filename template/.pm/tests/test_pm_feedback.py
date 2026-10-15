@@ -124,6 +124,7 @@ class FeedbackTest(unittest.TestCase):
             mock.patch.object(pm_feedback.subprocess, "run", self.gh),
             mock.patch.dict(pm_feedback.os.environ, {"ZEPHYR_API_TOKEN": ENV_SECRET}),
             mock.patch.object(pm_feedback, "tool_versions", lambda: "python 3.x\ngit: git version 2.x"),
+            mock.patch.object(pm_feedback.shutil, "which", lambda name: name),
         ):
             patch.start()
             self.addCleanup(patch.stop)
@@ -200,6 +201,15 @@ class FeedbackTest(unittest.TestCase):
         self.assertIn("### Error excerpt", body)
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
+
+    def test_missing_gh_sends_nothing_and_says_so(self):
+        report, _ = self.write_report()
+        with mock.patch.object(pm_feedback.shutil, "which", lambda name: None):
+            code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("gh is missing or not signed in", out)
+        self.assertIn(report.as_posix(), out)
+        self.assertEqual(self.gh.calls, [])
 
     def test_send_redacts_an_edited_report_again(self):
         report, _ = self.write_report()
