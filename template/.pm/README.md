@@ -45,6 +45,7 @@ python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
 backlog browser
 python .pm/tools/pm_check.py --stale
+python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
 ```
 
 Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor (D-98).
