@@ -245,6 +245,14 @@ class ResumeSummaryTest(unittest.TestCase):
         self.commit_with("feat: bare", "Refs: TASK-3\nAssisted-by: M (high)", "2025-06-03")
         self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
 
+        # A draft's file holds its work too, like an open task's.
+        drafts_dir = self.root / ".pm" / "backlog" / "drafts"
+        drafts_dir.mkdir(parents=True)
+        draft = "---\nid: DRAFT-1\ntitle: Parked idea\nstatus: Draft\n---\n"
+        (drafts_dir / "draft-1 - Parked-idea.md").write_text(draft, encoding="utf-8")
+        self.commit_with("chore: park the idea", "Refs: DRAFT-1\nAssisted-by: M (high)", "2025-06-03")
+        self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
+
     def test_names_finished_tasks_in_the_newest_worklogs_next(self):
         worklog_dir = self.root / ".pm" / "worklog"
         worklog_dir.mkdir(parents=True)

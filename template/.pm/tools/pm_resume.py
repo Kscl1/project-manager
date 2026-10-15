@@ -334,7 +334,7 @@ def worklog_gap_warning():
     """Warn about commits after the newest worklog that no task records either (D-105).
 
     A one-goal session writes no worklog, so a commit is recorded when every task its Refs line names is open
-    (its task file holds the work) or Done with a Final Summary; a commit with `Refs: none`, no Refs line,
+    or a draft (its file holds the work) or Done with a Final Summary; a commit with `Refs: none`, no Refs line,
     an unknown task or a Done task without a summary is not.
     """
     try:
@@ -348,14 +348,16 @@ def worklog_gap_warning():
     if not last:
         return None  # the worklog is not committed yet
     recorded = {
-        task["id"] for task in load_tasks() + load_tasks(COMPLETED_DIR) if task["status"] != "Done" or task["summary"]
+        task["id"]
+        for task in load_tasks() + load_tasks(COMPLETED_DIR) + load_tasks(DRAFTS_DIR)
+        if task["status"] != "Done" or task["summary"]
     }
     loose = [c for c in commits(f"{last}..HEAD") if not c["refs"] or not c["refs"] <= recorded]
     if not loose:
         return None
     return (
         f"- ⚠️ {len(loose)} commit(s) after the newest worklog ({newest.name}) are in no record "
-        f"(open task or closing summary): git log --oneline {last[:7]}..HEAD"
+        f"(open task, draft or closing summary): git log --oneline {last[:7]}..HEAD"
     )
 
 
