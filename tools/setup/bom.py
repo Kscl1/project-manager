@@ -1,6 +1,7 @@
 """Bill of materials checks for the setup TUI: load bom.toml, read the installed versions, compare (DESIGN.md).
 
-Standard library only, so the tests and the plain-text table run without Textual.
+Standard library only, so the tests and the plain-text table run without Textual. Read-only: it runs each
+command item's version check with a timeout and never installs or downloads anything.
 
 usage: python tools/setup/bom.py    print the check table as plain text
 """
@@ -15,27 +16,67 @@ from pathlib import Path
 import tomllib
 
 BOM = Path(__file__).with_name("bom.toml")
-VERSION = re.compile(r"\d+(?:\.\d+)+")
+KINDS = ("command", "project-file", "manual")
+LAYERS = ("core", "map")
 TIMEOUT_S = 15
-COLUMNS = ("Item", "Installed", "Minimum", "Tested", "Status")
+COLUMNS = ("Item", "Installed", "Minimum", "Tested", "Status", "Path")
+
+# The first word that starts like a version, with whatever is glued to it ("3.15.0rc1", "2.54.0.windows.1").
+VERSION_WORD = re.compile(r"(?<![\w.])v?(\d+\.\d+[^\s,;()]*)")
+COMPARABLE = re.compile(r"\d+\.\d+(?:\.\d+)?")  # 3.11 or 3.11.9; anything else cannot be compared
+GIT_WINDOWS = re.compile(r"\.windows\.\d+$")  # git version 2.54.0.windows.1, a known suffix
 
 MISSING = "missing"
+FAILED = "check failed"
 UNREADABLE = "version unreadable"
+CANNOT_COMPARE = "cannot compare"
+NOT_CHECKED = "not checked"
 BELOW = "below minimum"
 OK = "ok"
 UNTESTED = "not tested yet"
 
 
 def load(path=BOM):
-    """The [[item]] tables of bom.toml, in file order."""
+    """The [[item]] tables of bom.toml, in file order. Raises ValueError with a plain message on a bad entry."""
     with open(path, "rb") as f:
-        return tomllib.load(f)["item"]
+        items = tomllib.load(f).get("item", [])
+    seen = set()
+    for item in items:
+        where = f"bom.toml item {item.get('id') or item.get('name') or '?'}"
+        if not item.get("id") or not item.get("name"):
+            raise ValueError(f"{where}: needs an id and a name")
+        if item["id"] in seen:
+            raise ValueError(f"{where}: duplicate id")
+        seen.add(item["id"])
+        if item.get("kind") not in KINDS:
+            raise ValueError(f"{where}: kind must be one of {', '.join(KINDS)}")
+        if item.get("layer") not in LAYERS:
+            raise ValueError(f"{where}: layer must be one of {', '.join(LAYERS)}")
+        for key in ("min", "tested"):
+            if item.get(key) and not COMPARABLE.fullmatch(item[key]):
+                raise ValueError(f"{where}: {key} must look like 3.11 or 3.11.9, or be left out")
+        if item.get("min") and item.get("tested") and compare(item["min"], item["tested"]) > 0:
+            raise ValueError(f"{where}: min is above tested")
+        if item["kind"] == "command":
+            check = item.get("check")
+            if not check or not all(isinstance(arg, str) for arg in check):
+                raise ValueError(f"{where}: a command item needs check, a list of strings")
+            if check[0] == "npx":
+                raise ValueError(f"{where}: npx may download; the scan must stay read-only")
+            if not item.get("min") or not item.get("tested"):
+                raise ValueError(f"{where}: a command item needs min and tested")
+        if item["kind"] == "project-file" and not item.get("path"):
+            raise ValueError(f"{where}: a project-file item needs a path")
+    return items
 
 
 def parse_version(text):
-    """The first dotted number in a command's output ('git version 2.54.0.windows.1' -> '2.54.0'), else None."""
-    match = VERSION.search(text or "")
-    return match.group(0) if match else None
+    """The version in a command's output: 'v24.14.0' -> '24.14.0', 'git version 2.54.0.windows.1' -> '2.54.0'.
+
+    Anything glued to the number stays ('3.15.0rc1'), so status() reports it as cannot compare. None if no version.
+    """
+    match = VERSION_WORD.search(text or "")
+    return GIT_WINDOWS.sub("", match.group(1).rstrip(".")) if match else None
 
 
 def compare(a, b):
@@ -48,11 +89,15 @@ def compare(a, b):
     return (x > y) - (x < y)
 
 
-def status(found, version, minimum, tested):
-    if not found:
+def status(path, ran_ok, version, minimum, tested):
+    if path is None:
         return MISSING
+    if not ran_ok:
+        return FAILED
     if version is None:
         return UNREADABLE
+    if not COMPARABLE.fullmatch(version):
+        return CANNOT_COMPARE
     if compare(version, minimum) < 0:
         return BELOW
     if compare(version, tested) > 0:
@@ -60,42 +105,57 @@ def status(found, version, minimum, tested):
     return OK
 
 
-def installed_version(check):
-    """(found, version) for a check command such as ["git", "--version"]; version is None if the output has none."""
-    exe = shutil.which(check[0])  # also finds npm's .cmd shims on Windows
-    if exe is None:
-        return False, None
+def probe(check, timeout=TIMEOUT_S):
+    """(path, ran_ok, version) for a check command such as ["git", "--version"].
+
+    path is the resolved executable, None if not found; "python" is the interpreter running this tool.
+    A non-zero exit or a timeout gives ran_ok False and no version, even if the output shows one.
+    """
+    path = sys.executable if check[0] == "python" else shutil.which(check[0])  # which() finds .cmd shims too
+    if path is None:
+        return None, False, None
     try:
         done = subprocess.run(
-            [exe, *check[1:]], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=TIMEOUT_S
+            [path, *check[1:]], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return True, None
-    return True, parse_version(done.stdout + done.stderr)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return path, False, None
+    if done.returncode != 0:
+        return path, False, None
+    return path, True, parse_version(done.stdout + done.stderr)
 
 
-def check_all(items, probe=installed_version):
-    """One row per item: name, installed, minimum, tested, status."""
+def check_all(items, run=probe):
+    """One row per item: name, installed, minimum, tested, status, path. Only command items are run."""
     rows = []
     for item in items:
-        found, version = probe(item["check"])
-        result = status(found, version, item["min"], item["tested"])
-        rows.append((item["name"], version or "-", item["min"], item["tested"], result))
+        minimum, tested = item.get("min") or "-", item.get("tested") or "-"
+        if item["kind"] != "command":
+            rows.append((item["name"], "-", minimum, tested, NOT_CHECKED, item.get("path", "-")))
+            continue
+        path, ran_ok, version = run(item["check"])
+        result = status(path, ran_ok, version, item["min"], item["tested"])
+        rows.append((item["name"], version or "-", minimum, tested, result, path or "-"))
     return rows
 
 
 def summary(rows):
-    """'5 checked: 3 ok, 2 missing'."""
-    counts = Counter(row[-1] for row in rows)
-    return f"{len(rows)} checked: " + ", ".join(f"{n} {name}" for name, n in counts.items())
+    """'5 items: 3 ok, 2 missing'."""
+    counts = Counter(row[4] for row in rows)
+    return f"{len(rows)} items: " + ", ".join(f"{n} {name}" for name, n in counts.items())
 
 
 def main():
-    rows = check_all(load())
+    try:
+        rows = check_all(load())
+    except ValueError as error:
+        print(error, file=sys.stderr)
+        return 1
     widths = [max(len(str(r[i])) for r in [COLUMNS, *rows]) for i in range(len(COLUMNS))]
     for row in [COLUMNS, *rows]:
         print("  ".join(str(cell).ljust(w) for cell, w in zip(row, widths)).rstrip())
     print(summary(rows))
+    return 0
 
 
 if __name__ == "__main__":

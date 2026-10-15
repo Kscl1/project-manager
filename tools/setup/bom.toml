@@ -1,49 +1,141 @@
-# Bill of materials: what the product needs on the user's machine, read by the setup TUI (DESIGN.md).
-# min: below it the TUI warns. tested: above it the TUI says "not tested yet". Until an older version
-# has been tried, min equals tested. check is a command and its arguments, never a shell line.
-# Install routes are shown later, never run without a yes.
+# Bill of materials: what the product needs, read by the setup TUI (DESIGN.md).
+#
+# id      stable key, never renamed.
+# kind    command: the TUI runs `check` (a command and its arguments, never a shell line) and reads the version.
+#         project-file: lives in the user's project at `path`; not checked yet.
+#         manual: nothing on the machine to check.
+# min     below it the TUI warns. tested: above it the TUI says "not tested yet". Until an older version has been
+#         tried, min equals tested. Leave both out when unknown. Command items need both.
+# install.* and note are text shown to the user, never handed to a shell.
+
+# Core: required for the first trial.
 
 [[item]]
+id = "python"
 name = "Python"
+kind = "command"
 layer = "core"
-check = ["python", "--version"]
+check = ["python", "--version"]  # "python" means the interpreter running the TUI
 min = "3.11"
 tested = "3.11.9"
-install.windows = "winget install Python.Python.3.11"
-install.linux = "preinstalled on Omarchy"
+install.windows = "winget install --id Python.Python.3.11 --exact --source winget"
+install.linux = "sudo pacman -S --needed python"
+note = "Preinstalled on Omarchy, where it is 3.14 and not tested yet."
 
 [[item]]
+id = "git"
 name = "Git"
+kind = "command"
 layer = "core"
 check = ["git", "--version"]
 min = "2.54.0"
 tested = "2.54.0"
-install.windows = "winget install Git.Git"
-install.linux = "preinstalled on Omarchy"
+install.windows = "winget install --id Git.Git --exact --source winget"
+install.linux = "sudo pacman -S --needed git"
+note = "Preinstalled on Omarchy."
 
 [[item]]
+id = "node"
 name = "Node.js"
+kind = "command"
 layer = "core"
 check = ["node", "--version"]
 min = "24.14.0"
 tested = "24.14.0"
-install.windows = "winget install OpenJS.NodeJS.LTS"
+install.windows = "winget install --id OpenJS.NodeJS.LTS --exact --source winget"
 install.linux = "omarchy install dev-env node"
 
 [[item]]
+id = "claude-code"
 name = "Claude Code"
+kind = "command"
 layer = "core"
 check = ["claude", "--version"]
 min = "2.1.296"
 tested = "2.1.296"
 install.windows = "irm https://claude.ai/install.ps1 | iex"
 install.linux = "curl -fsSL https://claude.ai/install.sh | bash"
+note = "Updates itself, so it often shows as not tested yet."
 
 [[item]]
+id = "backlog"
 name = "Backlog.md"
+kind = "command"
 layer = "core"
 check = ["backlog", "--version"]
 min = "1.52.0"
 tested = "1.52.0"
 install.windows = "npm i -g backlog.md@1.52.0"
 install.linux = "npm i -g backlog.md@1.52.0"
+
+[[item]]
+id = "pm-package"
+name = ".pm package"
+kind = "project-file"
+layer = "core"
+path = ".pm"
+install.all = "python <product>/template/.pm/tools/pm_init.py <project>"
+
+[[item]]
+id = "pm-hooks"
+name = "Opener and compaction hooks"
+kind = "project-file"
+layer = "core"
+path = ".claude/settings.json"
+
+[[item]]
+id = "context7-mcp"
+name = "Context7 MCP"
+kind = "project-file"
+layer = "core"
+path = ".mcp.json"
+note = "Configured in the project; the scan does not start the server."
+
+[[item]]
+id = "pm-grilling"
+name = "Skill pm-grilling"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-grilling"
+ref = "mattpocock/skills@49dd158 (grilling)"
+
+[[item]]
+id = "pm-grill-me"
+name = "Skill pm-grill-me"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-grill-me"
+ref = "mattpocock/skills@49dd158 (grill-me)"
+
+[[item]]
+id = "pm-scratch"
+name = "Skill pm-scratch"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-scratch"
+
+[[item]]
+id = "pm-feedback"
+name = "Skill pm-feedback"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-feedback"
+
+# Map: optional in the first trial.
+
+[[item]]
+id = "likec4"
+name = "LikeC4 CLI"
+kind = "manual"
+layer = "map"
+min = "1.59.4"
+tested = "1.59.4"
+install.all = "npx likec4@1.59.4 start"
+note = "Runs through npx with a pinned version; the scan does not start it, because npx may download."
+
+[[item]]
+id = "likec4-mcp"
+name = "LikeC4 MCP"
+kind = "project-file"
+layer = "map"
+path = ".mcp.json"
