@@ -421,19 +421,27 @@ class Project(unittest.TestCase):
         core_only = bom.plan(PROJECT_ITEMS, self.rows(), ("core",), "linux", self.project)[0][0]
         self.assertNotIn("--map", core_only["shell"])
 
-    def test_own_file_without_our_part_is_a_note(self):
+    def test_own_file_goes_to_the_installer_until_handed_over(self):
         (self.project / "settings.json").write_text("{}", encoding="utf-8")
+        steps, _ = bom.plan(PROJECT_ITEMS[1:2], self.rows()[1:2], ("core",), "linux", self.project)
+        self.assertEqual(steps[0]["ids"], ["hooks"])  # the installer lists it for /pm-setup
+        (self.project / ".pm" / "local").mkdir(parents=True)
+        (self.project / ".pm" / "local" / "merge-by-hand.md").write_text(
+            "# Merge by hand\n\n- settings.json: add ours\n", encoding="utf-8"
+        )
         steps, notes = bom.plan(PROJECT_ITEMS[1:2], self.rows()[1:2], ("core",), "linux", self.project)
-        self.assertEqual(steps, [])
-        self.assertIn("/pm-setup merges it with you", notes[0])
+        self.assertEqual((steps, notes), ([], []))  # now /pm-setup's work: neither a step nor a note
+        self.assertEqual(bom.merge_names(bom.merge_list(self.project)), "settings.json")
 
     def test_installer_outcome(self):
         ok = ("A", "-", "-", "-", bom.IN_PROJECT, "p")
         merge = ("B", "-", "-", "-", bom.MERGE, "p")
         absent = ("C", "-", "-", "-", bom.NOT_IN_PROJECT, "p")
         self.assertEqual(bom.project_outcome(0, [ok])[0], "done")
-        self.assertEqual(bom.project_outcome(0, [ok, merge])[0], "merge")
-        self.assertIn("B", bom.project_outcome(0, [ok, merge])[1])
+        self.assertEqual(bom.project_outcome(0, [ok, merge])[0], "done")
+        lines = ["- AGENTS.md: add ours", "- .mcp.json: add a", "- .mcp.json: add b"]
+        self.assertEqual(bom.project_outcome(0, [ok, merge], lines)[0], "merge")
+        self.assertIn("AGENTS.md, .mcp.json (listed", bom.project_outcome(0, [ok], lines)[1])
         self.assertEqual(bom.project_outcome(0, [absent])[0], "unverified")
         self.assertEqual(bom.project_outcome(3, [ok])[0], "failed")
 

@@ -203,23 +203,21 @@ def plan(items, rows, layers=LAYERS, system=None, project=None):
     shell (the argument list that runs it) and check (the command that verifies it afterwards). Only a missing or
     below-minimum command item becomes a step. One without a command for this OS, or one that is installed but
     could not be verified (check failed, version unreadable or cannot compare), is a note: never ready.
-    Project files not in the project become one last step, the installer (init_step); a user's own file that lacks
-    our part is a note for /pm-setup.
+    Project files not in the project become one last step, the installer (init_step). So does a file of the user's
+    that lacks our part, until the installer has handed it to /pm-setup in its merge list (handed_over): from then
+    on it is /pm-setup's work, not a step and not a note.
     """
     system = system or this_os()
     steps, notes, absent = [], [], []
+    merge_lines = merge_list(project) if project is not None else []
     for item, row in zip(items, rows):
         result = row[4]
         if item["layer"] not in layers or result in (OK, UNTESTED, NOT_CHECKED, IN_PROJECT):
             continue
-        if result == NOT_IN_PROJECT:
+        if result == NOT_IN_PROJECT or (result == MERGE and not handed_over(item, merge_lines)):
             absent.append(item["id"])
             continue
         if result == MERGE:
-            notes.append(
-                f"{item['name']}: your own {item['path']} does not have it yet; the installer never edits your file, "
-                "/pm-setup merges it with you (the entry is in .pm/templates/root/)."
-            )
             continue
         if result in (FAILED, UNREADABLE, CANNOT_COMPARE):
             notes.append(
@@ -271,17 +269,37 @@ def init_step(project, layers, ids):
     }
 
 
-def project_outcome(code, rows):
-    """Like outcome(), for the installer step, from its exit code and the re-checked project rows."""
+def merge_list(project):
+    """The '- item: how' lines pm_init left in the project for /pm-setup."""
+    try:
+        text = (Path(project) / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return [line for line in text.splitlines() if line.startswith("- ")]
+
+
+def handed_over(item, merge_lines):
+    """True when the installer's merge list already names this item's file (and its `has` text, if any)."""
+    word = item.get("has", "").strip('"')
+    return any(line.startswith(f"- {item['path']}:") and word in line for line in merge_lines)
+
+
+def merge_names(merge_lines):
+    """'AGENTS.md, .mcp.json' from the merge list, for one plain line."""
+    return ", ".join(dict.fromkeys(line[2:].split(":", 1)[0] for line in merge_lines))
+
+
+def project_outcome(code, rows, merge_lines=()):
+    """Like outcome(), for the installer step, from its exit code, the re-checked project rows and its merge list."""
     if code not in (0, None):
         return "failed", f"the installer failed (exit code {code}). Read its output; y tries again, s skips it."
     absent = [row[0] for row in rows if row[4] == NOT_IN_PROJECT]
-    merge = [row[0] for row in rows if row[4] == MERGE]
     if absent:
         return "unverified", f"still not in the project: {', '.join(absent)}."
-    if merge:
+    if merge_lines:
         return "merge", (
-            f"done. Yours to merge with /pm-setup: {', '.join(merge)} (listed in .pm/local/merge-by-hand.md)."
+            f"done. Yours, kept as they are, for /pm-setup to merge with you: {merge_names(merge_lines)} "
+            "(listed in .pm/local/merge-by-hand.md)."
         )
     return "done", "done, the project files are in place."
 
@@ -490,6 +508,7 @@ def main(argv=None, run=probe):
         keys = ("name", "installed", "minimum", "tested", "status", "path")
         table = [{"id": item["id"], "layer": item["layer"], **dict(zip(keys, row))} for item, row in zip(items, rows)]
         found = {"os": this_os(), "layers": layers, "items": table, "steps": steps, "notes": notes, "similar": alike}
+        found["merge"] = merge_list(project) if project is not None else []  # for /pm-setup, never a reason to stop
         print(json.dumps(found, indent=1))
         return 1 if steps or notes else 0
     widths = [max(len(str(r[i])) for r in [COLUMNS, *rows]) for i in range(len(COLUMNS))]
@@ -512,6 +531,8 @@ def main(argv=None, run=probe):
         print(f"Note: {note}")
     for line in alike:
         print(f"Already on this machine: {line}")
+    if project is not None and merge_list(project):
+        print(f"For /pm-setup to merge with the user: {merge_names(merge_list(project))}.")
     if steps:
         print("Show the user each command and run it only after they say yes; then run this again until it exits 0.")
     return 1 if steps or notes else 0

@@ -51,12 +51,12 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 
 | Screen | What happens | Keys |
 |---|---|---|
-| Check | Shows each program and project file: installed, minimum and tested version. Nothing changes here. | `Enter` continues, `r` checks again, `c` copies a path |
+| Check | Shows each program and project file: installed, minimum and tested version. Nothing changes here. On a rerun with nothing left, `Enter` goes straight to Done. | `Enter` continues, `r` checks again, `c` copies a path, `l` changes the layers on a rerun |
 | Choose | Core is always on; tick Map if you want diagrams. Lists the steps this machine needs. | `Space` ticks, `Enter` continues, `Esc` goes back |
 | Install | One step at a time. It shows the command first; the project step also shows the installer's plan. | `y` runs, `s` skips, `c` copies, `r` checks again |
 | Done | What is ready, what is left, and how to open your project. | `o` opens Claude Desktop (Windows), `c` copies the commands |
 
-Nothing is installed until you press `y` on a step. A version above the tested one means **not tested yet**, not broken. Setup never edits a file of yours: if your project already has its own `AGENTS.md`, git hooks, `.claude/settings.json` or `.mcp.json`, they are kept and listed for `/pm-setup` to merge with you.
+Nothing is installed until you press `y` on a step. A version above the tested one means **not tested yet**, not broken. Setup never rewrites a file of yours; it only adds lines at the end of `.gitignore` and `.gitattributes`. If your project already has its own `AGENTS.md`, git hooks, `.claude/settings.json` or `.mcp.json`, they are kept as they are and listed for `/pm-setup` to merge with you.
 
 **Stuck? Press `a`.** It copies a message for your coding agent, which can finish the setup without the TUI. If copying does not work, select the text on screen. `python tools/setup/bom.py --project <folder>` prints the same check and the commands; it installs nothing.
 
@@ -86,7 +86,7 @@ python template/.pm/tools/pm_init.py ../my-project
 
 ## Map layer (optional)
 
-[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.59.4 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model; add `--map` to the installer command, or tick Map in the TUI.
+[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.59.4 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
 
 The swarm layer (Pi, Herdr and parallel workers) comes in a later release. You do not need it to start.
 

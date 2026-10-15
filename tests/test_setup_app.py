@@ -1,5 +1,6 @@
 """Tests for tools/setup/app.py, headless with a fake probe and runner. Skipped where Textual is not installed (CI)."""
 
+import json
 import shutil
 import sys
 import tempfile
@@ -319,10 +320,14 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
         self.ran = []
 
     def runner(self, step):
-        """Stands in for pm_init: writes the package stamp, and leaves the user's own settings.json alone."""
+        """Stands in for pm_init: writes the package stamp and lists the user's own settings.json for /pm-setup."""
         self.ran.append(step["shell"])
-        (self.project / ".pm").mkdir(exist_ok=True)
+        (self.project / ".pm" / "local").mkdir(parents=True, exist_ok=True)
         (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        if (self.project / "settings.json").exists():
+            (self.project / ".pm" / "local" / "merge-by-hand.md").write_text(
+                "# Merge by hand\n\n- settings.json: add ours\n", encoding="utf-8"
+            )
         return 0
 
     def make(self, system="linux"):
@@ -343,6 +348,9 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
             screen = setup.screen
             self.assertIsInstance(screen, app.InstallScreen)
             self.assertEqual([step["id"] for step in screen.steps], ["pm-init"])
+            self.assertEqual(screen.steps[0]["ids"], ["pkg", "hooks"])
+            await setup.workers.wait_for_complete()  # the plan comes from a worker
+            await pilot.pause()
             panel = str(screen.query_one("#command").content)
             self.assertIn("--keep-existing", panel)
             self.assertIn("What it will do", panel)  # the installer's own plan, before y
@@ -350,13 +358,14 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
             await pilot.press("y")
             await pilot.pause()
             self.assertIn("--keep-existing", self.ran[0])
-            self.assertEqual(screen.states, ["done"])  # the user's own settings.json is not the installer's
+            self.assertEqual(screen.states, ["merge"])  # the user's own settings.json waits for /pm-setup
+            self.assertIn("settings.json", str(screen.query_one("#command").content))
             await pilot.press("enter")
             await pilot.pause()
             done = setup.screen
             self.assertIsInstance(done, app.DoneScreen)
             self.assertIn("/pm-setup", str(done.query_one("#next").content))
-            self.assertIn("Hooks: your own settings.json", str(done.query_one("#done").content))
+            self.assertIn("for /pm-setup to merge with you: settings.json", str(done.query_one("#done").content))
             self.assertFalse(done.check_action("open_desktop", ()))  # Linux: terminal commands only
             record = app.bom.read_record(self.project)
             self.assertEqual(record["layers"], ["core", "map"])
@@ -377,6 +386,42 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
             self.assertIsInstance(setup.screen, app.DoneScreen)
             self.assertTrue(setup.screen.check_action("open_desktop", ()))
             self.assertEqual(self.ran, [])
+            await pilot.press("escape")
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("l")  # the short path still lets the user change the layers
+            await pilot.pause()
+            self.assertIsInstance(setup.screen, app.ChooseScreen)
+
+    async def test_changed_bom_does_not_take_the_short_path(self):
+        (self.project / ".pm").mkdir()
+        (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        (self.project / "settings.json").write_text("ours", encoding="utf-8")
+        app.bom.write_record(self.project, ("core",), [], "2026-10-15")
+        record = app.bom.read_record(self.project)
+        record["bom"] = "older"
+        (self.project / app.bom.RECORD).write_text(json.dumps(record), encoding="utf-8")
+        setup = self.make()
+        async with setup.run_test(size=(120, 40)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(setup.screen, app.ChooseScreen)
+
+    async def test_no_plan_no_run(self):
+        setup = self.make()
+        with patch.object(app.bom, "PM_INIT", self.project / "missing.py"):
+            async with setup.run_test(size=(120, 40)) as pilot:
+                await setup.workers.wait_for_complete()
+                await pilot.pause()
+                await pilot.press("enter", "enter")
+                await setup.workers.wait_for_complete()
+                await pilot.pause()
+                self.assertIn("does not run here", str(setup.screen.query_one("#command").content))
+                await pilot.press("y")
+                await pilot.pause()
+                self.assertEqual(self.ran, [])
 
     def test_desktop_link_encodes_the_folder(self):
         self.assertEqual(

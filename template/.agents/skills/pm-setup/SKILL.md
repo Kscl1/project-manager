@@ -13,7 +13,7 @@ Reply in the user's language. Assume they know their project, not AI or project-
 
 - Read `.pm/local/setup.json` if it exists: the setup TUI wrote it, with `source` (the project-manager checkout), `layers` (the chosen layers, such as `core` and `map`) and the date. Read `.pm/local/merge-by-hand.md` if it exists: what `pm_init` found in the project and did not touch. Do not guess a path or a layer that these files do not give; ask.
 - If `.pm/` is missing, run `python "<source>/template/.pm/tools/pm_init.py" "<project>" --check` (add `--map` if map was chosen). It prints every write and every conflict and writes nothing: exit 0 means no conflicts, 3 means conflicts, anything else means stop and report it. Explain the plan in plain words and ask. Only on a clear yes run it again without `--check`, adding `--keep-existing` if it reported conflicts. On no, install nothing and stop.
-- If `.pm/` is there, do not reinstall or upgrade it to run this skill.
+- If `.pm/` is there, do not reinstall or upgrade it to run this skill. `setup.json` also lists `similar`: skills, MCP servers or plugins the user already has that do the job of one of ours.
 - Read the project's own instructions, `.pm/README.md` and the installed templates before proposing changes. If a tool or interface is missing, report the blocker; do not invent flags, patch `.pm/` files or install more tools without permission.
 
 ## Standards to keep
@@ -48,6 +48,8 @@ One child task per item; split a large item if needed. Do not ask the whole list
 6. **Merge by hand.** Walk every line of `.pm/local/merge-by-hand.md`, one at a time. For `.claude/settings.json` the hooks to add are in `.pm/templates/root/claude-settings.json`; for `.mcp.json` the line gives the server's JSON. Add only that entry, keep every other key, check that the JSON still parses, and show the diff before writing.
 7. **Charter.** If `.pm/charter.md` is missing, build it from `.pm/templates/charter.md`, in small questions: why the project exists, for whom, what is out of scope, what result counts as success. Fill its links from real project paths. Leave review gates the template names as pending; never mark them passed.
 8. **Models.** Go through `.pm/models.md` with the user: which roles they need and which accounts or tools they already have. Do not ask them to buy anything or store a credential. A role nobody can fill stays recorded as open.
+9. **Similar tools.** For each `similar` line in `setup.json`, ask which one the user wants to use: ours, theirs or both. Both may stay; a duplicate MCP server is harmless but costs context. Remove nothing of theirs; note the choice in the task.
+10. **Map.** Only if `map` is in the chosen layers: check that `.mcp.json` names `likec4` (item 6 adds it when listed), then offer to draw a first small model of the project's main parts with the user, and check it with `npx likec4@1.59.4 validate`. Map not chosen: skip this item and say so.
 
 If an item is blocked, move to the next independent one and record the dependency. If a later change affects an earlier answer, check it again.
 

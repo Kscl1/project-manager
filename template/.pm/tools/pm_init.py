@@ -12,7 +12,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   A user's own copy is never edited: what it lacks goes to the "Merge by hand" list.
 - The plan is printed before anything is written. A first install into a project that already has its own
   AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and writes nothing; --keep-existing installs
-  and keeps those files as they are. --check prints the plan and the conflicts only.
+  and keeps those files as they are. --check prints the plan and the conflicts only. The project's own git hooks
+  are never bypassed, on any run: core.hooksPath is set only when it is unset and there are none.
 - A second run with the same arguments changes nothing.
 
 For a clean package, install from the canonical source (template/.pm in project-manager): an installed
@@ -222,8 +223,8 @@ def add_lines(target, name, wanted):
     say("update", path, ", ".join(missing))
 
 
-def write_version(target):
-    """Stamp which package revision is installed, so a feedback report can name it (REQ-42). Rewritten on every run."""
+def package_commit():
+    """The package revision this installer comes from, as '<hash> <date>', marked when it has local changes."""
     rev = subprocess.run(["git", "log", "-1", "--format=%h %cs", "--", "."], cwd=PKG, capture_output=True, text=True)
     dirty = subprocess.run(["git", "status", "--porcelain", "--", "."], cwd=PKG, capture_output=True, text=True)
     commit = (
@@ -231,6 +232,17 @@ def write_version(target):
     )
     if dirty.returncode == 0 and dirty.stdout.strip():
         commit += " +local changes"
+    return commit
+
+
+def version_is_current(target):
+    path = target / ".pm" / "VERSION"
+    return path.exists() and path.read_text(encoding="utf-8").startswith(f"package: {package_commit()}\n")
+
+
+def write_version(target):
+    """Stamp which package revision is installed, so a feedback report can name it (REQ-42)."""
+    commit = package_commit()
     path = target / ".pm" / "VERSION"
     if path.exists() and path.read_text(encoding="utf-8").startswith(f"package: {commit}\n"):
         say("keep", path, commit)  # same package: keep the first install date, so a second run changes nothing
@@ -241,14 +253,16 @@ def write_version(target):
 
 EXIT_CONFLICT = 3
 ROOT_TEMPLATES = PKG / "templates" / "root"
+HOOKS_HOW = "call .pm/hooks/pre-commit and .pm/hooks/commit-msg from your hooks, or move yours"
 MERGE_HOW = {
     "AGENTS.md": "add the 'Start here' and 'Lead only' sections of .pm/templates/root/AGENTS.md to yours",
     "CLAUDE.md": "add the line @AGENTS.md to yours",
     "backlog.config.yml": "your Backlog.md setup stays as it is; .pm keeps its tasks in .pm/backlog: pick one",
     "backlog": "your Backlog.md tasks stay where they are; .pm keeps its tasks in .pm/backlog: pick one",
-    "git core.hooksPath": "call .pm/hooks/pre-commit and .pm/hooks/commit-msg from your hooks, or move yours",
-    ".git/hooks": "call .pm/hooks/pre-commit and .pm/hooks/commit-msg from your hooks, or move yours",
+    "git core.hooksPath": HOOKS_HOW,
+    ".git/hooks": HOOKS_HOW,
 }
+SETTINGS_HOW = "add the SessionStart hooks of .pm/templates/root/claude-settings.json (they run pm_board.py --resume)"
 
 
 def git_out(args, cwd):
@@ -256,28 +270,36 @@ def git_out(args, cwd):
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def find_conflicts(target):
-    """What a first install would clash with, as (name, why). Empty once .pm/ is installed: those files are ours then."""
-    if (target / ".pm" / "VERSION").exists():
+def is_repo(target):
+    return (target / ".git").exists()  # a folder, or a file in a worktree or submodule
+
+
+def hook_conflicts(target):
+    """The project's own git hooks, on every run: the installer never changes a hooks path the user set, and never
+    bypasses hooks of theirs. Git names the hooks folder, so a worktree's or submodule's is found too."""
+    if not is_repo(target):
         return []
+    hooks_path = git_out(["config", "--get", "core.hooksPath"], target)
+    if hooks_path:
+        return [] if hooks_path == ".pm/hooks" else [("git core.hooksPath", f"points to {hooks_path}")]
+    hooks = target / (git_out(["rev-parse", "--git-path", "hooks"], target) or ".git/hooks")
+    custom = sorted(p.name for p in hooks.glob("*") if p.is_file() and not p.name.endswith(".sample"))
+    return [(".git/hooks", "custom hooks: " + ", ".join(custom))] if custom else []
+
+
+def find_conflicts(target):
+    """What a first install stops on, as (name, why). Files only count before .pm/ is installed: then they are ours."""
     found = []
-    if (target / "AGENTS.md").exists():
-        found.append(("AGENTS.md", "the project has its own agent instructions"))
-    claude = target / "CLAUDE.md"
-    if claude.exists() and claude.read_text(encoding="utf-8", errors="replace").strip() != "@AGENTS.md":
-        found.append(("CLAUDE.md", "it holds more than @AGENTS.md"))
-    for name in ("backlog.config.yml", "backlog"):
-        if (target / name).exists():
-            found.append((name, "the project already uses Backlog.md"))
-    if (target / ".git").is_dir():
-        hooks_path = git_out(["config", "--get", "core.hooksPath"], target)
-        if hooks_path and hooks_path != ".pm/hooks":
-            found.append(("git core.hooksPath", f"points to {hooks_path}"))
-        hooks = target / ".git" / "hooks"
-        custom = sorted(p.name for p in hooks.glob("*") if p.is_file() and not p.name.endswith(".sample"))
-        if custom:
-            found.append((".git/hooks", "custom hooks: " + ", ".join(custom)))
-    return found
+    if not (target / ".pm" / "VERSION").exists():
+        if (target / "AGENTS.md").exists():
+            found.append(("AGENTS.md", "the project has its own agent instructions"))
+        claude = target / "CLAUDE.md"
+        if claude.exists() and claude.read_text(encoding="utf-8", errors="replace").strip() != "@AGENTS.md":
+            found.append(("CLAUDE.md", "it holds more than @AGENTS.md"))
+        for name in ("backlog.config.yml", "backlog"):
+            if (target / name).exists():
+                found.append((name, "the project already uses Backlog.md"))
+    return found + hook_conflicts(target)
 
 
 def read_json(path):
@@ -287,17 +309,16 @@ def read_json(path):
         return None
 
 
-def json_text(data):
-    return json.dumps(data, indent=2) + "\n"
-
-
 def settings_action(target):
     """write, keep or merge for .claude/settings.json: ours means a SessionStart hook that runs pm_board --resume."""
     path = target / ".claude" / "settings.json"
     if not path.exists():
         return "write"
-    groups = ((read_json(path) or {}).get("hooks") or {}).get("SessionStart") or []
-    commands = (hook.get("command", "") for group in groups for hook in group.get("hooks", []))
+    try:
+        groups = read_json(path)["hooks"]["SessionStart"]
+        commands = [str(hook["command"]) for group in groups for hook in group["hooks"]]
+    except (TypeError, KeyError):  # unreadable, or a shape that is not ours: the user merges it
+        return "merge"
     return "keep" if any("pm_board.py --resume" in command for command in commands) else "merge"
 
 
@@ -309,18 +330,16 @@ def wanted_servers(map_layer):
 
 
 def mcp_action(target, map_layer):
-    """(write | update | keep | merge, the servers to add). update only rewrites a file this installer wrote itself."""
+    """(write | keep | merge, the servers to add). An existing .mcp.json is never rewritten, even one we wrote."""
     path, want = target / ".mcp.json", wanted_servers(map_layer)
     if not path.exists():
         return "write", want
     data = read_json(path)
-    have = (data or {}).get("mcpServers") or {}
+    have = data.get("mcpServers") if isinstance(data, dict) else None
+    if not isinstance(have, dict):
+        return "merge", want
     missing = {name: server for name, server in want.items() if name not in have}
-    if not missing:
-        return "keep", {}
-    if data is not None and set(data) == {"mcpServers"} and have == wanted_servers(False):
-        return "update", want  # exactly what an install without --map wrote
-    return "merge", missing
+    return ("merge", missing) if missing else ("keep", {})
 
 
 def missing_lines(target, name, wanted):
@@ -329,78 +348,107 @@ def missing_lines(target, name, wanted):
     return [line for line in wanted if line not in lines]
 
 
-def plan(target, args, conflicts):
-    """Every write, as (action, path, note), before anything is written."""
-    entries = []
-    for src, dst, _ in package_parts(target):
-        if not dst.exists():
-            entries.append(("copy", dst, ""))
-        elif args.upgrade:
-            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
-    for part in [*SEED, "decisions.md"]:
-        if not (target / ".pm" / part).exists():
-            entries.append(("write", target / ".pm" / part, ""))
-    for name in ("AGENTS.md", "CLAUDE.md", "backlog.config.yml"):
-        if not (target / name).exists():
-            entries.append(("write", target / name, ""))
-    for name, wanted in ((".gitignore", GITIGNORE), (".gitattributes", GITATTRIBUTES)):
-        if missing_lines(target, name, wanted):
-            entries.append(("update", target / name, "adds lines"))
-    action = settings_action(target)
-    if action != "keep":
-        entries.append((action, target / ".claude" / "settings.json", "session start and compaction hooks"))
+def merge_items(target, args, conflicts):
+    """Everything the user merges by hand, as '- item: how' lines for .pm/local/merge-by-hand.md."""
+    items = [(item, MERGE_HOW[item]) for item, _ in conflicts]
+    if settings_action(target) == "merge":
+        items.append((".claude/settings.json", SETTINGS_HOW))
     action, servers = mcp_action(target, args.map)
-    if action != "keep":
-        entries.append((action, target / ".mcp.json", ", ".join(servers)))
-    hooks_blocked = any(name in ("git core.hooksPath", ".git/hooks") for name, _ in conflicts)
-    if (target / ".git").exists() and not hooks_blocked:
-        if git_out(["config", "--get", "core.hooksPath"], target) != ".pm/hooks":
-            entries.append(("set", "git core.hooksPath", ".pm/hooks"))
-    return entries
-
-
-def write_settings(target):
-    action = settings_action(target)
-    path = target / ".claude" / "settings.json"
-    if action == "write":
-        path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT_TEMPLATES / "claude-settings.json", path)
-        say("write", path, "session start and compaction hooks")
-    else:
-        say("keep", path, "merge by hand" if action == "merge" else "")
-    return action == "merge"
-
-
-def write_mcp(target, map_layer):
-    action, servers = mcp_action(target, map_layer)
-    path = target / ".mcp.json"
-    if action in ("write", "update"):
-        path.write_text(json_text({"mcpServers": servers}), encoding="utf-8", newline="\n")
-        say(action, path, ", ".join(servers))
-        return {}
-    say("keep", path, "merge by hand" if action == "merge" else "")
-    return servers if action == "merge" else {}
+    if action == "merge":
+        items += [(".mcp.json", f"add the {name} server: {json.dumps(config)}") for name, config in servers.items()]
+    return [f"- {item}: {how}" for item, how in items]
 
 
 MERGE_LIST = """# Merge by hand
 
 What pm_init found in this project and did not touch. /pm-setup walks these with you, one at a time.
-A later run only adds lines: conflicts are not looked for again once .pm/ is installed.
+A later run only adds lines; delete a line once it is merged.
 
 """
+
+
+def new_merge_lines(target, lines):
+    path = target / ".pm" / "local" / "merge-by-hand.md"
+    old = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    return [line for line in lines if line not in old]
 
 
 def keep_merge_list(target, lines):
     """Keep the list for /pm-setup in .pm/local/ (git-ignored); add new lines, never drop old ones."""
     path = target / ".pm" / "local" / "merge-by-hand.md"
-    old = path.read_text(encoding="utf-8") if path.exists() else MERGE_LIST
-    new = [line for line in lines if line not in old.splitlines()]
+    new = new_merge_lines(target, lines)
     if not new:
-        say("keep", path)
         return
+    old = path.read_text(encoding="utf-8") if path.exists() else MERGE_LIST
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(old + "\n".join(new) + "\n", encoding="utf-8", newline="\n")
     say("write", path, f"{len(new)} item(s) for /pm-setup")
+
+
+def hook_names():
+    return [f".pm/hooks/{p.name}" for p in sorted((PKG / "hooks").iterdir()) if p.is_file()]
+
+
+def hooks_to_stage(target):
+    """The hooks git does not yet record as executable; empty when there is nothing to stage."""
+    names = hook_names()
+    staged = git_out(["ls-files", "--stage", "--", *names], target).splitlines()
+    return names if len(staged) < len(names) or any(not line.startswith("100755") for line in staged) else []
+
+
+def set_hooks_path(target):
+    """Only when no hooks path is set and the project has no hooks of its own (hook_conflicts)."""
+    return is_repo(target) and not hook_conflicts(target) and not git_out(["config", "--get", "core.hooksPath"], target)
+
+
+def plan(target, args, conflicts):
+    """Every change the install makes, as (action, path relative to the project, note), before anything is written.
+    main() makes exactly these changes; the tests check that no file is written outside this list."""
+    entries, copies = [], 0
+    for _, dst, _ in package_parts(target):
+        if not dst.exists():
+            entries.append(("copy", dst, ""))
+        elif args.upgrade:
+            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
+        else:
+            continue
+        copies += 1
+    for skill in shipped_skills():
+        pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
+        if not pointer.exists() or args.upgrade:
+            entries.append(("write", pointer, "points Claude Code to the skill"))
+    if copies or not (target / ".pm" / "VERSION").exists():
+        entries.append(("write", target / ".pm" / MANIFEST, "what each package file looked like"))
+    for part in [*SEED, "decisions.md"]:
+        if not (target / ".pm" / part).exists():
+            entries.append(("write", target / ".pm" / part, ""))
+    for part in DATA_DIRS:
+        if not (target / ".pm" / part).exists():
+            entries.append(("create", target / ".pm" / part, "empty folder"))
+    for name in ("AGENTS.md", "CLAUDE.md", "backlog.config.yml"):
+        if not (target / name).exists():
+            entries.append(("write", target / name, ""))
+    for name, wanted in ((".gitignore", GITIGNORE), (".gitattributes", GITATTRIBUTES)):
+        if missing_lines(target, name, wanted):
+            entries.append(("append", target / name, "adds lines at the end"))
+    if settings_action(target) == "write":
+        entries.append(("write", target / ".claude" / "settings.json", "session start and compaction hooks"))
+    action, servers = mcp_action(target, args.map)
+    if action == "write":
+        entries.append(("write", target / ".mcp.json", ", ".join(servers)))
+    if not version_is_current(target):
+        entries.append(("write", target / ".pm" / "VERSION", "the package revision"))
+    if new_merge_lines(target, merge_items(target, args, conflicts)):
+        entries.append(("append", target / ".pm" / "local" / "merge-by-hand.md", "what /pm-setup merges with you"))
+    if set_hooks_path(target):
+        entries.append(("set", "git core.hooksPath", ".pm/hooks"))
+    if is_repo(target) and not hook_conflicts(target) and hooks_to_stage(target):
+        entries.append(("stage", "git index", "the .pm hooks as executable"))
+    return [(action, shown(target, path), note) for action, path, note in entries]
+
+
+def shown(target, path):
+    return path.relative_to(target).as_posix() if isinstance(path, Path) else path
 
 
 def main(argv=None):
@@ -410,7 +458,7 @@ def main(argv=None):
     parser.add_argument("--name", help="Backlog project name (default: the target folder name)")
     parser.add_argument("--upgrade", action="store_true", help="replace package files; project data is never touched")
     parser.add_argument("--dry-run", action="store_true", help="with --upgrade: list what would change, write nothing")
-    parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server to .mcp.json")
+    parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server to a new .mcp.json")
     parser.add_argument("--check", action="store_true", help="print the plan and the conflicts, write nothing")
     parser.add_argument(
         "--keep-existing", action="store_true", help="install even if the project has its own AGENTS.md, hooks..."
@@ -424,20 +472,20 @@ def main(argv=None):
         sys.exit("this is the package's own project; install into another folder")
     name = args.name or target.name
     conflicts = find_conflicts(target)
+    first = not (target / ".pm" / "VERSION").exists()
+    stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
     if not args.dry_run:
         entries = plan(target, args, conflicts)
         print(f"Plan for {target} ({len(entries)} change(s)):")
         for entry in entries:
             say(*entry)
-        if not entries:
-            print("  nothing to change")
         if conflicts:
-            print("\nAlready in the project (kept as it is; see 'Merge by hand' below):")
+            print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
             for item, why in conflicts:
-                say("conflict", item, why)
+                say("keep", item, why)
         if args.check:
-            return EXIT_CONFLICT if conflicts else 0
-        if conflicts and not args.keep_existing:
+            return EXIT_CONFLICT if stops else 0
+        if stops and not args.keep_existing:
             print(
                 "\nStopped: nothing was written. Run again with --keep-existing to install and keep those files"
                 " as they are, then merge them by hand."
@@ -458,6 +506,7 @@ def main(argv=None):
             + ("" if manifest else " No manifest yet: run one real upgrade to record one.")
         )
         return 0
+    merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
     for src, dst, part in package_parts(target):
         copy_dir(src, dst, args.upgrade, backup, manifest, part)
@@ -470,45 +519,43 @@ def main(argv=None):
     for part in DATA_DIRS:
         (target / ".pm" / part).mkdir(parents=True, exist_ok=True)
 
-    root = PKG / "templates" / "root"
-    agents = root / "AGENTS.md"
+    agents = ROOT_TEMPLATES / "AGENTS.md"
     if agents.exists():
         write_once(target / "AGENTS.md", text=agents.read_text(encoding="utf-8").replace("<project name>", name))
-    write_once(target / "CLAUDE.md", src=root / "CLAUDE.md")
-    config = (root / "backlog.config.yml").read_text(encoding="utf-8").replace("<project>", name)
+    write_once(target / "CLAUDE.md", src=ROOT_TEMPLATES / "CLAUDE.md")
+    config = (ROOT_TEMPLATES / "backlog.config.yml").read_text(encoding="utf-8").replace("<project>", name)
     write_once(target / "backlog.config.yml", text=config)
     add_lines(target, ".gitignore", GITIGNORE)
     add_lines(target, ".gitattributes", GITATTRIBUTES)
-    merge = [(item, MERGE_HOW[item]) for item, _ in conflicts]
-    if write_settings(target):
-        merge.append((".claude/settings.json", "add the SessionStart hooks of .pm/templates/root/claude-settings.json"))
-    for server, config in write_mcp(target, args.map).items():
-        merge.append((".mcp.json", f"add the {server} server: {json.dumps(config)}"))
+    if settings_action(target) == "write":
+        write_once(target / ".claude" / "settings.json", src=ROOT_TEMPLATES / "claude-settings.json")
+    action, servers = mcp_action(target, args.map)
+    if action == "write":
+        text = json.dumps({"mcpServers": servers}, indent=2) + "\n"
+        write_once(target / ".mcp.json", text=text)
     write_version(target)
+    keep_merge_list(target, merge)
 
-    hooks_blocked = any(item in ("git core.hooksPath", ".git/hooks") for item, _ in conflicts)
-    if not (target / ".git").exists():
-        say("note", "not a git repository yet: run git init, then git config core.hooksPath .pm/hooks")
-    elif not hooks_blocked:
-        if git_out(["config", "--get", "core.hooksPath"], target) == ".pm/hooks":
-            say("keep", "git core.hooksPath", ".pm/hooks")
-        else:
+    if not is_repo(target):
+        say("note", "not a git repository yet: run git init, then run this installer again")
+    elif hook_conflicts(target):
+        say("keep", "git hooks", "yours stay; the .pm hooks are not active until you merge them (/pm-setup)")
+    else:
+        if set_hooks_path(target):
             run(["git", "config", "core.hooksPath", ".pm/hooks"], cwd=target)
         # Git on Linux and macOS skips a hook without the exec bit, and a Windows checkout cannot keep the bit on
         # disk, so set it on the files and stage them with it; the first commit then records them as executable.
-        hooks = sorted(p for p in (target / ".pm" / "hooks").iterdir() if p.is_file())
-        for hook in hooks:
-            hook.chmod(hook.stat().st_mode | 0o111)
-        names = [h.relative_to(target).as_posix() for h in hooks]
-        staged = git_out(["ls-files", "--stage", "--", *names], target).splitlines()
-        if len(staged) < len(names) or any(not line.startswith("100755") for line in staged):
+        for hook in hook_names():
+            path = target / hook
+            path.chmod(path.stat().st_mode | 0o111)
+        names = hooks_to_stage(target)
+        if names:
             run(["git", "add", "--chmod=+x", "--", *names], cwd=target)
 
     if merge:
-        print("\nMerge by hand (the installer never edits your own copy):")
-        for item, how in merge:
-            print(f"  - {item}: {how}")
-        keep_merge_list(target, [f"- {item}: {how}" for item, how in merge])
+        print("\nMerge by hand (the installer never rewrites a file of yours):")
+        for line in merge:
+            print(f"  {line}")
     print("\nNext:")
     print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")
     print("  2. python .pm/tools/pm_check.py    # should print: No problems found")

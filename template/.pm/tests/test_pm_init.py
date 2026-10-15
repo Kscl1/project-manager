@@ -262,14 +262,22 @@ class PmInitTest(unittest.TestCase):
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7"})
 
-    def test_map_adds_likec4_to_the_installers_own_mcp_file(self):
+    def test_map_on_a_fresh_install_writes_both_servers(self):
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)
+
+        servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+        self.assertEqual(set(servers), {"context7", "likec4"})
+
+    def test_map_later_lists_likec4_and_rewrites_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
+        before = (self.root / ".mcp.json").read_bytes()
 
         result = self.run_init(self.root, "--map")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
-        self.assertEqual(set(servers), {"context7", "likec4"})
+        self.assertEqual((self.root / ".mcp.json").read_bytes(), before)
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .mcp.json: add the likec4 server", kept)
 
     def test_own_settings_and_mcp_are_never_edited(self):
         (self.root / ".claude").mkdir()
@@ -293,7 +301,7 @@ class PmInitTest(unittest.TestCase):
         result = self.run_init()
 
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
-        self.assertIn("conflict", result.stdout)
+        self.assertIn("kept as it is", result.stdout)
         self.assertFalse((self.root / ".pm").exists())
         self.assertFalse((self.root / ".claude").exists())
 
@@ -324,8 +332,60 @@ class PmInitTest(unittest.TestCase):
 
         self.assertEqual(stopped.returncode, 3, stopped.stdout)
         self.assertEqual(kept.returncode, 0, kept.stdout + kept.stderr)
-        hooks_path = subprocess.run([GIT, "config", "--get", "core.hooksPath"], cwd=self.root, capture_output=True)
-        self.assertNotEqual(hooks_path.returncode, 0, "core.hooksPath must stay unset")
+        for again in ((), ("--upgrade",)):  # a later run must not bypass them either
+            self.assertEqual(self.run_init(self.root, *again).returncode, 0)
+            hooks_path = subprocess.run([GIT, "config", "--get", "core.hooksPath"], cwd=self.root, capture_output=True)
+            self.assertNotEqual(hooks_path.returncode, 0, "core.hooksPath must stay unset")
+
+    def test_own_hooks_path_survives_reruns(self):
+        subprocess.run([GIT, "config", "core.hooksPath", ".husky"], cwd=self.root, check=True)
+
+        self.assertEqual(self.run_init(self.root, "--keep-existing").returncode, 0)
+        self.assertEqual(self.run_init(self.root, "--upgrade").returncode, 0)
+
+        hooks_path = subprocess.run(
+            [GIT, "config", "--get", "core.hooksPath"], cwd=self.root, capture_output=True, text=True
+        ).stdout.strip()
+        self.assertEqual(hooks_path, ".husky")
+
+    def test_worktree_hooks_are_found(self):
+        subprocess.run([GIT, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"],
+                       cwd=self.root, check=True)  # fmt: skip
+        (self.root / ".git" / "hooks" / "pre-commit").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        worktree = self.root / "wt"
+        subprocess.run([GIT, "worktree", "add", "-q", str(worktree)], cwd=self.root, check=True)
+
+        result = self.run_init(worktree)
+
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn("custom hooks: pre-commit", result.stdout)
+
+    def test_odd_json_shapes_become_merges(self):
+        (self.root / ".claude").mkdir()
+        (self.root / ".claude" / "settings.json").write_text('{"hooks": [1]}', encoding="utf-8")
+        (self.root / ".mcp.json").write_text('{"mcpServers": [1]}', encoding="utf-8")
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / ".mcp.json").read_text(encoding="utf-8"), '{"mcpServers": [1]}')
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .claude/settings.json:", kept)
+        self.assertIn("- .mcp.json: add the context7 server", kept)
+
+    def test_every_written_file_is_in_the_plan(self):
+        (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
+        planned = self.run_init(self.root, "--check", "--map").stdout.split("\n\n")[0].splitlines()[1:]
+        paths = [line.split()[1] for line in planned]
+        before = set(self.snapshot()[0])
+
+        self.assertEqual(self.run_init(self.root, "--keep-existing", "--map").returncode, 0)
+
+        written = set(self.snapshot()[0]) - before
+        self.assertTrue(written)
+        for name in written:
+            with self.subTest(file=name):
+                self.assertTrue(any(name == p or name.startswith(p + "/") for p in paths), paths)
 
     def test_check_prints_the_plan_and_writes_nothing(self):
         result = self.run_init(self.root, "--check")

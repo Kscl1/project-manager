@@ -34,7 +34,7 @@ PATH = bom.COLUMNS.index("Path")
 STUCK = "Stuck? Press a to copy a message for your coding agent; it can finish the setup without this screen."
 LAYER_TEXT = {
     "core": "Core: what every project needs",
-    "map": "Map: architecture diagrams of your project (optional; set up inside the project later)",
+    "map": "Map: architecture diagrams of your project (optional)",
 }
 # Install screen: what each step state shows, and its level for the colour (bom.outcome names the states).
 STATES = {
@@ -48,6 +48,7 @@ STATES = {
     "merge": ("done, merge the rest", "warn"),
 }
 QUIET_S = 0.8  # after a step returns, y is ignored this long: keys queued while it ran must not run the next
+PLAN_S = 30  # the installer's read-only plan; longer than this and the step is not run from here
 FINISHED = {"done", "not-found", "unverified", "skipped", "merge"}  # nothing more this screen can do for these
 NO_PROJECT = (
     "Your project's files are checked when setup starts with the project folder: "
@@ -113,6 +114,7 @@ class SetupApp(App):
         Binding("enter", "choose", "Continue", priority=True),
         ("r", "recheck", "Check again"),
         ("c", "copy_path", "Copy path"),
+        ("l", "layers", "Change layers"),
         ("a", "agent", "Ask agent"),
         ("q", "quit", "Quit"),
     ]
@@ -154,10 +156,12 @@ class SetupApp(App):
 
     def check_action(self, action, parameters):
         """The Check screen's own keys work only while it is on top; Continue only once a scan has ended."""
-        if action in ("recheck", "choose", "copy_path") and len(self.screen_stack) > 1:
+        if action in ("recheck", "choose", "copy_path", "layers") and len(self.screen_stack) > 1:
             return False
         if action == "choose" and (self.scanning or not self.rows):
             return None  # shown greyed out
+        if action == "layers":  # only where Enter skips Choose: a rerun with nothing left
+            return not self.scanning and bool(self.rows) and self.nothing_left()
         return True
 
     def action_recheck(self):
@@ -174,7 +178,7 @@ class SetupApp(App):
     def check(self):
         """Runs the version commands off the screen's thread, so the window opens at once."""
         rows = bom.check_all(self.items, self.probe, self.project)
-        similar = bom.similar(self.items, bom.user_scan(self.home))
+        similar = bom.similar(self.items, bom.user_scan(self.home), self.layers)
         if not get_current_worker().is_cancelled:  # the app may have closed meanwhile
             self.call_from_thread(self.show, rows, similar)  # Textual is not thread-safe: update on its own thread
 
@@ -194,7 +198,10 @@ class SetupApp(App):
             text.append(f"\n{NO_PROJECT}", "dim")
         for line in self.similar:
             text.append(f"\nAlready on this machine: {line}", "dim")
-        enter = "finish" if self.nothing_left() else "choose what to set up"
+        merge = bom.merge_list(self.project) if self.project else []
+        if merge:
+            text.append(f"\nKept as yours, for /pm-setup to merge with you: {bom.merge_names(merge)}.", "dim")
+        enter = "finish, l to change the layers" if self.nothing_left() else "choose what to set up"
         text.append(f"\n\nPress Enter to {enter}. c or a click on a path copies it.\n")
         text.append(LEGEND, "dim")
         text.append(f"\n{STUCK}", "dim")
@@ -203,8 +210,14 @@ class SetupApp(App):
         self.refresh_bindings()
 
     def nothing_left(self):
-        """A rerun with nothing to do: Enter goes straight to Done (the short screen)."""
-        return bool(self.record) and not bom.plan(self.items, self.rows, self.layers, self.system, self.project)[0]
+        """A rerun with nothing to do and the same bom.toml: Enter goes straight to Done (the short screen)."""
+        if not self.record or self.record.get("bom") != bom.bom_hash():
+            return False
+        steps, notes = bom.plan(self.items, self.rows, self.layers, self.system, self.project)
+        return not steps and not notes
+
+    def action_layers(self):
+        self.push_screen(ChooseScreen())
 
     def fill(self, width=None):
         """Redraws the table from self.rows; the Path column only on a wide terminal."""
@@ -213,17 +226,24 @@ class SetupApp(App):
         keep = table.cursor_row
         table.clear(columns=True)
         table.add_columns(*(bom.COLUMNS if wide else bom.COLUMNS[:PATH]))
-        self.shown = [i for i, row in enumerate(self.rows) if row[4] != bom.NOT_CHECKED]
+        # A beginner reads nine "not checked" or nine "not in project" lines as nine problems, while one step (or
+        # none) settles them all; each group gets one line that says so plainly.
+        grouped = (bom.NOT_CHECKED, bom.NOT_IN_PROJECT)
+        self.shown = [i for i, row in enumerate(self.rows) if row[4] not in grouped]
         for *cells, result, path in (self.rows[i] for i in self.shown):
             level = bom.LEVEL[result]
             status = Text(f"{SYMBOLS[level]} {result}", style=self.colour(level) or "")
             table.add_row(*cells, status, *([path] if wide else []))
-        later = len(self.rows) - len(self.shown)
-        if later:  # a beginner reads nine "not checked" lines as nine problems; one dim line says it plainly
-            name = Text(f"{later} project item{'s' if later != 1 else ''}, set up later", style="dim")
-            empty = Text("-", style="dim")
-            status = Text(f"· {bom.NOT_CHECKED}", style="dim")
-            table.add_row(name, empty, empty, empty, status, *([empty] if wide else []))
+        empty = Text("-", style="dim")
+        for result, label, style in (
+            (bom.NOT_IN_PROJECT, "{n} project file{s}, one step sets them up", self.colour("bad") or ""),
+            (bom.NOT_CHECKED, "{n} project item{s}, set up later", "dim"),
+        ):
+            n = sum(1 for row in self.rows if row[4] == result)
+            if n:
+                name = Text(label.format(n=n, s="s" if n != 1 else ""), style="dim")
+                status = Text(f"{SYMBOLS[bom.LEVEL[result]]} {result}", style=style)
+                table.add_row(name, empty, empty, empty, status, *([empty] if wide else []))
         table.move_cursor(row=keep)
 
     def action_copy_path(self):
@@ -331,7 +351,8 @@ class ChooseScreen(Screen):
             text.append(f"\nNote: {note}", "dim")
         self.query_one("#steps", Static).update(text)
         if self.steps:
-            hint = f"Press Enter to review these {len(self.steps)} steps one by one. Nothing runs yet."
+            count = "this step" if len(self.steps) == 1 else f"these {len(self.steps)} steps one by one"
+            hint = f"Press Enter to review {count}. Nothing runs yet."
         else:
             hint = "Press Enter to finish, Esc to go back."
         self.query_one("#choose-hint", Static).update(f"{hint}\n{STUCK}")
@@ -359,7 +380,7 @@ class InstallScreen(Screen):
         self.steps = steps
         self.states = ["waiting"] * len(steps)
         self.messages = [""] * len(steps)
-        self.previews = {}  # step index: what the installer's --check printed, shown before y
+        self.previews = {}  # step index: (usable, text) from the installer's --check; missing while it runs
         self.quiet_until = 0.0
 
     def compose(self) -> ComposeResult:
@@ -374,6 +395,27 @@ class InstallScreen(Screen):
         self.query_one(DataTable).add_columns("Step", "Program", "Why", "State")
         self.redraw()
         self.query_one(DataTable).focus()
+        for index, step in enumerate(self.steps):
+            if step.get("preview"):
+                self.ask_plan(index, step["preview"])
+
+    @work(thread=True)
+    def ask_plan(self, index, command):
+        """The installer's own plan for this project (--check, read-only), off the screen's thread."""
+        try:
+            done = subprocess.run(
+                command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PLAN_S
+            )
+            # 0: nothing in the way; 3: the project's own files, which the step keeps (--keep-existing)
+            result = done.returncode in (0, 3), (done.stdout + done.stderr).strip()
+        except (OSError, subprocess.SubprocessError) as error:
+            result = False, f"the installer did not answer ({error})."
+        if not get_current_worker().is_cancelled:
+            self.app.call_from_thread(self.got_plan, index, result)
+
+    def got_plan(self, index, result):
+        self.previews[index] = result
+        self.show_current()
 
     @property
     def current(self):
@@ -412,8 +454,11 @@ class InstallScreen(Screen):
         panel = self.query_one("#command", Static)
         panel.border_title = f"Step {index + 1} of {len(self.steps)}: {step['name']}"
         text = Text(step["command"], "bold")
-        if step.get("preview") and state != "done":
-            text.append(f"\n\nWhat it will do (nothing is written yet):\n{self.preview(index)}", "dim")
+        if step.get("preview") and state not in FINISHED:
+            usable, plan = self.previews.get(index, (False, "asking the installer for its plan..."))
+            text.append(f"\n\nWhat it will do (nothing is written yet):\n{plan}", "dim")
+            if index in self.previews and not usable:
+                text.append("\n\nWithout its plan this step does not run here; c copies the command.", "bold")
         if message:
             text.append(f"\n\n{message}", self.app.colour(STATES[state][1]) or "")
         panel.update(text)
@@ -422,18 +467,6 @@ class InstallScreen(Screen):
         else:
             hint = "y runs this step here, s skips it, c copies it, ↑↓ pick another step. Nothing runs without y."
         self.query_one("#install-hint", Static).update(f"{hint}\n{STUCK}")
-
-    def preview(self, index):
-        """The installer's own plan for this project (--check, read-only), run once per step and kept."""
-        if index not in self.previews:
-            try:
-                done = subprocess.run(
-                    self.steps[index]["preview"], capture_output=True, text=True, encoding="utf-8", errors="replace"
-                )
-                self.previews[index] = (done.stdout + done.stderr).strip()
-            except OSError as error:
-                self.previews[index] = f"could not ask the installer for its plan: {error}"
-        return self.previews[index]
 
     def final_words(self):
         """What happened, and what is still left, once every step is finished."""
@@ -454,6 +487,9 @@ class InstallScreen(Screen):
             return
         if self.states[index] == "done":
             self.app.notify(f"{step['name']} is already done.")
+            return
+        if step.get("preview") and not self.previews.get(index, (False, ""))[0]:  # the user reads the plan first
+            self.app.notify("Wait for the installer's plan above; it runs only after you have seen it.")
             return
         if not shutil.which(step["needs"]):  # e.g. npm before the Node.js step has run
             self.messages[index] = (
@@ -488,7 +524,7 @@ class InstallScreen(Screen):
                 rows.append(app.rows[at])
         app.fill()
         if "ids" in step:  # the installer step sets up several project items
-            self.states[index], self.messages[index] = bom.project_outcome(code, rows)
+            self.states[index], self.messages[index] = bom.project_outcome(code, rows, bom.merge_list(app.project))
         else:
             self.states[index], self.messages[index] = bom.outcome(code, rows[0])
         self.advance(index)
@@ -544,10 +580,15 @@ class DoneScreen(Screen):
             text.append(f"Still open ({', '.join(app.layers)}): ", app.colour("bad") or "")
             text.append(", ".join(step["name"] for step in steps))
             text.append("\nRun setup again to do them, or press a for your coding agent.", "dim")
+        elif notes:
+            text.append("Installed, but worth a look first:", app.colour("warn") or "")
         else:
             text.append(f"✓ Everything for {', '.join(app.layers)} is ready.", app.colour("good") or "")
         for note in notes:
             text.append(f"\nNote: {note}", "dim")
+        merge = bom.merge_list(app.project) if app.project else []
+        if merge:
+            text.append(f"\nKept as yours, for /pm-setup to merge with you: {bom.merge_names(merge)}.")
         for line in app.similar:
             text.append(f"\nAlready on this machine: {line}", "dim")
         if saved:
