@@ -4,6 +4,8 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--upgrade]
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
 - Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them (D-49).
+- Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code (D-116);
+  --upgrade replaces them too. The project's own skills are never touched.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing.
 Every action is printed.
@@ -43,6 +45,15 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
+SKILLS = PKG.parent / ".agents" / "skills"  # shipped skills sit next to the package; theirs all start with pm- (D-116)
+# Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
+POINTER = """---
+{front}
+---
+
+Read `.agents/skills/{name}/SKILL.md` and follow it exactly, with the arguments given.
+That file is the only copy of the instructions; this one only points Claude Code to it.
+"""
 
 
 def say(action, path, note=""):
@@ -68,10 +79,23 @@ def read_manifest(target):
     return {name: digest for digest, name in pairs}
 
 
+def shipped_skills():
+    return sorted(p for p in SKILLS.glob("pm-*") if (p / "SKILL.md").is_file())
+
+
+def package_parts(target):
+    """Yield (source, installed copy, manifest key prefix) for every package folder; skills are keyed from the root."""
+    for part in PACKAGE:
+        yield PKG / part, target / ".pm" / part, part
+    for skill in shipped_skills():
+        yield skill, target / ".agents" / "skills" / skill.name, f".agents/skills/{skill.name}"
+
+
 def write_manifest(target):
     lines = []
-    for part in PACKAGE:
-        folder = target / ".pm" / part
+    for _, folder, part in package_parts(target):
+        if not folder.exists():
+            continue
         for rel in sorted(files_in(folder), key=str):
             lines.append(f"{sha256(folder / rel)}  {(Path(part) / rel).as_posix()}")
     (target / ".pm" / MANIFEST).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
@@ -120,18 +144,35 @@ def report_changes(src, dst, part, manifest):
     return found
 
 
-def copy_dir(src, dst, upgrade, backup, manifest):
+def copy_dir(src, dst, upgrade, backup, manifest, part):
     if dst.exists() and not upgrade:
         say("skip", dst, "exists; use --upgrade to refresh")
         return
     if dst.exists():
-        report_changes(src, dst, dst.name, manifest)
+        report_changes(src, dst, part, manifest)
         # Keep the old copy until the new one is in place: local edits stay recoverable.
+        backup = backup / Path(part).parent
         backup.mkdir(parents=True, exist_ok=True)
         shutil.move(str(dst), str(backup / dst.name))
         say("backup", backup / dst.name)
+    dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst, ignore=SKIP)
     say("upgrade" if upgrade else "copy", dst)
+
+
+def write_pointer(skill, target, upgrade):
+    """Write the Claude Code pointer for one skill: its frontmatter, then where the instructions are."""
+    lines = (skill / "SKILL.md").read_text(encoding="utf-8").splitlines()
+    front = "\n".join(lines[1 : lines.index("---", 1)])
+    text = POINTER.format(front=front, name=skill.name)
+    dst = target / ".claude" / "skills" / skill.name / "SKILL.md"
+    if dst.exists() and (not upgrade or dst.read_text(encoding="utf-8") == text):
+        say("keep", dst)
+        return
+    action = "upgrade" if dst.exists() else "write"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(text, encoding="utf-8", newline="\n")
+    say(action, dst)
 
 
 def write_once(dst, text=None, src=None):
@@ -207,9 +248,7 @@ def main():
         if not args.upgrade:
             sys.exit("--dry-run only makes sense with --upgrade")
         total = sum(
-            report_changes(PKG / part, target / ".pm" / part, part, manifest)
-            for part in PACKAGE
-            if (target / ".pm" / part).exists()
+            report_changes(src, dst, part, manifest) for src, dst, part in package_parts(target) if dst.exists()
         )
         print(
             f"\nDry run: {total} package file(s) would change; nothing was written."
@@ -217,8 +256,10 @@ def main():
         )
         return
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
-    for part in PACKAGE:
-        copy_dir(PKG / part, target / ".pm" / part, args.upgrade, backup, manifest)
+    for src, dst, part in package_parts(target):
+        copy_dir(src, dst, args.upgrade, backup, manifest, part)
+    for skill in shipped_skills():
+        write_pointer(skill, target, args.upgrade)
     write_manifest(target)
     for part in SEED:
         write_once(target / ".pm" / part, src=PKG / part)

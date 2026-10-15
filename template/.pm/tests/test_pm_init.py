@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 PM_INIT = Path(__file__).resolve().parent.parent / "tools" / "pm_init.py"
+SKILLS = PM_INIT.parent.parent.parent / ".agents" / "skills"
 GIT = shutil.which("git")
 
 
@@ -162,6 +163,57 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(encoding="utf-8"), "local package file\n")
         self.assertFalse(extra.exists())
+
+    def test_install_copies_every_pm_skill_with_a_claude_pointer(self):
+        source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
+        self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
+        shutil.copytree(PM_INIT.parent.parent, source / ".pm")
+        shutil.copytree(SKILLS, source / ".agents" / "skills")
+        for name in ("pm-extra", "own-skill"):  # a pm- skill no list names, and a skill that is not the package's
+            skill = source / ".agents" / "skills" / name / "SKILL.md"
+            skill.parent.mkdir()
+            skill.write_text(f"---\nname: {name}\ndescription: Test skill.\n---\n\nBody.\n", encoding="utf-8")
+
+        result = subprocess.run(
+            [sys.executable, str(source / ".pm" / "tools" / "pm_init.py"), str(self.root)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("pm-grilling", "pm-grill-me", "pm-scratch", "pm-extra"):
+            with self.subTest(skill=name):
+                self.assertTrue((self.root / ".agents" / "skills" / name / "SKILL.md").is_file())
+                pointer = (self.root / ".claude" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+                self.assertTrue(pointer.startswith(f"---\nname: {name}\n"))
+                self.assertIn(f"Read `.agents/skills/{name}/SKILL.md`", pointer)
+        self.assertTrue((self.root / ".agents" / "skills" / "pm-grilling" / "LICENSE").is_file())
+        scratch = (self.root / ".claude" / "skills" / "pm-scratch" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("disable-model-invocation: true", scratch)
+        self.assertFalse((self.root / ".agents" / "skills" / "own-skill").exists())
+        self.assertFalse((self.root / ".claude" / "skills" / "own-skill").exists())
+        manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
+        self.assertIn("  .agents/skills/pm-grilling/SKILL.md", manifest)
+
+    def test_upgrade_replaces_pm_skills_and_keeps_the_projects_own(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        own = self.root / ".agents" / "skills" / "my-skill" / "SKILL.md"
+        own.parent.mkdir()
+        own.write_text("---\nname: my-skill\ndescription: Mine.\n---\n", encoding="utf-8")
+        edited = self.root / ".agents" / "skills" / "pm-scratch" / "SKILL.md"
+        edited.write_text(edited.read_text(encoding="utf-8") + "local rule\n", encoding="utf-8")
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("local-edit", result.stdout)
+        self.assertEqual(edited.read_bytes(), (SKILLS / "pm-scratch" / "SKILL.md").read_bytes())
+        backups = list((self.root / ".pm/local/backup").glob("*/.agents/skills/pm-scratch/SKILL.md"))
+        self.assertEqual(len(backups), 1)
+        self.assertTrue(backups[0].read_text(encoding="utf-8").endswith("local rule\n"))
+        self.assertTrue(own.is_file())
 
     def test_installing_into_package_project_fails(self):
         package_project = PM_INIT.resolve().parent.parent.parent
