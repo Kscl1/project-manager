@@ -18,6 +18,8 @@ It is not a framework or a harness. It is a folder of conventions (`.pm/`), one 
 
 ## Install
 
+New here? [Getting started](docs/getting-started.md) walks every step, with a setup screen that checks and installs the tools for you, then `/pm-setup` in your project. The steps below are the short manual path.
+
 You need Python 3.11 or newer, Git, and the [Backlog.md](https://github.com/MrLesk/Backlog.md) CLI 1.52 or newer (`npm i -g backlog.md`, which needs Node.js). On Windows, use `python`; the `python3` alias there is a stub.
 
 1. Clone this repo **next to** your project, not inside it:
@@ -35,7 +37,7 @@ You need Python 3.11 or newer, Git, and the [Backlog.md](https://github.com/MrLe
    python .pm/tools/pm_check.py
    ```
 
-   `--name` is your project's name; without it the folder name is used. The installer copies `template/.pm/` to `.pm/`, writes `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` if they are missing, sets git's hooks path to `.pm/hooks` and stages the hooks as executable. `pm_check` should print `No problems found`.
+   `--name` is your project's name; without it the folder name is used. The installer prints its plan first; `--check` stops there. It copies `template/.pm/` to `.pm/` and the `pm-` skills to `.agents/skills/`, writes `AGENTS.md`, `CLAUDE.md`, `backlog.config.yml`, `.claude/settings.json` (session hooks) and `.mcp.json` (Context7; LikeC4 with `--map`) only if they are missing, sets git's hooks path to `.pm/hooks` and stages the hooks as executable. If your project already has its own agent instructions, Backlog.md or git hooks, it stops and writes nothing; `--keep-existing` installs and keeps yours, and lists what to merge in `.pm/local/merge-by-hand.md`. `pm_check` should print `No problems found`. Then run `/pm-setup` in your coding agent.
 
 4. Open your first task. Use `backlog browser`, or the command line:
 
