@@ -35,7 +35,7 @@ You need Python 3.11 or newer, Git, and the [Backlog.md](https://github.com/MrLe
    python .pm/tools/pm_check.py
    ```
 
-   The installer copies `template/.pm/` to `.pm/`, writes `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` if they are missing, and sets git's hooks path to `.pm/hooks`. `pm_check` should print `No problems found`.
+   `--name` is your project's name; without it the folder name is used. The installer copies `template/.pm/` to `.pm/`, writes `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` if they are missing, and sets git's hooks path to `.pm/hooks`. `pm_check` should print `No problems found`.
 
 4. Open your first task. Use `backlog browser`, or the command line:
 
@@ -47,7 +47,7 @@ You need Python 3.11 or newer, Git, and the [Backlog.md](https://github.com/MrLe
 
 5. Commit. The pre-commit hook runs `pm_check` on staged docs.
 
-Then read `.pm/README.md` in your project. Upgrades and installs into an existing project are covered in `template/README.md`.
+Then read `.pm/README.md` in your project. Upgrades and installs into an existing project are covered in this repo's `template/README.md`.
 
 ## Status
 
