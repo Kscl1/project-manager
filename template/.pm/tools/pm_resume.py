@@ -385,6 +385,40 @@ def worklog_next_warning(tasks):
     return f"- ⚠️ Tasks in the Next section of the newest worklog ({newest.name}) are done now: {', '.join(done)}"
 
 
+def folders(listing, skip):
+    """The folders up to two levels deep that hold a tracked file, leaving out dot-folders, docs/ and `skip`."""
+    found = set()
+    for path in listing.split("\0"):
+        parts = path.split("/")[:-1][:2]
+        for depth in range(1, len(parts) + 1):
+            folder = "/".join(parts[:depth])
+            if parts[0] == "docs" or any(p.startswith(".") for p in parts[:depth]) or folder in skip:
+                break
+            found.add(folder)
+    return found
+
+
+def map_warning():
+    """Name the folders added or removed since the last commit that changed the LikeC4 map (D-118).
+
+    The map is every tracked .c4 or .likec4 file; a project without one gets no warning, since the map is optional.
+    """
+    now = git_stdout(["ls-tree", "-r", "-z", "--name-only", "HEAD"], None)
+    maps = [path for path in (now or "").split("\0") if path.endswith((".c4", ".likec4"))]
+    if not maps:
+        return None
+    last = (git_stdout(["log", "-1", "--format=%H", "--", *maps], "") or "").strip()
+    then = git_stdout(["ls-tree", "-r", "-z", "--name-only", last], None) if last else None
+    if then is None:
+        return None
+    skip = {path.rsplit("/", 1)[0] for path in maps if "/" in path}
+    changed = sorted(folders(now, skip) ^ folders(then, skip))
+    if not changed:
+        return None
+    shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
+    return f"- ⚠️ Map may be out of date: folders added or removed since the map last changed ({last[:7]}): {shown}"
+
+
 def git_stdout(arguments, failure_warning):
     try:
         result = subprocess.run(
@@ -574,6 +608,9 @@ def main():
     finished = worklog_next_warning(all_tasks + load_tasks(COMPLETED_DIR))
     if finished:
         warning_lines.append(finished)
+    stale_map = map_warning()
+    if stale_map:
+        warning_lines.append(stale_map)
     drafts = load_tasks(DRAFTS_DIR)
     waiting = owner_lines(all_tasks) + owner_lines(drafts)
     sections = [
