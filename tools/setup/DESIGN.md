@@ -37,8 +37,8 @@ bom.toml --load--> items --probe--> path, exit, output --parse--> version --comp
 ```
 
 - `bom.py` (standard library only, tested): `load()`; `probe()` resolves the executable (`shutil.which`, which also finds npm's `.cmd` shims on Windows; for Python the interpreter running the TUI, `sys.executable`), runs the check with a 15-second timeout and keeps the path; `parse_version()`; `status()`.
-- `app.py` (Textual, thin): one screen, one `DataTable`. The checks run in a thread worker so the screen opens at once; the worker hands the rows back with `call_from_thread`, because Textual is not thread-safe. While a scan runs, `r` does nothing. `q` quits.
-- `python tools/setup/bom.py` prints the same table as plain text, without Textual.
+- `app.py` (Textual, thin): one screen, one `DataTable`. The checks run in a thread worker so the screen opens at once; the worker hands the rows back with `call_from_thread`, because Textual is not thread-safe. While a scan runs, `r` does nothing. `q` quits. Under the table: the counts, one next-step sentence (`next_step()`, from the worst status) and a legend. Each status has a symbol as well as the theme's colour, so it reads without colour; not-checked rows are dimmed. The Path column shows from 100 columns up, so 80 columns fit without scrolling.
+- `python tools/setup/bom.py` prints the same table and next step as plain text, without Textual.
 
 ## Status rules
 
@@ -57,7 +57,7 @@ The version is the first word that starts like `3.11` or `3.11.9`. Git's `.windo
 
 ## Screens
 
-1. **Check** (this slice): the table, columns item, installed, minimum, tested, status, path.
+1. **Check** (this slice): the table, columns item, installed, minimum, tested, status, path; the next step under it.
 2. **Choose** (later): core is fixed, map is optional; shows the install or upgrade command for each missing or too old item.
 3. **Install** (later): shows each official command (winget, pacman, npm, official script) and runs it only after a yes.
 4. **Done** (later): opens Claude Code Desktop on Windows, prints CLI steps on Linux.

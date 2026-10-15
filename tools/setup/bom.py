@@ -35,6 +35,18 @@ BELOW = "below minimum"
 OK = "ok"
 UNTESTED = "not tested yet"
 
+# How much each status asks of the user: good (nothing), warn (works, worth a look), bad (act), skip (not checked).
+LEVEL = {
+    OK: "good",
+    UNTESTED: "warn",
+    CANNOT_COMPARE: "warn",
+    UNREADABLE: "warn",
+    BELOW: "bad",
+    FAILED: "bad",
+    MISSING: "bad",
+    NOT_CHECKED: "skip",
+}
+
 
 def load(path=BOM):
     """The [[item]] tables of bom.toml, in file order. Raises ValueError with a plain message on a bad entry."""
@@ -145,6 +157,28 @@ def summary(rows):
     return f"{len(rows)} items: " + ", ".join(f"{n} {name}" for name, n in counts.items())
 
 
+def worst(rows):
+    """The level that asks most of the user: bad, then warn, then good; skip when nothing was checked."""
+    levels = {LEVEL[row[4]] for row in rows}
+    return next((level for level in ("bad", "warn", "good") if level in levels), "skip")
+
+
+def next_step(rows):
+    """One plain sentence on what to do now, from the worst status in the table."""
+    named = {level: [f"{row[0]} ({row[4]})" for row in rows if LEVEL[row[4]] == level] for level in set(LEVEL.values())}
+    if named["bad"]:
+        text = f"Next: install or update {', '.join(named['bad'])}, then check again."
+    elif named["warn"]:
+        text = f"All programs are there and should work. Worth a look: {', '.join(named['warn'])}."
+    elif named["good"]:
+        text = "All programs are ready."
+    else:
+        text = "Nothing to check on this machine yet."
+    if named["skip"]:
+        text += f' Items marked "{NOT_CHECKED}" are checked in a later step.'
+    return text
+
+
 def main():
     try:
         rows = check_all(load())
@@ -155,6 +189,7 @@ def main():
     for row in [COLUMNS, *rows]:
         print("  ".join(str(cell).ljust(w) for cell, w in zip(row, widths)).rstrip())
     print(summary(rows))
+    print(next_step(rows))
     return 0
 
 

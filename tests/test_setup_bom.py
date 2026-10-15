@@ -122,6 +122,42 @@ class CheckAll(unittest.TestCase):
         self.assertEqual(bom.summary(rows), "4 items: 1 ok, 1 missing, 1 check failed, 1 not checked")
 
 
+class NextStep(unittest.TestCase):
+    def row(self, name, result):
+        return (name, "-", "-", "-", result, "-")
+
+    def test_every_status_has_a_level(self):
+        statuses = {bom.MISSING, bom.FAILED, bom.UNREADABLE, bom.CANNOT_COMPARE, bom.NOT_CHECKED, bom.BELOW, bom.OK}
+        self.assertEqual(set(bom.LEVEL), statuses | {bom.UNTESTED})
+
+    def test_worst_level_wins(self):
+        ok, new, gone, skip = (
+            self.row("A", bom.OK),
+            self.row("B", bom.UNTESTED),
+            self.row("C", bom.MISSING),
+            self.row("D", bom.NOT_CHECKED),
+        )
+        self.assertEqual(bom.worst([ok, new, gone, skip]), "bad")
+        self.assertEqual(bom.worst([ok, new, skip]), "warn")
+        self.assertEqual(bom.worst([ok, skip]), "good")
+        self.assertEqual(bom.worst([skip]), "skip")
+        self.assertEqual(bom.worst([]), "skip")
+
+    def test_sentences(self):
+        rows = [self.row("Git", bom.MISSING), self.row("Node.js", bom.BELOW), self.row("Claude Code", bom.UNTESTED)]
+        self.assertEqual(
+            bom.next_step(rows),
+            "Next: install or update Git (missing), Node.js (below minimum), then check again.",
+        )
+        rows = [self.row("Git", bom.OK), self.row("Claude Code", bom.UNTESTED), self.row(".pm", bom.NOT_CHECKED)]
+        self.assertEqual(
+            bom.next_step(rows),
+            "All programs are there and should work. Worth a look: Claude Code (not tested yet)."
+            ' Items marked "not checked" are checked in a later step.',
+        )
+        self.assertEqual(bom.next_step([self.row("Git", bom.OK)]), "All programs are ready.")
+
+
 GOOD = """
 [[item]]
 id = "git"
