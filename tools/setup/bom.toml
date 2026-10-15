@@ -1,0 +1,49 @@
+# Bill of materials: what the product needs on the user's machine, read by the setup TUI (DESIGN.md).
+# min: below it the TUI warns. tested: above it the TUI says "not tested yet". Until an older version
+# has been tried, min equals tested. check is a command and its arguments, never a shell line.
+# Install routes are shown later, never run without a yes.
+
+[[item]]
+name = "Python"
+layer = "core"
+check = ["python", "--version"]
+min = "3.11"
+tested = "3.11.9"
+install.windows = "winget install Python.Python.3.11"
+install.linux = "preinstalled on Omarchy"
+
+[[item]]
+name = "Git"
+layer = "core"
+check = ["git", "--version"]
+min = "2.54.0"
+tested = "2.54.0"
+install.windows = "winget install Git.Git"
+install.linux = "preinstalled on Omarchy"
+
+[[item]]
+name = "Node.js"
+layer = "core"
+check = ["node", "--version"]
+min = "24.14.0"
+tested = "24.14.0"
+install.windows = "winget install OpenJS.NodeJS.LTS"
+install.linux = "omarchy install dev-env node"
+
+[[item]]
+name = "Claude Code"
+layer = "core"
+check = ["claude", "--version"]
+min = "2.1.296"
+tested = "2.1.296"
+install.windows = "irm https://claude.ai/install.ps1 | iex"
+install.linux = "curl -fsSL https://claude.ai/install.sh | bash"
+
+[[item]]
+name = "Backlog.md"
+layer = "core"
+check = ["backlog", "--version"]
+min = "1.52.0"
+tested = "1.52.0"
+install.windows = "npm i -g backlog.md@1.52.0"
+install.linux = "npm i -g backlog.md@1.52.0"

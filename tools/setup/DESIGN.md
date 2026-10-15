@@ -53,17 +53,18 @@ On later runs only screen 1 appears, unless the project is new or the selection 
 ## Running it
 
 ```
-python -m venv .venv-setup
-.venv-setup/Scripts/python -m pip install -r tools/setup/requirements.txt    # Linux: .venv-setup/bin/python
-.venv-setup/Scripts/python tools/setup/app.py
+python -m venv tools/setup/.venv
+tools/setup/.venv/Scripts/python -m pip install -r tools/setup/requirements.txt    # Linux: tools/setup/.venv/bin/python
+tools/setup/.venv/Scripts/python tools/setup/app.py
 ```
 
-The TUI has its own virtual environment, because Arch blocks system-wide pip (PEP 668) and the user's Python stays untouched.
+The TUI has its own virtual environment (ignored by git), because Arch blocks system-wide pip (PEP 668) and the user's Python stays untouched. It needs Python 3.11 or newer for `tomllib`. Tests: `python -m unittest discover -s tests`; the app tests skip where Textual is missing.
 
 ## Left for later, on purpose
 
 - Installs and upgrades, each shown and confirmed.
 - Project files: `.pm` package, shipped `pm-` skills, Context7 MCP in `.mcp.json`, the opener and compaction hooks; and listing the user's own skills with the same or a similar name as ours.
+- The map layer: LikeC4 runs through `npx` with a pinned version, so nothing is installed to check yet.
 - The swarm layer (Pi, Herdr, Pi extensions).
 - `/pm-setup`, the in-chat integration of `.pm` into an existing project.
 - A one-line bootstrap that makes the virtual environment for the user.
