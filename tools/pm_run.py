@@ -14,7 +14,8 @@ Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker 
 quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry (REQ-87); when the log is not found (another harness, a
 lookup gap) it nudges at once. A nudge goes to the same session: RESUME, or the
 full brief again when no turn ran (no completion_seq advance and no observed working state).
-A nudge counts as idle when the session log did not grow since the previous one; after PM_RUN_MAX_NUDGES idle nudges
+A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
+(a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
@@ -195,6 +196,15 @@ def run_verify(job, repo):
         return rc, f"check exited {rc}" if rc else ""
     except subprocess.TimeoutExpired:
         return -1, f"verify timed out after {VERIFY_S:g} s"
+
+
+def output_stamp(path):
+    """Size and mtime of the output file as one string (it survives the JSON receipt), or None when missing."""
+    try:
+        st = path.stat()
+        return f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        return None
 
 
 def session_log(attempt, now):
@@ -541,9 +551,11 @@ class Run:
 
     def nudge(self, job, s, a, now, size, why):
         """Prompt a settled worker again in its own session; False when the job was handed over instead."""
-        if "nudge_size" in a:  # a nudge counts as idle when the session log did not grow since it was sent
+        stamp = output_stamp(self.repo / job["out"])
+        if "nudge_size" in a:  # idle: since it was sent, the session log did not grow or the output did not change
             grew = size is not None and a["nudge_size"] is not None and size > a["nudge_size"]
-            a["idle_nudges"] = 0 if grew else a.get("idle_nudges", 0) + 1
+            changed = stamp != a.get("nudge_stamp")
+            a["idle_nudges"] = 0 if grew and changed else a.get("idle_nudges", 0) + 1
         if a.get("idle_nudges", 0) >= MAX_NUDGES:
             self.hand_over(job, s, f"{MAX_NUDGES} nudges in a row brought no new work; turn settled but {why}")
             return False
@@ -562,7 +574,7 @@ class Run:
             launch_prompt(job) if lost else RESUME.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"])
         )
         herdr("agent", "prompt", a["name"], prompt + note)
-        a.update(prompted=now, nudge_size=size, held=False)
+        a.update(prompted=now, nudge_size=size, nudge_stamp=stamp, held=False)
         self.reset_observation(a)
         if lost:
             self.log(f"PROMPT {job['id']}: no turn ran after the brief was sent; brief resent{note}")

@@ -11,7 +11,7 @@ Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md
 3. `.pm/decisions.md` — relevant decision IDs, not a second copy of their text.
 4. `.pm/README.md` and the relevant Epic requirements in `.pm/specs/<epic>/`.
 
-The **lead** creates and closes scoped Backlog tasks with acceptance criteria and evidence. **Workers never create or edit Backlog tasks; they report to the lead.** The lead uses `backlog browser` to inspect or edit tasks. Product docs stay in `docs/`, not Backlog's doc/decision commands. Run `python .pm/tools/pm_check.py` before committing docs, and do not bypass hooks.
+The **lead** creates and closes scoped Backlog tasks with acceptance criteria and evidence. **Workers never create or edit Backlog tasks; they report to the lead.** The lead uses `backlog browser` to inspect or edit tasks. Product docs stay in `docs/`, not Backlog's doc/decision commands. Run `python .pm/tools/pm_check.py` before committing docs, and do not bypass hooks. When you open a pull request, write its body from the repo's `.github/pull_request_template.md` if there is one; `gh pr create --body-file` does not apply it for you.
 
 When the package itself misbehaves (a `.pm/` tool, rule, role card or template, not this project's code), do not patch `.pm/` here: run the `pm-feedback` skill (or `python .pm/tools/pm_feedback.py`). It writes a diagnosis-only feedback report into `.pm/local/feedback/`, shows it to the owner and opens an issue in the package's home repo only on their yes.
 

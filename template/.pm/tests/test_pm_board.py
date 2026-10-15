@@ -1,6 +1,6 @@
 """Tests for tools/pm_board.py.
 
-pm_board reads Backlog task files and prints a Turkish status board in Markdown.
+pm_board reads Backlog task files and prints an English status board in Markdown.
 These tests run the CLI via subprocess against task files in temporary directories,
 testing each acceptance line from the task brief without inspecting implementation.
 """
@@ -120,25 +120,25 @@ class SampleOutputTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         expected = (
-            "# Durum panosu (2026-09-22)\n"
+            "# Status board (2026-09-22)\n"
             "\n"
-            "WIP: 1/7 · Acil: 0/1 · Devam ediyor: 1 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 1 · Biten: 1\n"
+            "WIP: 1/7 · Urgent: 0/1 · Active: 1 · In review: 0 · Owner check: 0 · Ready: 1 · Done: 1\n"
             "\n"
-            "Hazır: 1 (< 2) → planlama zamanı\n"
+            "Ready: 1 (< 2) → time to plan\n"
             "\n"
-            "## Devam ediyor\n"
+            "## Active\n"
             "- TASK-2 · pm board\n"
             "\n"
-            "## İncelemede\n"
-            "- (yok)\n"
+            "## In review\n"
+            "- (none)\n"
             "\n"
-            "## Sahip kontrolü\n"
-            "- (yok)\n"
+            "## Owner check\n"
+            "- (none)\n"
             "\n"
-            "## Sırada\n"
+            "## Ready\n"
             "- TASK-3 · Next thing\n"
             "\n"
-            "## Bitti\n"
+            "## Done\n"
             "- TASK-1 · Test suite\n"
         )
         self.assertEqual(result.stdout.strip(), expected.strip())
@@ -146,7 +146,7 @@ class SampleOutputTest(PmBoardTestCase):
 
 class StatusMappingAndSectionsTest(PmBoardTestCase):
     def test_status_mapping_to_sections(self):
-        """AC #2: 'Active' -> Devam ediyor, 'To Do' -> Sırada, 'Done' -> Bitti."""
+        """AC #2: 'Active' -> Active, 'Ready' -> Ready, 'Done' -> Done."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Alpha\nstatus: Active\nlabels: []\n---\n",
@@ -163,13 +163,13 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Devam ediyor\n- TASK-1 · Alpha", result.stdout)
-        self.assertIn("## Sırada\n- TASK-2 · Beta", result.stdout)
-        self.assertIn("## Bitti\n- TASK-3 · Gamma", result.stdout)
-        self.assertNotIn("## Diğer", result.stdout)
+        self.assertIn("## Active\n- TASK-1 · Alpha", result.stdout)
+        self.assertIn("## Ready\n- TASK-2 · Beta", result.stdout)
+        self.assertIn("## Done\n- TASK-3 · Gamma", result.stdout)
+        self.assertNotIn("## Other", result.stdout)
 
-    def test_empty_sections_show_yok(self):
-        """AC #2: Sections are always present; empty section shows '- (yok)'."""
+    def test_empty_sections_show_none(self):
+        """AC #2: Sections are always present; empty section shows '- (none)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Only Done\nstatus: Done\nlabels: []\n---\n",
@@ -178,13 +178,13 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Devam ediyor\n- (yok)", result.stdout)
-        self.assertIn("## Sırada\n- (yok)", result.stdout)
-        self.assertIn("## Bitti\n- TASK-1 · Only Done", result.stdout)
-        self.assertNotIn("## Diğer", result.stdout)
+        self.assertIn("## Active\n- (none)", result.stdout)
+        self.assertIn("## Ready\n- (none)", result.stdout)
+        self.assertIn("## Done\n- TASK-1 · Only Done", result.stdout)
+        self.assertNotIn("## Other", result.stdout)
 
-    def test_diger_section_appears_only_when_other_status_exists(self):
-        """AC #2: Any other status maps to Diğer, which only appears when such tasks exist."""
+    def test_other_section_appears_only_when_other_status_exists(self):
+        """AC #2: Any other status maps to Other, which only appears when such tasks exist."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Blocked task\nstatus: Blocked\nlabels: []\n---\n",
@@ -197,17 +197,17 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Diğer", result.stdout)
+        self.assertIn("## Other", result.stdout)
         self.assertIn("- TASK-1 · Blocked task", result.stdout)
         self.assertIn("- TASK-2 · Review task", result.stdout)
         # Counts line only tracks the five known lanes
         self.assertIn(
-            "WIP: 0/7 · Acil: 0/1 · Devam ediyor: 0 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 0/7 · Urgent: 0/1 · Active: 0 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
 
-    def test_expedite_lane_and_acil_label(self):
-        """AC #2: Acil label routes In Progress task to Acil count and appends ' (acil)'."""
+    def test_expedite_lane_and_urgent_label(self):
+        """AC #2: an `acil` label routes the task to the Urgent count and appends ' (urgent)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Normal progress\nstatus: Active\nlabels: []\n---\n",
@@ -225,17 +225,17 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 1/7 · Acil: 1/1 · Devam ediyor: 2 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 1 · Biten: 0",
+            "WIP: 1/7 · Urgent: 1/1 · Active: 2 · In review: 0 · Owner check: 0 · Ready: 1 · Done: 0",
             result.stdout,
         )
         self.assertIn("- TASK-1 · Normal progress", result.stdout)
-        self.assertIn("- TASK-2 · Urgent progress (acil)", result.stdout)
-        self.assertIn("- TASK-3 · Urgent todo (acil)", result.stdout)
+        self.assertIn("- TASK-2 · Urgent progress (urgent)", result.stdout)
+        self.assertIn("- TASK-3 · Urgent todo (urgent)", result.stdout)
 
 
 class WarningsTest(PmBoardTestCase):
     def test_warnings_not_shown_at_or_below_limit(self):
-        """AC #3: No warnings when WIP <= 7 and Acil <= 1."""
+        """AC #3: No warnings when WIP <= 7 and Urgent <= 1."""
         for i in range(1, 4):
             self.write_task(
                 f"task-{i}.md",
@@ -250,14 +250,14 @@ class WarningsTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 3/7 · Acil: 1/1 · Devam ediyor: 4 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 3/7 · Urgent: 1/1 · Active: 4 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertNotIn("WIP sınırı aşıldı", result.stdout)
-        self.assertNotIn("Acil şerit dolu", result.stdout)
+        self.assertNotIn("WIP limit exceeded", result.stdout)
+        self.assertNotIn("Urgent lane full", result.stdout)
 
-    def test_wip_warning_when_aktif_over_limit(self):
-        """AC #3: '⚠️ WIP sınırı aşıldı: N/7' when WIP > 7."""
+    def test_wip_warning_when_active_over_limit(self):
+        """AC #3: '⚠️ WIP limit exceeded: N/7' when WIP > 7."""
         for i in range(1, 9):
             self.write_task(
                 f"task-{i}.md",
@@ -268,32 +268,32 @@ class WarningsTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 8/7 · Acil: 0/1 · Devam ediyor: 8 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 8/7 · Urgent: 0/1 · Active: 8 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("⚠️ WIP sınırı aşıldı: 8/7", result.stdout)
-        self.assertNotIn("Acil şerit dolu", result.stdout)
+        self.assertIn("⚠️ WIP limit exceeded: 8/7", result.stdout)
+        self.assertNotIn("Urgent lane full", result.stdout)
 
-    def test_acil_warning_when_acil_over_limit(self):
-        """AC #3: '⚠️ Acil şerit dolu: N/1' when Acil > 1."""
+    def test_urgent_warning_when_urgent_over_limit(self):
+        """AC #3: '⚠️ Urgent lane full: N/1' when Urgent > 1."""
         for i in range(1, 3):
             self.write_task(
                 f"task-{i}.md",
-                f"---\nid: TASK-{i}\ntitle: Acil {i}\nstatus: Active\nlabels: [acil]\n---\n",
+                f"---\nid: TASK-{i}\ntitle: Urgent {i}\nstatus: Active\nlabels: [acil]\n---\n",
             )
 
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 0/7 · Acil: 2/1 · Devam ediyor: 2 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 0/7 · Urgent: 2/1 · Active: 2 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("⚠️ Acil şerit dolu: 2/1", result.stdout)
-        self.assertNotIn("WIP sınırı aşıldı", result.stdout)
+        self.assertIn("⚠️ Urgent lane full: 2/1", result.stdout)
+        self.assertNotIn("WIP limit exceeded", result.stdout)
 
     def test_both_warnings_appear_in_stated_order(self):
-        """AC #3: Warnings appear right after counts and before Hazır, in order: WIP then Acil."""
+        """AC #3: Warnings appear right after counts and before the Ready line, in order: WIP then Urgent."""
         for i in range(1, 9):
             self.write_task(
                 f"task-act-{i}.md",
@@ -302,21 +302,21 @@ class WarningsTest(PmBoardTestCase):
         for i in range(9, 11):
             self.write_task(
                 f"task-acl-{i}.md",
-                f"---\nid: TASK-{i}\ntitle: Acil {i}\nstatus: Active\nlabels: [acil]\n---\n",
+                f"---\nid: TASK-{i}\ntitle: Urgent {i}\nstatus: Active\nlabels: [acil]\n---\n",
             )
 
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("⚠️ WIP sınırı aşıldı: 8/7", result.stdout)
-        self.assertIn("⚠️ Acil şerit dolu: 2/1", result.stdout)
+        self.assertIn("⚠️ WIP limit exceeded: 8/7", result.stdout)
+        self.assertIn("⚠️ Urgent lane full: 2/1", result.stdout)
 
-        pos_counts = result.stdout.index("WIP: 8/7 · Acil: 2/1")
-        pos_wip = result.stdout.index("⚠️ WIP sınırı aşıldı: 8/7")
-        pos_acil = result.stdout.index("⚠️ Acil şerit dolu: 2/1")
-        pos_hazir = result.stdout.index("Hazır: 0 (< 2) → planlama zamanı")
+        pos_counts = result.stdout.index("WIP: 8/7 · Urgent: 2/1")
+        pos_wip = result.stdout.index("⚠️ WIP limit exceeded: 8/7")
+        pos_urgent = result.stdout.index("⚠️ Urgent lane full: 2/1")
+        pos_ready = result.stdout.index("Ready: 0 (< 2) → time to plan")
 
-        self.assertTrue(pos_counts < pos_wip < pos_acil < pos_hazir)
+        self.assertTrue(pos_counts < pos_wip < pos_urgent < pos_ready)
 
     def test_three_wip_lanes_three_total_no_warning(self):
         """CHANGES #4: one non-urgent task in Active, In review and Owner check is WIP 3/3, no warning."""
@@ -337,11 +337,11 @@ class WarningsTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 3/7 · Acil: 0/1 · Devam ediyor: 1 · İncelemede: 1 · Sahip kontrolü: 1 · Sırada: 0 · Biten: 0",
+            "WIP: 3/7 · Urgent: 0/1 · Active: 1 · In review: 1 · Owner check: 1 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertNotIn("WIP sınırı aşıldı", result.stdout)
-        self.assertNotIn("Acil şerit dolu", result.stdout)
+        self.assertNotIn("WIP limit exceeded", result.stdout)
+        self.assertNotIn("Urgent lane full", result.stdout)
 
     def test_eighth_top_level_task_warns(self):
         """An eighth open top-level task in the WIP lanes triggers the warning (limit 7)."""
@@ -371,11 +371,11 @@ class WarningsTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 8/7 · Acil: 0/1 · Devam ediyor: 6 · İncelemede: 1 · Sahip kontrolü: 1 · Sırada: 0 · Biten: 0",
+            "WIP: 8/7 · Urgent: 0/1 · Active: 6 · In review: 1 · Owner check: 1 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("⚠️ WIP sınırı aşıldı: 8/7", result.stdout)
-        self.assertNotIn("Acil şerit dolu", result.stdout)
+        self.assertIn("⚠️ WIP limit exceeded: 8/7", result.stdout)
+        self.assertNotIn("Urgent lane full", result.stdout)
 
     def test_sub_tasks_do_not_count_toward_wip(self):
         """Only top-level work counts; any number of sub-tasks under an Epic may be open."""
@@ -388,29 +388,29 @@ class WarningsTest(PmBoardTestCase):
 
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
-        self.assertIn("WIP: 1/7 · Acil: 0/1 · Devam ediyor: 10 ·", result.stdout)
-        self.assertNotIn("WIP sınırı aşıldı", result.stdout)
+        self.assertIn("WIP: 1/7 · Urgent: 0/1 · Active: 10 ·", result.stdout)
+        self.assertNotIn("WIP limit exceeded", result.stdout)
 
 
-class HazirLineTest(PmBoardTestCase):
-    def test_hazir_line_shown_when_sirada_is_0(self):
-        """AC #4: 'Hazır: N (< 2) → planlama zamanı' appears when Sırada == 0."""
+class ReadyLineTest(PmBoardTestCase):
+    def test_ready_line_shown_when_ready_is_0(self):
+        """AC #4: 'Ready: N (< 2) → time to plan' appears when the Ready count == 0."""
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Hazır: 0 (< 2) → planlama zamanı", result.stdout)
+        self.assertIn("Ready: 0 (< 2) → time to plan", result.stdout)
 
-    def test_hazir_line_shown_when_sirada_is_1(self):
-        """AC #4: 'Hazır: N (< 2) → planlama zamanı' appears when Sırada == 1."""
+    def test_ready_line_shown_when_ready_is_1(self):
+        """AC #4: 'Ready: N (< 2) → time to plan' appears when the Ready count == 1."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: One todo\nstatus: Ready\nlabels: []\n---\n",
         )
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Hazır: 1 (< 2) → planlama zamanı", result.stdout)
+        self.assertIn("Ready: 1 (< 2) → time to plan", result.stdout)
 
-    def test_hazir_line_not_shown_when_sirada_is_2(self):
-        """AC #4: Hazır line does not appear when Sırada == 2."""
+    def test_ready_line_not_shown_when_ready_is_2(self):
+        """AC #4: the Ready line does not appear when the Ready count == 2."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Todo 1\nstatus: Ready\nlabels: []\n---\n",
@@ -421,11 +421,11 @@ class HazirLineTest(PmBoardTestCase):
         )
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0)
-        self.assertNotIn("planlama zamanı", result.stdout)
-        self.assertNotIn("Hazır:", result.stdout)
+        self.assertNotIn("time to plan", result.stdout)
+        self.assertNotIn("(< 2)", result.stdout)
 
-    def test_hazir_line_not_shown_when_sirada_greater_than_2(self):
-        """AC #4: Hazır line does not appear when Sırada > 2."""
+    def test_ready_line_not_shown_when_ready_greater_than_2(self):
+        """AC #4: the Ready line does not appear when the Ready count > 2."""
         for i in range(1, 4):
             self.write_task(
                 f"task-{i}.md",
@@ -433,7 +433,7 @@ class HazirLineTest(PmBoardTestCase):
             )
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0)
-        self.assertNotIn("planlama zamanı", result.stdout)
+        self.assertNotIn("time to plan", result.stdout)
 
 
 class SortingTest(PmBoardTestCase):
@@ -475,7 +475,7 @@ class LabelsParsingTest(PmBoardTestCase):
             (
                 "---\n"
                 "id: TASK-1\n"
-                "title: Inline Acil\n"
+                "title: Inline Urgent\n"
                 "status: Active\n"
                 "assignee: [someone]\n"
                 "labels: [pilot, acil]\n"
@@ -492,35 +492,35 @@ class LabelsParsingTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 1/7 · Acil: 1/1 · Devam ediyor: 2 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 1/7 · Urgent: 1/1 · Active: 2 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("- TASK-1 · Inline Acil (acil)", result.stdout)
+        self.assertIn("- TASK-1 · Inline Urgent (urgent)", result.stdout)
         self.assertIn("- TASK-2 · Inline Empty", result.stdout)
 
     def test_block_labels_format(self):
         """AC #6: Block list format labels: followed by lines '  - item' is read."""
         self.write_task(
             "task-1.md",
-            ("---\nid: TASK-1\ntitle: Block Acil\nstatus: Active\nlabels:\n  - pilot\n  - acil\n---\n"),
+            ("---\nid: TASK-1\ntitle: Block Urgent\nstatus: Active\nlabels:\n  - pilot\n  - acil\n---\n"),
         )
         self.write_task(
             "task-2.md",
-            ("---\nid: TASK-2\ntitle: Block Non-Acil\nstatus: Active\nlabels:\n  - pilot\n---\n"),
+            ("---\nid: TASK-2\ntitle: Block Non-Urgent\nstatus: Active\nlabels:\n  - pilot\n---\n"),
         )
 
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 1/7 · Acil: 1/1 · Devam ediyor: 2 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 1/7 · Urgent: 1/1 · Active: 2 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("- TASK-1 · Block Acil (acil)", result.stdout)
-        self.assertIn("- TASK-2 · Block Non-Acil", result.stdout)
+        self.assertIn("- TASK-1 · Block Urgent (urgent)", result.stdout)
+        self.assertIn("- TASK-2 · Block Non-Urgent", result.stdout)
 
-    def test_urgent_label_counts_as_acil(self):
-        """CHANGES #3: the 'urgent' label counts as acil; the title suffix stays ' (acil)'."""
+    def test_both_urgent_and_acil_labels_count(self):
+        """CHANGES #3: the 'urgent' label counts the same as `acil`; the title suffix is ' (urgent)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Urgent label\nstatus: Active\nlabels: [urgent]\n---\n",
@@ -534,12 +534,12 @@ class LabelsParsingTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 0/7 · Acil: 2/1 · Devam ediyor: 2 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 0/7 · Urgent: 2/1 · Active: 2 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("- TASK-1 · Urgent label (acil)", result.stdout)
-        self.assertIn("- TASK-2 · Acil label (acil)", result.stdout)
-        self.assertIn("⚠️ Acil şerit dolu: 2/1", result.stdout)
+        self.assertIn("- TASK-1 · Urgent label (urgent)", result.stdout)
+        self.assertIn("- TASK-2 · Acil label (urgent)", result.stdout)
+        self.assertIn("⚠️ Urgent lane full: 2/1", result.stdout)
 
 
 class FrontmatterAndExitCodeTest(PmBoardTestCase):
@@ -566,7 +566,7 @@ class FrontmatterAndExitCodeTest(PmBoardTestCase):
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
         self.assertIn(
-            "WIP: 0/7 · Acil: 0/1 · Devam ediyor: 0 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 1",
+            "WIP: 0/7 · Urgent: 0/1 · Active: 0 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 1",
             result.stdout,
         )
         self.assertIn("- TASK-1 · Valid", result.stdout)
@@ -574,31 +574,31 @@ class FrontmatterAndExitCodeTest(PmBoardTestCase):
         self.assertNotIn("Meeting Notes", result.stdout)
 
     def test_empty_tasks_directory_exits_0(self):
-        """Empty DIR produces empty board with empty sections showing '- (yok)'."""
+        """Empty DIR produces empty board with empty sections showing '- (none)'."""
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
 
         self.assertEqual(result.returncode, 0)
         self.assertIn(
-            "WIP: 0/7 · Acil: 0/1 · Devam ediyor: 0 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0",
+            "WIP: 0/7 · Urgent: 0/1 · Active: 0 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0",
             result.stdout,
         )
-        self.assertIn("Hazır: 0 (< 2) → planlama zamanı", result.stdout)
-        self.assertIn("## Devam ediyor\n- (yok)", result.stdout)
-        self.assertIn("## Sırada\n- (yok)", result.stdout)
-        self.assertIn("## Bitti\n- (yok)", result.stdout)
-        self.assertNotIn("## Diğer", result.stdout)
+        self.assertIn("Ready: 0 (< 2) → time to plan", result.stdout)
+        self.assertIn("## Active\n- (none)", result.stdout)
+        self.assertIn("## Ready\n- (none)", result.stdout)
+        self.assertIn("## Done\n- (none)", result.stdout)
+        self.assertNotIn("## Other", result.stdout)
 
 
 class CommandLineInterfaceTest(PmBoardTestCase):
     def test_today_flag_overrides_date(self):
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2025-01-15")
         self.assertEqual(result.returncode, 0)
-        self.assertTrue(result.stdout.startswith("# Durum panosu (2025-01-15)"))
+        self.assertTrue(result.stdout.startswith("# Status board (2025-01-15)"))
 
     def test_default_today_uses_local_date(self):
         result = self.run_board("--tasks", str(self.tasks_dir))
         self.assertEqual(result.returncode, 0)
-        expected_header = f"# Durum panosu ({date.today().isoformat()})"
+        expected_header = f"# Status board ({date.today().isoformat()})"
         self.assertTrue(
             result.stdout.startswith(expected_header),
             f"Expected header starting with {expected_header!r}, got: {result.stdout[:50]!r}",
@@ -648,19 +648,19 @@ class CommandLineInterfaceTest(PmBoardTestCase):
             self.write_task(f"task-{i}.md", f"---\nid: TASK-{i}\ntitle: E{i}\nstatus: Active\nlabels: [acil]\n---\n")
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         expected = (
-            "# Durum panosu (2026-09-22)\n\n"
-            "WIP: 8/7 · Acil: 2/1 · Devam ediyor: 10 · İncelemede: 0 · Sahip kontrolü: 0 · Sırada: 0 · Biten: 0\n\n"
-            "⚠️ WIP sınırı aşıldı: 8/7\n\n"
-            "⚠️ Acil şerit dolu: 2/1\n\n"
-            "Hazır: 0 (< 2) → planlama zamanı\n\n"
-            "## Devam ediyor\n"
+            "# Status board (2026-09-22)\n\n"
+            "WIP: 8/7 · Urgent: 2/1 · Active: 10 · In review: 0 · Owner check: 0 · Ready: 0 · Done: 0\n\n"
+            "⚠️ WIP limit exceeded: 8/7\n\n"
+            "⚠️ Urgent lane full: 2/1\n\n"
+            "Ready: 0 (< 2) → time to plan\n\n"
+            "## Active\n"
             "- TASK-1 · A1\n- TASK-2 · A2\n- TASK-3 · A3\n- TASK-4 · A4\n"
             "- TASK-5 · A5\n- TASK-6 · A6\n- TASK-7 · A7\n- TASK-8 · A8\n"
-            "- TASK-9 · E9 (acil)\n- TASK-10 · E10 (acil)\n\n"
-            "## İncelemede\n- (yok)\n\n"
-            "## Sahip kontrolü\n- (yok)\n\n"
-            "## Sırada\n- (yok)\n\n"
-            "## Bitti\n- (yok)\n"
+            "- TASK-9 · E9 (urgent)\n- TASK-10 · E10 (urgent)\n\n"
+            "## In review\n- (none)\n\n"
+            "## Owner check\n- (none)\n\n"
+            "## Ready\n- (none)\n\n"
+            "## Done\n- (none)\n"
         )
         self.assertEqual(result.stdout, expected)
 

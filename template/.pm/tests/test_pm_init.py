@@ -118,6 +118,16 @@ class PmInitTest(unittest.TestCase):
         )
         self.assertEqual(hooks_path.stdout.strip(), ".pm/hooks")
 
+    def test_hooks_are_staged_as_executable(self):
+        result = self.run_init()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        staged = subprocess.run(
+            [GIT, "ls-files", "-s", ".pm/hooks"], cwd=self.root, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        self.assertEqual(len(staged), 2, staged)
+        for line in staged:
+            self.assertTrue(line.startswith("100755 "), line)
+
     def test_gitignore_entries_are_added_once_across_installs(self):
         first = self.run_init()
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)

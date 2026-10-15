@@ -150,3 +150,15 @@ class PreCommitTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(GIT, "needs git")
+class HookModeTest(unittest.TestCase):
+    def test_hooks_are_executable_in_git(self):
+        # Git on Linux and macOS skips a hook without the exec bit, silently; Windows checkouts cannot show it.
+        listed = subprocess.run(
+            [GIT, "ls-files", "-s", ".githooks", "template/.pm/hooks"], cwd=ROOT, capture_output=True, text=True
+        ).stdout.splitlines()
+        self.assertTrue(listed)
+        for line in listed:
+            self.assertTrue(line.startswith("100755 "), line)

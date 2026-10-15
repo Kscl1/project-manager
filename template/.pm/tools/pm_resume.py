@@ -1,4 +1,4 @@
-"""Print a Turkish continuation summary for active Backlog tasks.
+"""Print an English resume summary for active Backlog tasks.
 
 Usage: python .pm/tools/pm_resume.py
        python .pm/tools/pm_resume.py --did YYYY-MM-DD   the Did part of a multi-goal worklog (D-109)
@@ -35,15 +35,9 @@ WEEKLY_AUDIT_DAYS = 7
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up (REQ-61.1)
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
-STATUS = {
-    "Active": "Devam ediyor",
-    "In review": "İncelemede",
-    "Owner check": "Sahip kontrolü",
-    "Ready": "Sırada",
-    "Done": "Bitti",
-    "Draft": "Taslak",
-}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
+# A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
+# task files use it.
 NOTHING_NEEDED = {"none", "nothing", "yok", "-", "?", "n/a"}
 SECTION_MARKER = re.compile(r"<!--\s*SECTION:([A-Za-z0-9_:]+)\s*-->", re.IGNORECASE)
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -297,17 +291,17 @@ def collect_warnings(tasks):
             resolved = absolute_path(path)
             referenced.add(path_key(resolved))
             if task["status"] in ACTIVE_STATUSES and not resolved.exists():
-                warnings.append(f"- ⚠️ Eksik worktree: {task['id']} · {display_path(resolved)}")
+                warnings.append(f"- ⚠️ Missing worktree: {task['id']} · {display_path(resolved)}")
 
     directories = worktree_directories()
     for directory in directories:
         if path_key(directory) not in referenced:
-            warnings.append(f"- ⚠️ Sahipsiz worktree: {display_path(directory)}")
+            warnings.append(f"- ⚠️ Orphan worktree: {display_path(directory)}")
 
     for directory in directories:
         report = directory / ".pm-report.md"
         if report.is_file():
-            warnings.append(f"- ⚠️ Bekleyen rapor: {display_path(report)}")
+            warnings.append(f"- ⚠️ Pending report: {display_path(report)}")
 
     return warnings
 
@@ -332,8 +326,8 @@ def weekly_audit_warning(today):
     last = max(dates, default=None)
     if last is not None and (today - last).days < WEEKLY_AUDIT_DAYS:
         return None
-    since = f"son: {last.isoformat()}" if last else "hiç çalışmadı"
-    return f"- ⚠️ Haftalık belge kontrolü zamanı ({since}): .pm/templates/doc-audit.md, kind weekly"
+    since = f"last: {last.isoformat()}" if last else "never ran"
+    return f"- ⚠️ Weekly doc audit due ({since}): .pm/templates/doc-audit.md, kind weekly"
 
 
 def worklog_gap_warning():
@@ -360,8 +354,8 @@ def worklog_gap_warning():
     if not loose:
         return None
     return (
-        f"- ⚠️ En yeni worklog'dan ({newest.name}) sonra {len(loose)} commit hiçbir kayıtta yok (açık görev ya da "
-        f"kapanış özeti): git log --oneline {last[:7]}..HEAD"
+        f"- ⚠️ {len(loose)} commit(s) after the newest worklog ({newest.name}) are in no record "
+        f"(open task or closing summary): git log --oneline {last[:7]}..HEAD"
     )
 
 
@@ -386,7 +380,7 @@ def worklog_next_warning(tasks):
     done = [task_id for task_id in dict.fromkeys(named) if status.get(task_id) == "Done"]
     if not done:
         return None
-    return f"- ⚠️ En yeni worklog'un ({newest.name}) Next bölümünde artık biten görevler: {', '.join(done)}"
+    return f"- ⚠️ Tasks in the Next section of the newest worklog ({newest.name}) are done now: {', '.join(done)}"
 
 
 def git_stdout(arguments, failure_warning):
@@ -414,7 +408,7 @@ def owner_lines(tasks):
         needs = task["live"]["Needs owner"]
         if task["status"] == "Done" or not needs or needs.split()[0].strip(".,;:").lower() in NOTHING_NEEDED:
             continue
-        lines.append(f"- {task['id']} [{STATUS.get(task['status'], task['status'])}]: {needs}")
+        lines.append(f"- {task['id']} [{task['status']}]: {needs}")
     return lines
 
 
@@ -422,20 +416,18 @@ def held_lines(tasks, drafts, today):
     """Top-level WIP and Ready counts, then stale Ready tasks and drafts and passed Review by dates (REQ-61.1)."""
     wip = [task for task in tasks if task["status"] in ACTIVE_STATUSES and not task["parent"]]  # top-level only
     ready = [task for task in tasks if task["status"] == "Ready"]
-    lines = [f"- Açık üst iş (WIP): {len(wip)}/{WIP_LIMIT} · Sırada: {len(ready)} · Taslak: {len(drafts)}"]
+    lines = [f"- Open top-level work (WIP): {len(wip)}/{WIP_LIMIT} · Ready: {len(ready)} · Drafts: {len(drafts)}"]
     for task in [task for task in tasks if task["status"] != "Done"] + drafts:
         review_by = as_date(task["review_by"])
         if review_by is not None and review_by < today:
-            lines.append(f"- ⏰ {task['id']} · gözden geçirme tarihi geçti: {task['review_by']}")
+            lines.append(f"- ⏰ {task['id']} · review date passed: {task['review_by']}")
     for task in ready + drafts:
         if as_date(task["review_by"]) is not None:
             continue  # a dated hold is shown only when its date passes (above)
         since = as_date(task["reviewed"]) or as_date(task["created"])
         if since is not None and (today - since).days > REVIEW_DAYS:
-            seen = "son gözden geçirme" if task["reviewed"] else "açılış"
-            lines.append(
-                f"- 💤 {task['id']} · {(today - since).days} gündür bekliyor ({seen} {since}): {task['title']}"
-            )
+            seen = "last review" if task["reviewed"] else "opened"
+            lines.append(f"- 💤 {task['id']} · waiting {(today - since).days} days ({seen} {since}): {task['title']}")
     return lines
 
 
@@ -479,10 +471,10 @@ def audit_warnings(tasks):
         findings = report_findings(task["audit_report"])
         missing = sorted(findings - task["outcomes"]) if findings else []
         if not task["outcomes"]:
-            warnings.append(f"- ⚠️ Sonuçsuz denetim: {task['id']} bulgulara henüz sonuç yazılmadı")
+            warnings.append(f"- ⚠️ Audit without outcomes: {task['id']} has no outcome written for its findings yet")
         elif missing:
             numbers = ", ".join(str(number) for number in missing)
-            warnings.append(f"- ⚠️ Sonuçsuz denetim: {task['id']} bulgu {numbers} için sonuç yok")
+            warnings.append(f"- ⚠️ Audit without outcomes: {task['id']} has no outcome for finding {numbers}")
     return warnings
 
 
@@ -558,12 +550,12 @@ def main():
 
     all_tasks = load_tasks()
     tasks = [task for task in all_tasks if task["status"] in ACTIVE_STATUSES]
-    status_output = git_stdout(["status", "-sb"], "⚠️ `git status -sb` çalıştırılamadı.")
-    log_output = git_stdout(["log", "-5", "--oneline"], "⚠️ `git log -5 --oneline` çalıştırılamadı.")
+    status_output = git_stdout(["status", "-sb"], "⚠️ Could not run `git status -sb`.")
+    log_output = git_stdout(["log", "-5", "--oneline"], "⚠️ Could not run `git log -5 --oneline`.")
 
     task_lines = []
     for task in tasks:
-        task_lines.append(f"- {task['id']} · {task['title']} [{STATUS.get(task['status'], task['status'])}]")
+        task_lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
         for name in LIVE_FIELDS:
             value = task["live"][name]
             task_lines.append(f"  {name}: {value if value is not None else '?'}")
@@ -583,20 +575,20 @@ def main():
     drafts = load_tasks(DRAFTS_DIR)
     waiting = owner_lines(all_tasks) + owner_lines(drafts)
     sections = [
-        ("Git durumu", status_output),
-        ("Son 5 commit", log_output),
-        ("Açık görevler", "\n".join(task_lines) if task_lines else "- (yok)"),
-        ("Senden beklenenler", "\n".join(waiting) if waiting else "- (yok)"),
-        ("Bekleyen ve eskiyen işler", "\n".join(held_lines(all_tasks, drafts, date.today()))),
-        ("Uyarılar", "\n".join(warning_lines) if warning_lines else "- (yok)"),
+        ("Git status", status_output),
+        ("Last 5 commits", log_output),
+        ("Open tasks", "\n".join(task_lines) if task_lines else "- (none)"),
+        ("Waiting on the owner", "\n".join(waiting) if waiting else "- (none)"),
+        ("Waiting and ageing work", "\n".join(held_lines(all_tasks, drafts, date.today()))),
+        ("Warnings", "\n".join(warning_lines) if warning_lines else "- (none)"),
     ]
     if drafts:
-        sections.insert(3, ("Taslaklar", "\n".join(f"- {d['id']} · {d['title']}" for d in drafts)))
+        sections.insert(3, ("Drafts", "\n".join(f"- {d['id']} · {d['title']}" for d in drafts)))
     closed = closed_lines(all_tasks + load_tasks(COMPLETED_DIR))
     if closed:
-        sections.insert(2, ("Son kapanan görevler", "\n".join(closed)))
+        sections.insert(2, ("Recently closed tasks", "\n".join(closed)))
 
-    output = "# Devam özeti\n\n"
+    output = "# Resume summary\n\n"
     for index, (name, body) in enumerate(sections):
         output += render_section(name, body)
         if not output.endswith("\n"):

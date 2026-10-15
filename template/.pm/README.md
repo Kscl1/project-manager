@@ -21,9 +21,10 @@ The project's work system, installed inside its own repository. Start at the roo
 | Seed | `.pm/README.md`, `board.md`, `principles.md`, `models.md` | Written once if missing; then owned by the project and kept on upgrade. |
 | Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md`, `specs/`, `backlog/`, `worklog/` | Never overwritten. |
 
-A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
 | Root adapters | `AGENTS.md`, `CLAUDE.md`, `backlog.config.yml` | Written only when absent. Review an existing file manually. |
 | Machine-local | `.pm/local/`, worker `.pm-report.md` files, `.worktrees/` | Not distributed or committed. |
+
+A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
 
 The package lives in git, including tasks, decisions, specs and delivery records. Ignore only `.pm/local/`, `.pm-report.md` and `.worktrees/` as appropriate. Product code, tests and living product docs stay in the product's own directories. Do not use `backlog decision` or `backlog doc`: decisions live in `.pm/decisions/`, one file each with `.pm/decisions.md` as the index, product documentation in `docs/`. Backlog may recreate empty internal directories; they are not extra sources of truth.
 
@@ -44,13 +45,14 @@ python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
 backlog browser
 python .pm/tools/pm_check.py --stale
+python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
 ```
 
 Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor (D-98).
 
 ## When the package misbehaves
 
-Do not patch package files in a project. Write a one-page report from `.pm/templates/feedback.md` into `.pm/local/feedback/`; the owner carries it to the package's home project, which triages and fixes it in `template/.pm/`.
+Do not patch package files in a project. Run the `pm-feedback` skill (or `python .pm/tools/pm_feedback.py`): it writes a diagnosis-only report from `.pm/templates/feedback.md` into `.pm/local/feedback/`, shows it to the owner and, only on their yes, opens an issue in the package's home project, which triages and fixes it in `template/.pm/`.
 
 ## Everyone
 
