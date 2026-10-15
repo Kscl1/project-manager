@@ -97,6 +97,41 @@ def agent_message(layers, project=None):
     )
 
 
+PLAN_WORDS = {  # pm_init's plan actions, as a person says them
+    "copy": "copy {n} package folder{s}",
+    "upgrade": "upgrade {n} package folder{s}",
+    "write": "write {n} file{s}",
+    "create": "create {n} empty folder{s}",
+    "append": "add lines to {n} file{s}",
+    "set": "point git at the .pm hooks",
+    "stage": "stage the hooks as executable",
+}
+
+
+def plan_summary(output):
+    """pm_init's --check output in a few lines: what it changes, counted, and what it keeps of the user's.
+    Anything it does not recognise is shown as it is."""
+    changes, kept, part = {}, [], None
+    for line in output.splitlines():
+        if line.startswith("Plan for"):
+            part = "plan"
+        elif line.startswith("Already in the project"):
+            part = "kept"
+        elif not line.startswith("  "):
+            part = None
+        elif part == "plan" and line.split()[0] in PLAN_WORDS:
+            changes[line.split()[0]] = changes.get(line.split()[0], 0) + 1
+        elif part == "kept":
+            kept.append(line.split(None, 1)[1].strip())
+    if not changes and not kept:
+        return output
+    said = [PLAN_WORDS[action].format(n=n, s="s" if n != 1 else "") for action, n in changes.items()]
+    text = f"Inside the project folder only, it will {', '.join(said) or 'change nothing'}."
+    if kept:
+        text += "\nKept as they are, for /pm-setup to merge with you:\n" + "\n".join(f"  {k}" for k in kept)
+    return text + "\nc copies the command; add --check to it to see every file."
+
+
 def next_lines(project):
     """The commands that open the project in Claude Code and start /pm-setup, for the Done screen and its c key."""
     return [f'cd "{project}"', "claude", "/pm-setup"]
@@ -456,7 +491,7 @@ class InstallScreen(Screen):
         text = Text(step["command"], "bold")
         if step.get("preview") and state not in FINISHED:
             usable, plan = self.previews.get(index, (False, "asking the installer for its plan..."))
-            text.append(f"\n\nWhat it will do (nothing is written yet):\n{plan}", "dim")
+            text.append(f"\n\nWhat it will do (nothing is written yet):\n{plan_summary(plan)}")
             if index in self.previews and not usable:
                 text.append("\n\nWithout its plan this step does not run here; c copies the command.", "bold")
         if message:

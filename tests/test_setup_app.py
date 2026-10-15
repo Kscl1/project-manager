@@ -355,7 +355,7 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
             panel = str(screen.query_one("#command").content)
             self.assertIn("--keep-existing", panel)
             self.assertIn("What it will do", panel)  # the installer's own plan, before y
-            self.assertIn("Plan for", panel)
+            self.assertIn("Inside the project folder only, it will copy", panel)
             await pilot.press("y")
             await pilot.pause()
             self.assertIn("--keep-existing", self.ran[0])
@@ -423,6 +423,17 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("y")
                 await pilot.pause()
                 self.assertEqual(self.ran, [])
+
+    def test_plan_summary_counts_and_names_what_is_kept(self):
+        output = (
+            "Plan for C:/p (4 change(s)):\n  copy    .pm/tools\n  copy    .pm/hooks\n  write   CLAUDE.md\n"
+            "  set     git core.hooksPath  (.pm/hooks)\n\nAlready in the project, kept as it is (/pm-setup merges"
+            " it with you):\n  keep    AGENTS.md  (the project has its own agent instructions)\n"
+        )
+        summary = app.plan_summary(output)
+        self.assertIn("copy 2 package folders, write 1 file, point git at the .pm hooks", summary)
+        self.assertIn("  AGENTS.md  (the project has its own agent instructions)", summary)
+        self.assertEqual(app.plan_summary("python: can't open file"), "python: can't open file")
 
     def test_desktop_link_encodes_the_folder(self):
         self.assertEqual(
