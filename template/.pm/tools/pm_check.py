@@ -376,6 +376,12 @@ def check_record_type(name, front):
     return []
 
 
+def vendored(name):
+    """A file of a skill copied from another project (a LICENSE sits beside its SKILL.md): its text is upstream's."""
+    parts = name.split("/")
+    return parts[:2] == [".agents", "skills"] and len(parts) > 3 and (ROOT / "/".join(parts[:3]) / "LICENSE").is_file()
+
+
 def check_file(path, decisions):
     name = rel(path)
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -421,7 +427,7 @@ def check_file(path, decisions):
                     f"    → CI and other clones cannot see it: write the path as `code` or move the file into git"
                 )
 
-    if len(lines) > LINE_LIMIT and not name.startswith(NO_LINE_LIMIT):
+    if len(lines) > LINE_LIMIT and not name.startswith(NO_LINE_LIMIT) and not vendored(name):
         problems.append(
             f"{name}: {len(lines)} lines, limit is {LINE_LIMIT}\n    → split by topic and keep this file as an index"
         )

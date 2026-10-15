@@ -444,6 +444,17 @@ class LineLimitTest(RepoTestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("long.md: 301 lines, limit is 300", result.stdout)
 
+    def test_long_file_of_a_copied_skill_exempt(self):
+        long = "\n".join(f"line {i}" for i in range(301)) + "\n"
+        self.write(".agents/skills/pm-copied/LICENSE", "MIT\n")
+        self.write(".agents/skills/pm-copied/references/long.md", long)
+        self.write(".agents/skills/pm-own/SKILL.md", long)
+
+        result = self.run_check()
+
+        self.assertNotIn("pm-copied", result.stdout)
+        self.assertIn(".agents/skills/pm-own/SKILL.md: 301 lines", result.stdout)
+
     def test_long_research_doc_and_decision_log_exempt(self):
         body = "\n".join(f"line {i}" for i in range(301)) + "\n"
         self.write("research/big.md", body)
