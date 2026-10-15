@@ -1,0 +1,219 @@
+"""Build a package problem report that carries only the diagnosis, and send it only on an explicit yes.
+
+Usage:
+  python .pm/tools/pm_feedback.py --command "<failed command>" --error-file <file> [--harness "..."] [--title "..."]
+  python .pm/tools/pm_feedback.py --send <report file> [--yes]
+
+The first form writes `.pm/local/feedback/<date>-feedback.md` and prints it; it never sends anything.
+The report has five fields (.pm/templates/feedback.md): package version, harness, tool versions, the failed command,
+and at most 20 lines of the error. Everything passes the redaction below.
+The second form shows the report again and opens an issue in the package's home repo with `gh issue create`.
+Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
+
+Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
+task and decision titles, project and user names, paths outside the package's own files, e-mail addresses, known
+secret shapes, values of secret-looking environment variables, and quoted text of four or more words (prompts).
+"""
+
+import argparse
+import getpass
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HOME_REPO = "Kscl1/project-manager"  # the package's home project, where reports become issues
+MAX_LINES = 20
+MAX_CHARS = 2000
+TOOLS = ["git", "gh", "backlog", "node", "herdr", "pi"]
+FIELDS = ["Package", "Harness", "Tools", "Failed command", "Error excerpt"]  # the issue form's labels, in order
+
+SECRET_SHAPES = [
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+    r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})",
+    r"\bsk-[A-Za-z0-9_-]{16,}",
+    r"\bAKIA[0-9A-Z]{16}\b",
+    r"\bxox[abprs]-[A-Za-z0-9-]{10,}",
+    r"\b(?:[Bb]earer|[Bb]asic)\s+[A-Za-z0-9._~+/=-]{8,}",
+    # key=value or key: value with a config-style key (all lower or all upper case) that names a secret
+    r"\b([a-z0-9_.-]*(?:token|secret|passw(?:or)?d|api[_-]?key|credential)[a-z0-9_.-]*"
+    r"|[A-Z0-9_.-]*(?:TOKEN|SECRET|PASSW(?:OR)?D|API[_-]?KEY|CREDENTIAL)[A-Z0-9_.-]*)(\s*[=:]\s*)\S+",
+]
+SECRET_ENV = re.compile(r"TOKEN|SECRET|PASSW|KEY|AUTH|CREDENTIAL", re.I)
+PATH_CHARS = r"[^\s'\"<>|:*?]"
+PACKAGE_DIR = r"\.pm[\\/](?:tools|tests|hooks|roles|templates)[\\/]"  # package files: useful to triage, not private
+ABS_PATH = re.compile(r"(?:\b[A-Za-z]:[\\/]|\\\\|(?<![\w.~>])/(?=[\w.~-]+/))" + PATH_CHARS + "*")
+BACKLOG_FILE = re.compile(r"[\w./\\-]*backlog[\\/][^\n]*?\.md\b")  # Backlog file names carry the task title
+REL_PATH = re.compile(r"(?<![\w.<>/\\-])(?!" + PACKAGE_DIR + r")[\w.-]+(?:[\\/][\w.-]+)+")
+EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+QUOTED = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'")
+
+
+def front_title(path):
+    """The `title:` value of a Markdown file's frontmatter, or None."""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            return None
+        if line.startswith("title:"):
+            return line[6:].strip().strip("'\"") or None
+    return None
+
+
+def git_config(root, key):
+    try:
+        out = subprocess.run(["git", "config", "--get", key], cwd=root, capture_output=True, text=True)
+    except OSError:
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def private_strings(root):
+    """Strings from this project and machine that must never leave it, with their marks, longest first."""
+    found = {}
+    for folder in (root / ".pm" / "backlog", root / ".pm" / "decisions"):
+        for path in folder.rglob("*.md") if folder.is_dir() else []:
+            title = front_title(path)
+            if title and len(title) >= 4:
+                found[title] = "<title>"
+    config = root / "backlog.config.yml"
+    if config.exists():
+        match = re.search(r"^project_name:\s*(.+)$", config.read_text(encoding="utf-8"), re.M)
+        if match:
+            found[match.group(1).strip().strip("'\"")] = "<project>"
+    found[root.name] = "<project>"
+    for key in ("user.name", "user.email"):
+        found[git_config(root, key)] = "<user>"
+    try:
+        found[getpass.getuser()] = "<user>"
+    except (OSError, KeyError, ImportError):
+        pass
+    for name, value in os.environ.items():
+        if SECRET_ENV.search(name) and len(value) >= 8:
+            found[value] = "<secret>"
+    found.pop("", None)
+    return sorted(found.items(), key=lambda pair: -len(pair[0]))
+
+
+def redact(text, root, private):
+    """Replace everything in `text` that could identify the project, its owner or a secret."""
+    for shape in SECRET_SHAPES:
+        text = re.sub(shape, lambda m: f"{m.group(1)}{m.group(2)}<secret>" if m.lastindex else "<secret>", text)
+    for value, mark in private:  # secret values first: they may sit inside a path or a quoted string
+        if mark == "<secret>":
+            text = text.replace(value, mark)
+
+    def in_project(match):
+        rest = (match.group(1) or "").replace("\\", "/")
+        return "<project>" + (rest if re.match("/" + PACKAGE_DIR, rest) else "/<file>" if rest else "")
+
+    for form in {str(root), root.as_posix()}:
+        text = re.sub(re.escape(form) + "([\\\\/]" + PATH_CHARS + "*)?", in_project, text, flags=re.I)
+    text = ABS_PATH.sub("<path>", text)
+    text = BACKLOG_FILE.sub("<task file>", text)
+    text = REL_PATH.sub("<file>", text)
+    text = EMAIL.sub("<email>", text)
+    text = QUOTED.sub(lambda m: "<text>" if len(m.group(0).split()) >= 4 else m.group(0), text)
+    for value, mark in private:
+        if len(value) >= 3:
+            text = re.sub(r"(?<!\w)" + re.escape(value) + r"(?!\w)", mark, text, flags=re.I)
+    return text
+
+
+def tool_version(name):
+    path = shutil.which(name)  # also finds backlog.cmd and other Windows shims
+    if not path:
+        return "not found"
+    try:
+        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return "not found"
+    lines = (out.stdout or out.stderr).strip().splitlines()
+    return lines[0] if lines else "unknown"
+
+
+def tool_versions():
+    rows = [f"python {platform.python_version()}", f"os {platform.platform()} {platform.machine()}"]
+    return "\n".join(rows + [f"{name}: {tool_version(name)}" for name in TOOLS])
+
+
+def excerpt(text):
+    lines = text.strip().splitlines()[-MAX_LINES:]
+    return "\n".join(lines)[-MAX_CHARS:]
+
+
+def build(root, command, error, harness, title):
+    """The report as Markdown: the issue form's labels as headings, the redacted values below them."""
+    version = root / ".pm" / "VERSION"
+    package = version.read_text(encoding="utf-8").strip() if version.exists() else "no .pm/VERSION"
+    values = [package, harness or "not given", tool_versions(), command, excerpt(error)]
+    private = private_strings(root)
+    body = "\n\n".join(f"### {field}\n\n```text\n{value}\n```" for field, value in zip(FIELDS, values))
+    title = title or f"{command.split()[0] if command.split() else 'command'} failed"
+    return f"# [feedback] {redact(title, root, private)}\n\n{redact(body, root, private)}\n"
+
+
+def send(root, report, yes, repo):
+    """Open the issue only on an explicit yes. Returns the exit code."""
+    text = redact(report.read_text(encoding="utf-8"), root, private_strings(root))  # again: the file may be edited
+    title, _, body = text.partition("\n")
+    print(text)
+    if not yes:
+        try:
+            print(
+                f"It becomes an issue in the package's home repo (github.com/{repo}); anyone with access can read it,"
+            )
+            print("and it becomes public when the repo does.")
+            answer = input("Send it? [y/N] ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() not in ("y", "yes"):
+            print("Nothing sent.")
+            return 0
+    if not shutil.which("gh"):
+        print(f"gh is missing or not signed in; nothing sent. The report is saved at {report.as_posix()}.")
+        return 1
+    title = title.lstrip("# ").strip()
+    command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
+    return subprocess.run(command, input=body.strip() + "\n", text=True).returncode
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Write a diagnosis-only package problem report; send it on yes.")
+    parser.add_argument("--command", help="the package command that failed")
+    parser.add_argument("--error-file", help="a file with the error output; '-' reads standard input")
+    parser.add_argument("--harness", help="harness, model and thinking level, e.g. 'Claude Code 2.3, Opus 5.5 (high)'")
+    parser.add_argument("--title", help="one line: what went wrong (redacted like the rest)")
+    parser.add_argument("--send", metavar="REPORT", help="open an issue from this report file after a yes")
+    parser.add_argument("--yes", action="store_true", help="with --send: the owner already said yes in chat")
+    parser.add_argument("--repo", default=HOME_REPO, help=argparse.SUPPRESS)
+    parser.add_argument("--root", default=".", help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    root = Path(args.root).resolve()
+
+    if args.send:
+        return send(root, Path(args.send), args.yes, args.repo)
+    if not args.command or not args.error_file:
+        parser.error("give --command and --error-file, or --send REPORT")
+    error = sys.stdin.read() if args.error_file == "-" else Path(args.error_file).read_text(encoding="utf-8")
+    report = build(root, args.command, error, args.harness, args.title)
+    out = root / ".pm" / "local" / "feedback" / f"{time.strftime('%Y-%m-%d-%H%M%S')}-feedback.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report, encoding="utf-8", newline="\n")
+    print(report)
+    print(f"Written to {out.relative_to(root).as_posix()}. Nothing was sent.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.exit(main())

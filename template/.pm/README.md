@@ -52,7 +52,7 @@ Both `--tree` and `--resume` must exist in your installed package version before
 
 ## When the package misbehaves
 
-Do not patch package files in a project. Write a one-page report from `.pm/templates/feedback.md` into `.pm/local/feedback/`; the owner carries it to the package's home project, which triages and fixes it in `template/.pm/`.
+Do not patch package files in a project. Run the `pm-feedback` skill (or `python .pm/tools/pm_feedback.py`): it writes a diagnosis-only report from `.pm/templates/feedback.md` into `.pm/local/feedback/`, shows it to the owner and, only on their yes, opens an issue in the package's home project, which triages and fixes it in `template/.pm/`.
 
 ## Everyone
 

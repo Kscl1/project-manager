@@ -1,0 +1,45 @@
+# Package problem report: the diagnosis only (REQ-94.4). `pm_feedback.py --send` writes the same headings.
+name: Package problem
+description: A .pm tool, hook, rule or template failed. Versions, the failed command and a short error excerpt only.
+title: "[feedback] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only the diagnosis, please. Leave out project paths and file names, any names, task or decision titles,
+        prompts, code and excerpts from project files. `python .pm/tools/pm_feedback.py` builds and redacts this report.
+  - type: textarea
+    id: package
+    attributes:
+      label: Package
+      description: Contents of `.pm/VERSION`.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: harness
+    attributes:
+      label: Harness
+      description: Harness, model and thinking level, e.g. "Pi 1.0.3, DeepSeek V4.1 Flash (high)".
+  - type: textarea
+    id: tools
+    attributes:
+      label: Tools
+      description: Python, OS, git, gh, backlog, node, herdr and pi versions.
+      render: text
+  - type: textarea
+    id: command
+    attributes:
+      label: Failed command
+      description: The package command that failed, with project paths and quoted text replaced.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Error excerpt
+      description: At most the last 20 lines of the output, redacted.
+      render: text
+    validations:
+      required: true
