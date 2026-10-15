@@ -4,6 +4,8 @@ Standard library only. The probe tests run real processes (this Python, a .cmd o
 exercise the operating system they run on; the rest are plain functions.
 """
 
+import io
+import json
 import os
 import platform
 import sys
@@ -128,7 +130,8 @@ class NextStep(unittest.TestCase):
 
     def test_every_status_has_a_level(self):
         statuses = {bom.MISSING, bom.FAILED, bom.UNREADABLE, bom.CANNOT_COMPARE, bom.NOT_CHECKED, bom.BELOW, bom.OK}
-        self.assertEqual(set(bom.LEVEL), statuses | {bom.UNTESTED})
+        project = {bom.IN_PROJECT, bom.NOT_IN_PROJECT, bom.MERGE}
+        self.assertEqual(set(bom.LEVEL), statuses | project | {bom.UNTESTED})
 
     def test_worst_level_wins(self):
         ok, new, gone, skip = (
@@ -152,10 +155,13 @@ class NextStep(unittest.TestCase):
         rows = [self.row("Git", bom.OK), self.row("Claude Code", bom.UNTESTED), self.row(".pm", bom.NOT_CHECKED)]
         self.assertEqual(
             bom.next_step(rows),
-            "All programs are there and should work. Worth a look: Claude Code (not tested yet)."
-            ' Items marked "not checked" are checked in a later step.',
+            "All programs are installed. Worth a look: Claude Code (not tested yet).",
         )
         self.assertEqual(bom.next_step([self.row("Git", bom.OK)]), "All programs are ready.")
+        self.assertEqual(
+            bom.later_note(rows), 'The item marked "not checked" belongs to your project and is set up later.'
+        )
+        self.assertEqual(bom.later_note([self.row("Git", bom.OK)]), "")
 
 
 GOOD = """
@@ -203,6 +209,157 @@ class Load(unittest.TestCase):
     def test_command_needs_versions(self):
         self.assert_rejected(GOOD.replace('tested = "2.54.0"', ""), "needs min and tested")
 
+    def test_check_must_be_a_list(self):
+        self.assert_rejected(GOOD.replace('["git", "--version"]', '"git"'), "check, a list of strings")
+
+    def test_install_lines_need_a_known_os(self):
+        self.assertEqual(
+            self.load_text(GOOD + 'install.linux = "sudo pacman -S git"\n')[0]["install"]["linux"], "sudo pacman -S git"
+        )
+        self.assert_rejected(GOOD + 'install.beos = "get git"\n', "install takes install.<os>")
+        self.assert_rejected(GOOD + 'upgrade.windows = ""\n', "upgrade takes upgrade.<os>")
+        self.assert_rejected(GOOD + 'install = "winget install git"\n', "install takes install.<os>")
+
+
+def item(item_id, layer="core", **extra):
+    return {"id": item_id, "name": item_id.title(), "kind": "command", "layer": layer, "check": [item_id], **extra}
+
+
+def row(name, result, installed="-"):
+    return (name, installed, "1.0", "1.2", result, "-")
+
+
+class Plan(unittest.TestCase):
+    def test_only_missing_and_below_minimum_become_steps(self):
+        items = [
+            item("git", install={"windows": "winget install git", "linux": "pacman -S git"}),
+            item("node", install={"windows": "winget install node"}, upgrade={"windows": "winget upgrade node"}),
+            item("ok", install={"windows": "winget install ok"}),
+            item("new", install={"windows": "winget install new"}),
+        ]
+        rows = [row("Git", bom.MISSING), row("Node", bom.BELOW), row("Ok", bom.OK), row("New", bom.UNTESTED)]
+        steps, notes = bom.plan(items, rows, system="windows")
+        self.assertEqual(
+            [(s["id"], s["why"], s["command"], s["needs"]) for s in steps],
+            [
+                ("git", bom.MISSING, "winget install git", "winget"),
+                ("node", bom.BELOW, "winget upgrade node", "winget"),
+            ],
+        )
+        self.assertEqual(steps[0]["shell"], ["powershell", "-NoProfile", "-Command", "winget install git"])
+        self.assertEqual(steps[0]["check"], ["git"])
+        self.assertEqual(notes, [])
+
+    def test_missing_item_installs_even_when_an_upgrade_line_exists(self):
+        items = [item("node", install={"windows": "winget install node"}, upgrade={"windows": "winget upgrade node"})]
+        steps, _ = bom.plan(items, [row("Node", bom.MISSING)], system="windows")
+        self.assertEqual(steps[0]["command"], "winget install node")
+
+    def test_os_line_then_all(self):
+        items = [
+            item("backlog", install={"all": "npm i -g backlog.md"}),
+            item("git", install={"linux": "pacman -S git"}),
+        ]
+        steps, _ = bom.plan(items, [row("Backlog", bom.MISSING), row("Git", bom.BELOW)], system="linux")
+        self.assertEqual([s["command"] for s in steps], ["npm i -g backlog.md", "pacman -S git"])
+
+    def test_no_command_and_failed_check_become_notes(self):
+        items = [item("git", install={"linux": "pacman -S git"}, note="Get it from git-scm.com."), item("node")]
+        steps, notes = bom.plan(items, [row("Git", bom.MISSING), row("Node", bom.FAILED)], system="windows")
+        self.assertEqual(steps, [])
+        self.assertEqual(len(notes), 2)
+        self.assertIn("no install command for windows; Get it from git-scm.com.", notes[0])
+        self.assertIn("could not be verified (check failed); run node", notes[1])
+
+    def test_unverified_versions_are_notes_not_ready(self):
+        items = [item("git", install={"all": "get git"}), item("py", install={"all": "get py"})]
+        rows = [row("Git", bom.UNREADABLE), row("Py", bom.CANNOT_COMPARE, "3.15.0rc1")]
+        steps, notes = bom.plan(items, rows, system="linux")
+        self.assertEqual(steps, [])
+        self.assertIn("could not be verified (version unreadable)", notes[0])
+        self.assertIn("could not be verified (cannot compare)", notes[1])
+
+    def test_unticked_layer_is_left_out(self):
+        items = [item("likec4", layer="map", install={"all": "npm i -g likec4"})]
+        self.assertEqual(bom.plan(items, [row("Likec4", bom.MISSING)], layers=("core",), system="linux"), ([], []))
+
+
+class Running(unittest.TestCase):
+    def test_shell_per_os(self):
+        self.assertEqual(
+            bom.shell_args("irm x | iex", "windows"), ["powershell", "-NoProfile", "-Command", "irm x | iex"]
+        )
+        self.assertEqual(bom.shell_args("curl x | bash", "linux"), ["bash", "-c", "curl x | bash"])
+
+    def test_outcome_from_exit_code_and_recheck(self):
+        self.assertEqual(bom.outcome(0, row("Git", bom.OK, "2.54.0"))[0], "done")
+        self.assertEqual(bom.outcome(0, row("Git", bom.UNTESTED, "2.60.0"))[0], "done")
+        self.assertEqual(bom.outcome(0, row("Git", bom.MISSING))[0], "not-found")
+        self.assertEqual(bom.outcome(0, row("Git", bom.BELOW, "0.9"))[0], "too-old")
+        self.assertEqual(bom.outcome(0, row("Git", bom.UNREADABLE))[0], "unverified")
+        self.assertEqual(bom.outcome(0, row("Git", bom.FAILED))[0], "unverified")
+        state, message = bom.outcome(5, row("Git", bom.OK, "2.54.0"))
+        self.assertEqual(state, "failed")
+        self.assertIn("exit code 5", message)
+
+    def test_needs_names_the_program_that_runs_the_line(self):
+        self.assertEqual(bom.needs("winget install --id Git.Git", "windows"), "winget")
+        self.assertEqual(bom.needs("sudo pacman -S --needed git", "linux"), "pacman")
+        self.assertEqual(bom.needs("npm i -g backlog.md@1.52.0", "linux"), "npm")
+        self.assertEqual(bom.needs("irm https://claude.ai/install.ps1 | iex", "windows"), "powershell")
+        self.assertEqual(bom.needs("curl -fsSL https://claude.ai/install.sh | bash", "linux"), "curl")
+
+    def test_path_refresh_keeps_this_process_first(self):
+        before = os.environ["PATH"]
+        try:
+            os.environ["PATH"] = os.pathsep.join(["C:\\venv\\Scripts", before])
+            bom.refresh_path()
+            self.assertTrue(os.environ["PATH"].startswith("C:\\venv\\Scripts" + os.pathsep))
+        finally:
+            os.environ["PATH"] = before
+
+
+class Main(unittest.TestCase):
+    """The plain-text and JSON output an agent reads, and the exit codes it can trust."""
+
+    def run_main(self, args, found):
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = bom.main(args, lambda check: found.get(check[0], ("/bin/x", True, "999.0")))
+        return code, out.getvalue()
+
+    def test_steps_left_exit_1_and_list_commands(self):
+        code, out = self.run_main([], {"git": (None, False, None)})
+        self.assertEqual(code, 1)
+        self.assertIn("To do on ", out)
+        self.assertIn("1. Git (missing): ", out)
+
+    def test_failed_check_is_a_note_and_exit_1(self):
+        code, out = self.run_main(["--layers", "core"], {"git": ("/bin/git", False, None)})
+        self.assertEqual(code, 1)
+        self.assertIn("nothing can run automatically", out)
+        self.assertIn("Note: Git: installed, but it could not be verified (check failed)", out)
+
+    def test_nothing_left_exit_0(self):
+        code, out = self.run_main(["--layers", "core"], {})
+        self.assertEqual(code, 0)
+        self.assertIn("(core): nothing", out)
+
+    def test_json(self):
+        code, out = self.run_main(["--json"], {"git": (None, False, None)})
+        data = json.loads(out)
+        self.assertEqual(code, 1)
+        self.assertEqual(data["steps"][0]["id"], "git")
+        self.assertEqual(next(i for i in data["items"] if i["id"] == "git")["status"], bom.MISSING)
+
+    def test_missing_bom_exit_2(self):
+        with patch.object(bom, "BOM", Path("no-such-folder/bom.toml")), patch("sys.stderr"):
+            with patch.object(bom.load, "__defaults__", (Path("no-such-folder/bom.toml"),)):
+                self.assertEqual(bom.main([]), 2)
+
+    def test_bad_layer_exit_2(self):
+        with patch("sys.stderr"):
+            self.assertEqual(bom.main(["--layers", "swarm"]), 2)
+
 
 class ShippedBom(unittest.TestCase):
     """The hand-edited bom.toml loads, and every shipped skill follows the pm- prefix."""
@@ -218,6 +375,125 @@ class ShippedBom(unittest.TestCase):
                 if "/skills/" in item.get("path", ""):
                     self.assertTrue(item["id"].startswith("pm-"))
                     self.assertTrue(Path(item["path"]).name.startswith("pm-"))
+
+    def test_every_shipped_skill_is_checked(self):
+        shipped = {p.name for p in (bom.PM_INIT.parents[2] / ".agents" / "skills").glob("pm-*")}
+        listed = {Path(item["path"]).name for item in bom.load() if "/skills/" in item.get("path", "")}
+        self.assertEqual(listed, shipped)
+
+
+PROJECT_ITEMS = [
+    {"id": "pkg", "name": "Package", "kind": "project-file", "layer": "core", "path": ".pm/VERSION"},
+    {"id": "hooks", "name": "Hooks", "kind": "project-file", "layer": "core", "path": "settings.json", "has": "ours"},
+    {"id": "map", "name": "Map server", "kind": "project-file", "layer": "map", "path": "mcp.json", "has": "likec4",
+     "similar": ["likec4"]},
+]  # fmt: skip
+
+
+class Project(unittest.TestCase):
+    """Project files: checked only with a project folder, set up by one installer step."""
+
+    def setUp(self):
+        self.project = Path(tempfile.mkdtemp(prefix="bom_project_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.project, ignore_errors=True))
+
+    def rows(self):
+        return bom.check_all(PROJECT_ITEMS, project=self.project)
+
+    def test_not_checked_without_a_project(self):
+        self.assertEqual({row[4] for row in bom.check_all(PROJECT_ITEMS)}, {bom.NOT_CHECKED})
+
+    def test_in_project_missing_and_merge(self):
+        (self.project / ".pm").mkdir()
+        (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        (self.project / "settings.json").write_text("{}", encoding="utf-8")
+        self.assertEqual([row[4] for row in self.rows()], [bom.IN_PROJECT, bom.MERGE, bom.NOT_IN_PROJECT])
+        self.assertEqual(self.rows()[0][5], str(self.project / ".pm/VERSION"))
+
+    def test_missing_files_become_one_installer_step(self):
+        steps, notes = bom.plan(PROJECT_ITEMS, self.rows(), ("core", "map"), "linux", self.project)
+        self.assertEqual([step["id"] for step in steps], ["pm-init"])
+        step = steps[0]
+        self.assertEqual(step["ids"], ["pkg", "hooks", "map"])
+        self.assertEqual(step["shell"][1:], [str(bom.PM_INIT), str(self.project), "--keep-existing", "--map"])
+        self.assertIn("--check", step["preview"])
+        self.assertNotIn("--keep-existing", step["preview"])
+        core_only = bom.plan(PROJECT_ITEMS, self.rows(), ("core",), "linux", self.project)[0][0]
+        self.assertNotIn("--map", core_only["shell"])
+
+    def test_own_file_goes_to_the_installer_until_handed_over(self):
+        (self.project / "settings.json").write_text("{}", encoding="utf-8")
+        steps, _ = bom.plan(PROJECT_ITEMS[1:2], self.rows()[1:2], ("core",), "linux", self.project)
+        self.assertEqual(steps[0]["ids"], ["hooks"])  # the installer lists it for /pm-setup
+        (self.project / ".pm" / "local").mkdir(parents=True)
+        (self.project / ".pm" / "local" / "merge-by-hand.md").write_text(
+            "# Merge by hand\n\n- settings.json: add ours\n", encoding="utf-8"
+        )
+        steps, notes = bom.plan(PROJECT_ITEMS[1:2], self.rows()[1:2], ("core",), "linux", self.project)
+        self.assertEqual((steps, notes), ([], []))  # now /pm-setup's work: neither a step nor a note
+        self.assertEqual(bom.merge_names(bom.merge_list(self.project)), "settings.json")
+
+    def test_installer_outcome(self):
+        ok = ("A", "-", "-", "-", bom.IN_PROJECT, "p")
+        merge = ("B", "-", "-", "-", bom.MERGE, "p")
+        absent = ("C", "-", "-", "-", bom.NOT_IN_PROJECT, "p")
+        self.assertEqual(bom.project_outcome(0, [ok])[0], "done")
+        self.assertEqual(bom.project_outcome(0, [ok, merge])[0], "done")
+        lines = ["- AGENTS.md: add ours", "- .mcp.json: add a", "- .mcp.json: add b"]
+        self.assertEqual(bom.project_outcome(0, [ok, merge], lines)[0], "merge")
+        self.assertIn("AGENTS.md, .mcp.json (listed", bom.project_outcome(0, [ok], lines)[1])
+        self.assertEqual(bom.project_outcome(0, [absent])[0], "unverified")
+        self.assertEqual(bom.project_outcome(3, [ok])[0], "failed")
+
+    def test_next_step_names_project_files_plainly(self):
+        self.assertEqual(bom.next_step(self.rows()), "Next: set up the project files (3 not in your project yet).")
+
+    def test_record_needs_pm_and_reads_back(self):
+        self.assertFalse(bom.write_record(self.project, ("core",), [], "2026-10-15"))
+        (self.project / ".pm").mkdir()
+        self.assertTrue(bom.write_record(self.project, ("core", "map"), ["x"], "2026-10-15"))
+        record = bom.read_record(self.project)
+        self.assertEqual(record["layers"], ["core", "map"])
+        self.assertEqual(record["bom"], bom.bom_hash())
+        self.assertEqual(record["source"], str(bom.PM_INIT.parents[3]))
+
+    def test_main_with_project(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = bom.main(["--project", str(self.project)], lambda check: ("/bin/x", True, "999.0"))
+        self.assertEqual(code, 1)
+        self.assertIn(".pm and project files", out.getvalue())
+        with patch("sys.stderr"):
+            self.assertEqual(bom.main(["--project", str(self.project / "nope")]), 2)
+
+
+class UserScan(unittest.TestCase):
+    """Names of what the user already has; never the configuration behind them."""
+
+    def test_names_only_and_similar(self):
+        home = Path(tempfile.mkdtemp(prefix="bom_home_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        for folder, name in ((".claude/skills", "likec4-dsl"), (".agents/skills", "notes")):
+            (home / folder / name).mkdir(parents=True)
+            (home / folder / name / "SKILL.md").write_text("---\n---\n", encoding="utf-8")
+        server = {"type": "http", "url": "https://example.test", "headers": {"KEY": "secret-value"}}
+        (home / ".claude.json").write_text(json.dumps({"mcpServers": {"likec4": server}}), encoding="utf-8")
+        (home / ".claude" / "plugins").mkdir(parents=True)
+        plugins = {"version": 2, "plugins": {"likec4@market": []}}
+        (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(plugins), encoding="utf-8")
+
+        scan = bom.user_scan(home)
+
+        self.assertEqual(scan, {"skills": ["likec4-dsl", "notes"], "mcp": ["likec4"], "plugins": ["likec4"]})
+        self.assertNotIn("secret-value", json.dumps(scan))
+        lines = bom.similar(PROJECT_ITEMS, scan)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("skill likec4-dsl, MCP server likec4, plugin likec4", lines[0])
+        self.assertEqual(bom.similar(PROJECT_ITEMS, scan, ("core",)), [])
+
+    def test_empty_home(self):
+        self.assertEqual(
+            bom.user_scan(tempfile.gettempdir() + "/no-such-home"), {"skills": [], "mcp": [], "plugins": []}
+        )
 
 
 if __name__ == "__main__":

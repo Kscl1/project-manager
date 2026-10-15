@@ -17,7 +17,7 @@ When the package itself misbehaves (a `.pm/` tool, rule, role card or template, 
 
 ## Lead only: which tool when
 
-Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and says why in one short sentence unless the user has said they know it. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
+Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and says why in one short sentence unless the user has said they know it. `.pm/local/teaching.md`, when present, sets how: `mode: hint` is that sentence, `together` lets the user try the step, `off` says nothing; skip what `known` lists. `/pm-setup` writes it. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
 
 | Situation | Do | Why |
 |---|---|---|
