@@ -1,0 +1,2 @@
+# The setup TUI's own virtual environment (see DESIGN.md). Python 3.11+.
+textual==8.2.8
