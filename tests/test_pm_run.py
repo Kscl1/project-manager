@@ -253,10 +253,14 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         herdr = self.herdr_state()
         argv = herdr["gone"]["run-a-1"]["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "claude")
+        settings = argv[argv.index("--settings") + 1]
         self.assertEqual(
             argv[argv.index("--") + 1 :],
-            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--permission-mode", "acceptEdits"],
+            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--settings", settings]
+            + ["--permission-mode", "acceptEdits"],
         )
+        # The project's MCP servers start without the approval dialog that would swallow the brief.
+        self.assertEqual(json.loads(Path(settings).read_text(encoding="utf-8")), {"enableAllProjectMcpServers": True})
         self.assertEqual(herdr["ran"], [[herdr["gone"]["run-a-1"]["pane"], "$env:X=1"]])
 
     def test_pi_is_the_default_harness_and_runs_no_setup(self):

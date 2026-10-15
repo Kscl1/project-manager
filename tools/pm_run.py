@@ -85,6 +85,7 @@ PROMPT = (
 )
 # D-97: every helper runs in its own Herdr pane through pm_run, so an agent started here gets no in-process
 # sub-agent tools. Applies to this run only; the owner's own Pi and Claude Code setup is unchanged.
+CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}  # the project's MCP servers (Context7...) start unasked
 NO_HELPERS = {"pi": ["--exclude-tools", "Agent,SubagentWorkflow"], "claude": ["--disallowedTools", "Agent,Workflow"]}
 RESUME = (
     "Your previous turn ended before the output was finished. Re-read the brief file(s) {briefs} and {out}, "
@@ -372,6 +373,12 @@ class Run:
         if harness == "pi":
             agent_args += ["--thinking", job.get("thinking", "high"), "--name", attempt["name"]]
         agent_args += NO_HELPERS[harness]
+        if harness == "claude":
+            # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
+            # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
+            settings = self.root / "claude-settings.json"
+            settings.write_text(json.dumps(CLAUDE_SETTINGS) + "\n", encoding="utf-8")
+            agent_args += ["--settings", str(settings)]
         attempt["model"] = job["model"]  # the model asked for; the session log shows what actually ran
         start = herdr("agent", "start", attempt["name"], *agent_args, *job.get("args", []))
         if "error" in start:
