@@ -6,7 +6,8 @@
 #         manual: nothing on the machine to check.
 # min     below it the TUI warns. tested: above it the TUI says "not tested yet". Until an older version has been
 #         tried, min equals tested. Leave both out when unknown. Command items need both.
-# install.* and note are text shown to the user, never handed to a shell.
+# install.* and upgrade.* run through the platform shell only after the user presses Enter on that step (DESIGN.md);
+# note is text shown to the user. upgrade.<os> is used for an item below its minimum when install does not upgrade.
 
 # Core: required for the first trial.
 
@@ -31,6 +32,7 @@ check = ["git", "--version"]
 min = "2.54.0"
 tested = "2.54.0"
 install.windows = "winget install --id Git.Git --exact --source winget"
+upgrade.windows = "winget upgrade --id Git.Git --exact --source winget"
 install.linux = "sudo pacman -S --needed git"
 note = "Preinstalled on Omarchy."
 
@@ -43,6 +45,7 @@ check = ["node", "--version"]
 min = "24.14.0"
 tested = "24.14.0"
 install.windows = "winget install --id OpenJS.NodeJS.LTS --exact --source winget"
+upgrade.windows = "winget upgrade --id OpenJS.NodeJS.LTS --exact --source winget"
 install.linux = "omarchy install dev-env node"
 
 [[item]]
@@ -55,7 +58,7 @@ min = "2.1.296"
 tested = "2.1.296"
 install.windows = "irm https://claude.ai/install.ps1 | iex"
 install.linux = "curl -fsSL https://claude.ai/install.sh | bash"
-note = "Updates itself, so it often shows as not tested yet."
+note = "Updates itself, so it often shows as not tested yet. On Linux the installer puts claude in ~/.local/bin; if it is not found afterwards, add that folder to PATH as the installer says."
 
 [[item]]
 id = "backlog"
@@ -67,6 +70,7 @@ min = "1.52.0"
 tested = "1.52.0"
 install.windows = "npm i -g backlog.md@1.52.0"
 install.linux = "npm i -g backlog.md@1.52.0"
+note = "Needs Node.js first. If npm says EACCES on Linux, follow https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally rather than sudo."
 
 [[item]]
 id = "pm-package"
