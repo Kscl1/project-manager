@@ -239,6 +239,12 @@ def main():
 
     if (target / ".git").exists():
         run(["git", "config", "core.hooksPath", ".pm/hooks"], cwd=target)
+        # Git on Linux and macOS skips a hook without the exec bit, and a Windows checkout cannot keep the bit on
+        # disk, so set it on the files and stage them with it; the first commit then records them as executable.
+        hooks = sorted(p for p in (target / ".pm" / "hooks").iterdir() if p.is_file())
+        for hook in hooks:
+            hook.chmod(hook.stat().st_mode | 0o111)
+        run(["git", "add", "--chmod=+x", "--", *(h.relative_to(target).as_posix() for h in hooks)], cwd=target)
     else:
         say("note", "not a git repository yet: run git init, then git config core.hooksPath .pm/hooks")
 
