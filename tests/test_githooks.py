@@ -131,6 +131,15 @@ class PreCommitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("not formatted", result.stderr)
 
+    def test_local_check_runs_when_configured(self):
+        self.stage("tool.py", "x = 1\n")
+        self.git("config", "pm.localcheck", "echo leak found; exit 1")
+        result = self.run_hook()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("pm.localcheck failed", result.stderr)
+        self.git("config", "pm.localcheck", "true")
+        self.assertEqual(self.run_hook().returncode, 0)
+
     def test_missing_tool_blocks_instead_of_skipping(self):
         self.stage("tool.py", "x = 1\n")
         env = {**os.environ, "PATH": str(Path(GIT).parent)}  # git only, no gitleaks or ruff
