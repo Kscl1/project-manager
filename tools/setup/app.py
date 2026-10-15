@@ -3,14 +3,16 @@
 The checks, the status rules and the steps live in bom.py; this file only shows them and runs a step after the
 user presses y on it.
 
-usage: python tools/setup/app.py    (in the TUI's own virtual environment, see DESIGN.md)
+usage: python tools/setup/app.py [project folder]    (in the TUI's own virtual environment, see DESIGN.md)
 """
 
+import os
 import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import bom
 from rich.text import Text
@@ -43,9 +45,14 @@ STATES = {
     "too-old": ("still too old", "bad"),
     "failed": ("failed", "bad"),
     "skipped": ("skipped", "skip"),
+    "merge": ("done, merge the rest", "warn"),
 }
 QUIET_S = 0.8  # after a step returns, y is ignored this long: keys queued while it ran must not run the next
-FINISHED = {"done", "not-found", "unverified", "skipped"}  # nothing more this screen can do for these
+FINISHED = {"done", "not-found", "unverified", "skipped", "merge"}  # nothing more this screen can do for these
+NO_PROJECT = (
+    "Your project's files are checked when setup starts with the project folder: "
+    "python tools/setup/app.py <your project folder>"
+)
 
 CSS = """
 Screen { align-horizontal: center; }
@@ -75,16 +82,28 @@ def copy_message(text):
     return f"Sent to the clipboard:\n{text}\nIf nothing was copied, select the text here instead."
 
 
-def agent_message(layers):
+def agent_message(layers, project=None):
     """What the user pastes into their coding agent when they hand the setup over (DESIGN.md)."""
     script = Path(bom.__file__).resolve()
+    where = f' --project "{project}"' if project else ""
     return (
         "Please finish the project-manager setup on this machine. "
-        f'Run: python "{script}" --layers {",".join(layers)} '
+        f'Run: python "{script}" --layers {",".join(layers)}{where} '
         "It prints what is installed and a To do list with one command per step (add --json for JSON). "
         "Show me each command and run it only after I say yes; never add sudo to npm. "
         "Then run the check again until it exits 0, and tell me what is left."
+        + (" After that, run /pm-setup in the project." if project else "")
     )
+
+
+def next_lines(project):
+    """The commands that open the project in Claude Code and start /pm-setup, for the Done screen and its c key."""
+    return [f'cd "{project}"', "claude", "/pm-setup"]
+
+
+def desktop_link(project):
+    """Claude Desktop's documented link that opens a new Code session in a folder."""
+    return "claude://code/new?folder=" + quote(str(project), safe="")
 
 
 class SetupApp(App):
@@ -100,13 +119,19 @@ class SetupApp(App):
     ENABLE_COMMAND_PALETTE = False  # a few keys per screen: nothing to search for
     CSS = CSS
 
-    def __init__(self, items=None, probe=bom.probe, runner=None, system=None):
+    def __init__(self, items=None, probe=bom.probe, runner=None, system=None, project=None, home=None):
         super().__init__()
         self.items = bom.load() if items is None else items
         self.probe = probe  # tests pass a fake one
         self.runner = runner or self.run_in_terminal  # tests pass a fake one
         self.system = system or bom.this_os()
+        self.project = Path(project).resolve() if project else None
+        self.home = home  # tests pass a folder; None is the user's home
+        self.record = bom.read_record(self.project) if self.project else None
         self.layers = bom.LAYERS
+        if self.record and self.record.get("layers"):  # a rerun starts from what was chosen last time
+            self.layers = tuple(layer for layer in bom.LAYERS if layer == "core" or layer in self.record["layers"])
+        self.similar = []
         self.scanning = False
         self.rows = []
         self.shown = []  # the index in self.rows of each table line; not-checked items share one line
@@ -148,28 +173,38 @@ class SetupApp(App):
     @work(thread=True)
     def check(self):
         """Runs the version commands off the screen's thread, so the window opens at once."""
-        rows = bom.check_all(self.items, self.probe)
+        rows = bom.check_all(self.items, self.probe, self.project)
+        similar = bom.similar(self.items, bom.user_scan(self.home))
         if not get_current_worker().is_cancelled:  # the app may have closed meanwhile
-            self.call_from_thread(self.show, rows)  # Textual is not thread-safe: update the table on its own thread
+            self.call_from_thread(self.show, rows, similar)  # Textual is not thread-safe: update on its own thread
 
-    def show(self, rows):
-        self.rows = rows
+    def show(self, rows, similar=()):
+        self.rows, self.similar = rows, list(similar)
         self.fill()
         level = bom.worst(rows)  # "worth a look" is still good news: only "needs action" turns the sentence red
-        self.summary.update(
-            Text.assemble(
-                (bom.summary(rows), "bold"),
-                "\n",
-                (bom.next_step(rows), self.colour("good" if level == "warn" else level) or ""),
-                "\n\n",
-                "Press Enter to choose what to set up. c or a click on a path copies it.\n",
-                (LEGEND, "dim"),
-                "\n",
-                (STUCK, "dim"),
-            )
-        )
+        text = Text()
+        if self.project:
+            text.append(f"Project: {self.project}\n", "bold")
+        if self.record:
+            text.append(f"Set up here before on {self.record.get('date')} ({', '.join(self.layers)}).\n", "dim")
+        text.append(bom.summary(rows), "bold")
+        text.append("\n")
+        text.append(bom.next_step(rows), self.colour("good" if level == "warn" else level) or "")
+        if not self.project:
+            text.append(f"\n{NO_PROJECT}", "dim")
+        for line in self.similar:
+            text.append(f"\nAlready on this machine: {line}", "dim")
+        enter = "finish" if self.nothing_left() else "choose what to set up"
+        text.append(f"\n\nPress Enter to {enter}. c or a click on a path copies it.\n")
+        text.append(LEGEND, "dim")
+        text.append(f"\n{STUCK}", "dim")
+        self.summary.update(text)
         self.scanning = False
         self.refresh_bindings()
+
+    def nothing_left(self):
+        """A rerun with nothing to do: Enter goes straight to Done (the short screen)."""
+        return bool(self.record) and not bom.plan(self.items, self.rows, self.layers, self.system, self.project)[0]
 
     def fill(self, width=None):
         """Redraws the table from self.rows; the Path column only on a wide terminal."""
@@ -201,7 +236,7 @@ class SetupApp(App):
             self.copy(self.rows[self.shown[line]][PATH])
 
     def action_agent(self):
-        self.copy(agent_message(self.layers))
+        self.copy(agent_message(self.layers, self.project))
 
     def copy(self, text):
         self.copy_to_clipboard(text)
@@ -212,17 +247,18 @@ class SetupApp(App):
         return COLOURS[level] and getattr(self.current_theme, COLOURS[level])
 
     def action_choose(self):
-        self.push_screen(ChooseScreen())
+        self.push_screen(DoneScreen() if self.nothing_left() else ChooseScreen())
 
-    def run_in_terminal(self, command):
-        """Steps the app aside, runs one bom.toml command in the real terminal, waits for Enter. None: cannot."""
+    def run_in_terminal(self, step):
+        """Steps the app aside, runs one step in the real terminal, waits for Enter. None: cannot."""
+        command = step["command"]
         try:
             with self.suspend():
                 print(f"\nproject-manager setup runs:\n\n    {command}\n", flush=True)
                 if "sudo " in command:
                     print("It asks for your password. Nothing appears while you type it; press Enter at the end.\n")
                 try:
-                    code = subprocess.call(bom.shell_args(command, self.system))
+                    code = subprocess.call(step["shell"])
                 except KeyboardInterrupt:  # Ctrl+C reaches us as well as the installer
                     code = 130
                 except OSError as error:  # the shell itself is missing
@@ -243,7 +279,7 @@ class ChooseScreen(Screen):
 
     SUB_TITLE = "Check · Choose"
     BINDINGS = [
-        Binding("enter", "install", "Review the steps", priority=True),
+        Binding("enter", "install", "Continue", priority=True),
         ("escape", "app.pop_screen", "Back"),
     ]
 
@@ -280,34 +316,29 @@ class ChooseScreen(Screen):
         self.update_steps()
 
     def update_steps(self):
-        self.steps, notes = bom.plan(self.app.items, self.app.rows, self.app.layers, self.app.system)
+        app = self.app
+        self.steps, notes = bom.plan(app.items, app.rows, app.layers, app.system, app.project)
         text = Text()
         for number, step in enumerate(self.steps, 1):
             text.append(f"{number}. {step['name']}", "bold")
             text.append(f"  {step['why']}\n", "dim")
             text.append(f"   {step['command']}\n")
         if not self.steps:
-            text.append(
-                "Nothing can be installed automatically; see the notes." if notes else "Every program is ready."
-            )
-            text.append(
-                "\nThe project files (.pm, hooks, skills) are set up inside your project in the next step.", "dim"
-            )
+            text.append("Nothing can be installed automatically; see the notes." if notes else "Everything is ready.")
+        if not app.project:
+            text.append(f"\n{NO_PROJECT}", "dim")
         for note in notes:
             text.append(f"\nNote: {note}", "dim")
         self.query_one("#steps", Static).update(text)
         if self.steps:
-            hint = f"Press Enter to review these {len(self.steps)} steps. Nothing runs yet."
+            hint = f"Press Enter to review these {len(self.steps)} steps one by one. Nothing runs yet."
         else:
-            hint = "Press Esc to go back or q to quit."
+            hint = "Press Enter to finish, Esc to go back."
         self.query_one("#choose-hint", Static).update(f"{hint}\n{STUCK}")
         self.refresh_bindings()
 
-    def check_action(self, action, parameters):
-        return None if action == "install" and not self.steps else True
-
     def action_install(self):
-        self.app.push_screen(InstallScreen(self.steps))
+        self.app.push_screen(InstallScreen(self.steps) if self.steps else DoneScreen())
 
 
 class InstallScreen(Screen):
@@ -328,6 +359,7 @@ class InstallScreen(Screen):
         self.steps = steps
         self.states = ["waiting"] * len(steps)
         self.messages = [""] * len(steps)
+        self.previews = {}  # step index: what the installer's --check printed, shown before y
         self.quiet_until = 0.0
 
     def compose(self) -> ComposeResult:
@@ -380,6 +412,8 @@ class InstallScreen(Screen):
         panel = self.query_one("#command", Static)
         panel.border_title = f"Step {index + 1} of {len(self.steps)}: {step['name']}"
         text = Text(step["command"], "bold")
+        if step.get("preview") and state != "done":
+            text.append(f"\n\nWhat it will do (nothing is written yet):\n{self.preview(index)}", "dim")
         if message:
             text.append(f"\n\n{message}", self.app.colour(STATES[state][1]) or "")
         panel.update(text)
@@ -388,6 +422,18 @@ class InstallScreen(Screen):
         else:
             hint = "y runs this step here, s skips it, c copies it, ↑↓ pick another step. Nothing runs without y."
         self.query_one("#install-hint", Static).update(f"{hint}\n{STUCK}")
+
+    def preview(self, index):
+        """The installer's own plan for this project (--check, read-only), run once per step and kept."""
+        if index not in self.previews:
+            try:
+                done = subprocess.run(
+                    self.steps[index]["preview"], capture_output=True, text=True, encoding="utf-8", errors="replace"
+                )
+                self.previews[index] = (done.stdout + done.stderr).strip()
+            except OSError as error:
+                self.previews[index] = f"could not ask the installer for its plan: {error}"
+        return self.previews[index]
 
     def final_words(self):
         """What happened, and what is still left, once every step is finished."""
@@ -398,7 +444,7 @@ class InstallScreen(Screen):
         text = f"All steps are finished: {done} of {len(self.steps)} done."
         if left:
             text += f" Still open: {', '.join(left)}."
-        return text + " Press Enter to check everything again."
+        return text + " Press Enter to finish."
 
     def action_run(self):
         index = self.current
@@ -416,7 +462,7 @@ class InstallScreen(Screen):
             )
             self.redraw()
             return
-        code = self.app.runner(step["command"])
+        code = self.app.runner(step)
         self.quiet_until = time.monotonic() + QUIET_S
         if code is None:  # the terminal cannot hand over: the user runs it elsewhere
             self.app.copy(step["command"])
@@ -434,11 +480,17 @@ class InstallScreen(Screen):
     def settle(self, index, code):
         """Re-checks the step's program and stores the new row, so Choose and Check do not plan it again."""
         bom.refresh_path()
-        at = next(i for i, item in enumerate(self.app.items) if item["id"] == self.steps[index]["id"])
-        row = bom.check_one(self.app.items[at], self.app.probe)
-        self.app.rows[at] = row
-        self.app.fill()
-        self.states[index], self.messages[index] = bom.outcome(code, row)
+        app, step = self.app, self.steps[index]
+        rows = []
+        for at, item in enumerate(app.items):
+            if item["id"] in step.get("ids", [step["id"]]):
+                app.rows[at] = bom.check_one(item, app.probe, app.project)
+                rows.append(app.rows[at])
+        app.fill()
+        if "ids" in step:  # the installer step sets up several project items
+            self.states[index], self.messages[index] = bom.project_outcome(code, rows)
+        else:
+            self.states[index], self.messages[index] = bom.outcome(code, rows[0])
         self.advance(index)
 
     def action_skip(self):
@@ -451,9 +503,7 @@ class InstallScreen(Screen):
         self.app.copy(self.steps[self.current]["command"])
 
     def action_finish(self):
-        self.app.pop_screen()
-        self.app.pop_screen()
-        self.app.action_recheck()
+        self.app.switch_screen(DoneScreen())
 
     def advance(self, index):
         """After a finished step, move to the next one not finished; after a failure, stay on it."""
@@ -464,8 +514,99 @@ class InstallScreen(Screen):
         self.redraw()
 
 
+class DoneScreen(Screen):
+    """What is ready, what is left, and how to go on in the project with /pm-setup (DESIGN.md, Done)."""
+
+    SUB_TITLE = "Check · Choose · Install · Done"
+    BINDINGS = [
+        ("o", "open_desktop", "Open in Claude Desktop"),
+        ("c", "copy_next", "Copy commands"),
+        ("escape", "back", "Check again"),
+        ("q", "app.quit", "Quit"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        yield Header()
+        with VerticalScroll(id="body"):
+            yield Static(id="done", classes="panel")
+            yield Static(id="next", classes="panel")
+            yield Static(id="done-hint", classes="hint")
+        yield Footer()
+
+    def on_mount(self):
+        app = self.app
+        steps, notes = bom.plan(app.items, app.rows, app.layers, app.system, app.project)
+        saved = app.project and bom.write_record(app.project, app.layers, app.similar, time.strftime("%Y-%m-%d"))
+        done = self.query_one("#done", Static)
+        done.border_title = "Setup"
+        text = Text()
+        if steps:
+            text.append(f"Still open ({', '.join(app.layers)}): ", app.colour("bad") or "")
+            text.append(", ".join(step["name"] for step in steps))
+            text.append("\nRun setup again to do them, or press a for your coding agent.", "dim")
+        else:
+            text.append(f"✓ Everything for {', '.join(app.layers)} is ready.", app.colour("good") or "")
+        for note in notes:
+            text.append(f"\nNote: {note}", "dim")
+        for line in app.similar:
+            text.append(f"\nAlready on this machine: {line}", "dim")
+        if saved:
+            text.append(f"\nSaved what was chosen in {app.project / bom.RECORD}; a rerun starts from it.", "dim")
+        done.update(text)
+
+        nxt = self.query_one("#next", Static)
+        nxt.border_title = "Next: fit .pm to your project"
+        if not app.project:
+            nxt.update(f"{NO_PROJECT}\nThen run /pm-setup in your coding agent, inside the project.")
+        else:
+            lines = next_lines(app.project)
+            text = Text("In a terminal:\n")
+            for line in lines[:2]:
+                text.append(f"    {line}\n", "bold")
+            text.append("then type ")
+            text.append(lines[2], "bold")
+            text.append(
+                " and press Enter. It asks about your project one question at a time; nothing changes without your yes."
+            )
+            if app.system == "windows":
+                text.append(
+                    "\n\nOr press o: Claude Desktop opens a new Code session in the project; type /pm-setup there.", ""
+                )
+            nxt.update(text)
+        keys = "o opens Claude Desktop, " if self.can_open() else ""
+        self.query_one("#done-hint", Static).update(f"{keys}c copies the commands, Esc checks again, q quits.\n{STUCK}")
+
+    def can_open(self):
+        return self.app.project is not None and self.app.system == "windows"
+
+    def check_action(self, action, parameters):
+        if action == "open_desktop":
+            return self.can_open()
+        if action == "copy_next":
+            return self.app.project is not None
+        return True
+
+    def action_open_desktop(self):
+        try:
+            os.startfile(desktop_link(self.app.project))  # Windows only: the link opens Claude Desktop
+            self.app.notify("Opening Claude Desktop. If nothing opens, use the terminal commands instead.")
+        except OSError as error:
+            self.app.notify(f"Claude Desktop did not open ({error}); use the terminal commands.", severity="warning")
+
+    def action_copy_next(self):
+        self.app.copy("\n".join(next_lines(self.app.project)))
+
+    def action_back(self):
+        while len(self.app.screen_stack) > 1:
+            self.app.pop_screen()
+        self.app.action_recheck()
+
+
 if __name__ == "__main__":
+    folder = sys.argv[1] if len(sys.argv) > 1 else None
+    if folder and not Path(folder).is_dir():
+        sys.exit(f"{folder} is not a folder. Start setup with your project folder, or with none.")
     try:
-        SetupApp().run()
+        SetupApp(project=folder).run()
     except ValueError as error:  # a bad bom.toml entry
         sys.exit(str(error))

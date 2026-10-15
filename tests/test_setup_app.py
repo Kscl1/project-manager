@@ -1,6 +1,8 @@
 """Tests for tools/setup/app.py, headless with a fake probe and runner. Skipped where Textual is not installed (CI)."""
 
+import shutil
 import sys
+import tempfile
 import threading
 import unittest
 from pathlib import Path
@@ -126,7 +128,8 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
         self.ran = []
         codes = codes or {}
 
-        def runner(command):
+        def runner(step):
+            command = step["command"]
             self.ran.append(command)
             code = codes.get(command, 0)
             if code == 0:
@@ -179,11 +182,15 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertTrue(screen.finished)
                 self.assertIn("2 of 2 done", str(screen.query_one("#install-hint").content))
-                await pilot.press("enter")  # finished: Enter goes back and checks everything again
+                await pilot.press("enter")  # finished: Enter shows Done
+                await pilot.pause()
+                self.assertIsInstance(setup.screen, app.DoneScreen)
+                self.assertIn("Everything for core, map is ready", str(setup.screen.query_one("#done").content))
+                self.assertEqual(str(setup.table.get_row_at(1)[4]), "✓ ok")
+                await pilot.press("escape")  # Done: Esc checks everything again
                 await setup.workers.wait_for_complete()
                 await pilot.pause()
-                self.assertNotIsInstance(setup.screen, (app.ChooseScreen, app.InstallScreen))
-                self.assertEqual(str(setup.query_one(app.DataTable).get_row_at(1)[4]), "✓ ok")
+                self.assertNotIsInstance(setup.screen, (app.ChooseScreen, app.InstallScreen, app.DoneScreen))
 
     async def test_resizing_on_install_leaves_its_table_alone(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
@@ -255,7 +262,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_exit_0_but_not_found_is_not_done(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda command: 0, system="linux")
+        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda step: 0, system="linux")
         with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
             async with setup.run_test(size=(120, 35)) as pilot:
                 await self.open_install(setup, pilot)
@@ -278,7 +285,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_terminal_that_cannot_hand_over_copies_and_r_rechecks(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda command: None, system="linux")
+        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda step: None, system="linux")
         copied = []
         with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
             async with setup.run_test(size=(120, 35)) as pilot:
@@ -292,6 +299,91 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("r")
                 await pilot.pause()
                 self.assertEqual(setup.screen.states, ["done"])
+
+
+PROJECT_ITEMS = [
+    {"id": "a", "name": "A", "kind": "command", "layer": "core", "check": ["a"], "min": "1.0", "tested": "1.2",
+     "install": {"all": "get a"}},
+    {"id": "pkg", "name": "Package", "kind": "project-file", "layer": "core", "path": ".pm/VERSION"},
+    {"id": "hooks", "name": "Hooks", "kind": "project-file", "layer": "core", "path": "settings.json", "has": "ours"},
+]  # fmt: skip
+
+
+@unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
+class ProjectTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.project = Path(tempfile.mkdtemp(prefix="setup_project_"))
+        self.home = Path(tempfile.mkdtemp(prefix="setup_home_"))
+        for folder in (self.project, self.home):
+            self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        self.ran = []
+
+    def runner(self, step):
+        """Stands in for pm_init: writes the package stamp, and leaves the user's own settings.json alone."""
+        self.ran.append(step["shell"])
+        (self.project / ".pm").mkdir(exist_ok=True)
+        (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        return 0
+
+    def make(self, system="linux"):
+        found = {"a": ("/bin/a", True, "1.1")}
+        return app.SetupApp(
+            PROJECT_ITEMS, lambda check: found[check[0]], self.runner, system, project=self.project, home=self.home
+        )
+
+    async def test_installer_step_then_done_with_pm_setup(self):
+        (self.project / "settings.json").write_text("{}", encoding="utf-8")  # the user's own file
+        setup = self.make()
+        async with setup.run_test(size=(120, 40)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertIn(f"Project: {self.project}", str(setup.query_one("#summary").content))
+            await pilot.press("enter", "enter")
+            await pilot.pause()
+            screen = setup.screen
+            self.assertIsInstance(screen, app.InstallScreen)
+            self.assertEqual([step["id"] for step in screen.steps], ["pm-init"])
+            panel = str(screen.query_one("#command").content)
+            self.assertIn("--keep-existing", panel)
+            self.assertIn("What it will do", panel)  # the installer's own plan, before y
+            self.assertIn("Plan for", panel)
+            await pilot.press("y")
+            await pilot.pause()
+            self.assertIn("--keep-existing", self.ran[0])
+            self.assertEqual(screen.states, ["done"])  # the user's own settings.json is not the installer's
+            await pilot.press("enter")
+            await pilot.pause()
+            done = setup.screen
+            self.assertIsInstance(done, app.DoneScreen)
+            self.assertIn("/pm-setup", str(done.query_one("#next").content))
+            self.assertIn("Hooks: your own settings.json", str(done.query_one("#done").content))
+            self.assertFalse(done.check_action("open_desktop", ()))  # Linux: terminal commands only
+            record = app.bom.read_record(self.project)
+            self.assertEqual(record["layers"], ["core", "map"])
+
+    async def test_rerun_with_nothing_left_goes_straight_to_done(self):
+        (self.project / ".pm").mkdir()
+        (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        (self.project / "settings.json").write_text("ours", encoding="utf-8")
+        app.bom.write_record(self.project, ("core",), [], "2026-10-15")
+        setup = self.make(system="windows")
+        async with setup.run_test(size=(120, 40)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(setup.layers, ("core",))  # from the record
+            self.assertIn("Set up here before on 2026-10-15", str(setup.query_one("#summary").content))
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIsInstance(setup.screen, app.DoneScreen)
+            self.assertTrue(setup.screen.check_action("open_desktop", ()))
+            self.assertEqual(self.ran, [])
+
+    def test_desktop_link_encodes_the_folder(self):
+        self.assertEqual(
+            app.desktop_link(Path("C:/My Projects/demo")).split("folder=")[1],
+            app.quote(str(Path("C:/My Projects/demo")), safe=""),
+        )
+        self.assertNotIn(" ", app.desktop_link(Path("C:/My Projects/demo")))
 
 
 if __name__ == "__main__":

@@ -130,7 +130,8 @@ class NextStep(unittest.TestCase):
 
     def test_every_status_has_a_level(self):
         statuses = {bom.MISSING, bom.FAILED, bom.UNREADABLE, bom.CANNOT_COMPARE, bom.NOT_CHECKED, bom.BELOW, bom.OK}
-        self.assertEqual(set(bom.LEVEL), statuses | {bom.UNTESTED})
+        project = {bom.IN_PROJECT, bom.NOT_IN_PROJECT, bom.MERGE}
+        self.assertEqual(set(bom.LEVEL), statuses | project | {bom.UNTESTED})
 
     def test_worst_level_wins(self):
         ok, new, gone, skip = (
@@ -374,6 +375,117 @@ class ShippedBom(unittest.TestCase):
                 if "/skills/" in item.get("path", ""):
                     self.assertTrue(item["id"].startswith("pm-"))
                     self.assertTrue(Path(item["path"]).name.startswith("pm-"))
+
+    def test_every_shipped_skill_is_checked(self):
+        shipped = {p.name for p in (bom.PM_INIT.parents[2] / ".agents" / "skills").glob("pm-*")}
+        listed = {Path(item["path"]).name for item in bom.load() if "/skills/" in item.get("path", "")}
+        self.assertEqual(listed, shipped)
+
+
+PROJECT_ITEMS = [
+    {"id": "pkg", "name": "Package", "kind": "project-file", "layer": "core", "path": ".pm/VERSION"},
+    {"id": "hooks", "name": "Hooks", "kind": "project-file", "layer": "core", "path": "settings.json", "has": "ours"},
+    {"id": "map", "name": "Map server", "kind": "project-file", "layer": "map", "path": "mcp.json", "has": "likec4",
+     "similar": ["likec4"]},
+]  # fmt: skip
+
+
+class Project(unittest.TestCase):
+    """Project files: checked only with a project folder, set up by one installer step."""
+
+    def setUp(self):
+        self.project = Path(tempfile.mkdtemp(prefix="bom_project_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.project, ignore_errors=True))
+
+    def rows(self):
+        return bom.check_all(PROJECT_ITEMS, project=self.project)
+
+    def test_not_checked_without_a_project(self):
+        self.assertEqual({row[4] for row in bom.check_all(PROJECT_ITEMS)}, {bom.NOT_CHECKED})
+
+    def test_in_project_missing_and_merge(self):
+        (self.project / ".pm").mkdir()
+        (self.project / ".pm" / "VERSION").write_text("package: x\n", encoding="utf-8")
+        (self.project / "settings.json").write_text("{}", encoding="utf-8")
+        self.assertEqual([row[4] for row in self.rows()], [bom.IN_PROJECT, bom.MERGE, bom.NOT_IN_PROJECT])
+        self.assertEqual(self.rows()[0][5], str(self.project / ".pm/VERSION"))
+
+    def test_missing_files_become_one_installer_step(self):
+        steps, notes = bom.plan(PROJECT_ITEMS, self.rows(), ("core", "map"), "linux", self.project)
+        self.assertEqual([step["id"] for step in steps], ["pm-init"])
+        step = steps[0]
+        self.assertEqual(step["ids"], ["pkg", "hooks", "map"])
+        self.assertEqual(step["shell"][1:], [str(bom.PM_INIT), str(self.project), "--keep-existing", "--map"])
+        self.assertIn("--check", step["preview"])
+        self.assertNotIn("--keep-existing", step["preview"])
+        core_only = bom.plan(PROJECT_ITEMS, self.rows(), ("core",), "linux", self.project)[0][0]
+        self.assertNotIn("--map", core_only["shell"])
+
+    def test_own_file_without_our_part_is_a_note(self):
+        (self.project / "settings.json").write_text("{}", encoding="utf-8")
+        steps, notes = bom.plan(PROJECT_ITEMS[1:2], self.rows()[1:2], ("core",), "linux", self.project)
+        self.assertEqual(steps, [])
+        self.assertIn("/pm-setup merges it with you", notes[0])
+
+    def test_installer_outcome(self):
+        ok = ("A", "-", "-", "-", bom.IN_PROJECT, "p")
+        merge = ("B", "-", "-", "-", bom.MERGE, "p")
+        absent = ("C", "-", "-", "-", bom.NOT_IN_PROJECT, "p")
+        self.assertEqual(bom.project_outcome(0, [ok])[0], "done")
+        self.assertEqual(bom.project_outcome(0, [ok, merge])[0], "merge")
+        self.assertIn("B", bom.project_outcome(0, [ok, merge])[1])
+        self.assertEqual(bom.project_outcome(0, [absent])[0], "unverified")
+        self.assertEqual(bom.project_outcome(3, [ok])[0], "failed")
+
+    def test_next_step_names_project_files_plainly(self):
+        self.assertEqual(bom.next_step(self.rows()), "Next: set up the project files (3 not in your project yet).")
+
+    def test_record_needs_pm_and_reads_back(self):
+        self.assertFalse(bom.write_record(self.project, ("core",), [], "2026-10-15"))
+        (self.project / ".pm").mkdir()
+        self.assertTrue(bom.write_record(self.project, ("core", "map"), ["x"], "2026-10-15"))
+        record = bom.read_record(self.project)
+        self.assertEqual(record["layers"], ["core", "map"])
+        self.assertEqual(record["bom"], bom.bom_hash())
+        self.assertEqual(record["source"], str(bom.PM_INIT.parents[3]))
+
+    def test_main_with_project(self):
+        with patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = bom.main(["--project", str(self.project)], lambda check: ("/bin/x", True, "999.0"))
+        self.assertEqual(code, 1)
+        self.assertIn(".pm and project files", out.getvalue())
+        with patch("sys.stderr"):
+            self.assertEqual(bom.main(["--project", str(self.project / "nope")]), 2)
+
+
+class UserScan(unittest.TestCase):
+    """Names of what the user already has; never the configuration behind them."""
+
+    def test_names_only_and_similar(self):
+        home = Path(tempfile.mkdtemp(prefix="bom_home_"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(home, ignore_errors=True))
+        for folder, name in ((".claude/skills", "likec4-dsl"), (".agents/skills", "notes")):
+            (home / folder / name).mkdir(parents=True)
+            (home / folder / name / "SKILL.md").write_text("---\n---\n", encoding="utf-8")
+        server = {"type": "http", "url": "https://example.test", "headers": {"KEY": "secret-value"}}
+        (home / ".claude.json").write_text(json.dumps({"mcpServers": {"likec4": server}}), encoding="utf-8")
+        (home / ".claude" / "plugins").mkdir(parents=True)
+        plugins = {"version": 2, "plugins": {"likec4@market": []}}
+        (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(plugins), encoding="utf-8")
+
+        scan = bom.user_scan(home)
+
+        self.assertEqual(scan, {"skills": ["likec4-dsl", "notes"], "mcp": ["likec4"], "plugins": ["likec4"]})
+        self.assertNotIn("secret-value", json.dumps(scan))
+        lines = bom.similar(PROJECT_ITEMS, scan)
+        self.assertEqual(len(lines), 1)
+        self.assertIn("skill likec4-dsl, MCP server likec4, plugin likec4", lines[0])
+        self.assertEqual(bom.similar(PROJECT_ITEMS, scan, ("core",)), [])
+
+    def test_empty_home(self):
+        self.assertEqual(
+            bom.user_scan(tempfile.gettempdir() + "/no-such-home"), {"skills": [], "mcp": [], "plugins": []}
+        )
 
 
 if __name__ == "__main__":

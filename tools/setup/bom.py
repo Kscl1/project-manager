@@ -4,11 +4,13 @@ Standard library only, so the tests and the plain-text output run without Textua
 anything: it runs each command item's version check with a timeout and works out which steps are left (plan());
 the TUI runs a step only after the user presses Enter on it.
 
-usage: python tools/setup/bom.py [--layers core,map] [--json]
-       the check table and the To do list for this machine; exit 0 when nothing is left, 1 when steps are left
+usage: python tools/setup/bom.py [--layers core,map] [--project FOLDER] [--json]
+       the check table and the To do list for this machine (and the project's files with --project);
+       exit 0 when nothing is left, 1 when steps or notes are left
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -40,18 +42,26 @@ NOT_CHECKED = "not checked"
 BELOW = "below minimum"
 OK = "ok"
 UNTESTED = "not tested yet"
+IN_PROJECT = "in project"
+NOT_IN_PROJECT = "not in project"
+MERGE = "merge by hand"  # the file is the user's own and lacks our part; the installer never edits it
 
 # How much each status asks of the user: good (nothing), warn (works, worth a look), bad (act), skip (not checked).
 LEVEL = {
     OK: "good",
+    IN_PROJECT: "good",
     UNTESTED: "warn",
     CANNOT_COMPARE: "warn",
     UNREADABLE: "warn",
+    MERGE: "warn",
     BELOW: "bad",
     FAILED: "bad",
     MISSING: "bad",
+    NOT_IN_PROJECT: "bad",
     NOT_CHECKED: "skip",
 }
+PM_INIT = Path(__file__).resolve().parents[2] / "template" / ".pm" / "tools" / "pm_init.py"
+RECORD = Path(".pm") / "local" / "setup.json"  # in the project: what setup did there, for a rerun and for /pm-setup
 
 
 def load(path=BOM):
@@ -93,6 +103,8 @@ def load(path=BOM):
                 raise ValueError(f'{where}: {key} takes {key}.<os> = "command" with <os> one of {", ".join(SYSTEMS)}')
         if item["kind"] == "project-file" and not item.get("path"):
             raise ValueError(f"{where}: a project-file item needs a path")
+        if not all(isinstance(name, str) for name in item.get("similar", [])):
+            raise ValueError(f"{where}: similar takes a list of names")
     return items
 
 
@@ -151,9 +163,22 @@ def probe(check, timeout=TIMEOUT_S):
     return path, True, parse_version(done.stdout + done.stderr)
 
 
-def check_one(item, run=probe):
-    """The row for one item: name, installed, minimum, tested, status, path. Only command items are run."""
+def project_status(item, project):
+    """in project, not in project, or merge by hand: the file is there but lacks the item's `has` text."""
+    path = Path(project) / item["path"]
+    if not path.exists():
+        return NOT_IN_PROJECT
+    if item.get("has") and item["has"] not in path.read_text(encoding="utf-8", errors="replace"):
+        return MERGE
+    return IN_PROJECT
+
+
+def check_one(item, run=probe, project=None):
+    """The row for one item: name, installed, minimum, tested, status, path. Only command items are run;
+    project files are looked at only when a project folder is given."""
     minimum, tested = item.get("min") or "-", item.get("tested") or "-"
+    if item["kind"] == "project-file" and project is not None:
+        return item["name"], "-", minimum, tested, project_status(item, project), str(Path(project) / item["path"])
     if item["kind"] != "command":
         return item["name"], "-", minimum, tested, NOT_CHECKED, item.get("path", "-")
     path, ran_ok, version = run(item["check"])
@@ -161,9 +186,9 @@ def check_one(item, run=probe):
     return item["name"], version or "-", minimum, tested, result, path or "-"
 
 
-def check_all(items, run=probe):
+def check_all(items, run=probe, project=None):
     """One row per item, in bom.toml order (check_one)."""
-    return [check_one(item, run) for item in items]
+    return [check_one(item, run, project) for item in items]
 
 
 def this_os():
@@ -171,19 +196,30 @@ def this_os():
     return {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
 
 
-def plan(items, rows, layers=LAYERS, system=None):
+def plan(items, rows, layers=LAYERS, system=None, project=None):
     """(steps, notes) for the ticked layers on this OS, from the check rows (DESIGN.md, Steps).
 
     A step is a dict: id, name, why (the status), command (the text to run), needs (the program that runs it),
     shell (the argument list that runs it) and check (the command that verifies it afterwards). Only a missing or
     below-minimum command item becomes a step. One without a command for this OS, or one that is installed but
     could not be verified (check failed, version unreadable or cannot compare), is a note: never ready.
+    Project files not in the project become one last step, the installer (init_step); a user's own file that lacks
+    our part is a note for /pm-setup.
     """
     system = system or this_os()
-    steps, notes = [], []
+    steps, notes, absent = [], [], []
     for item, row in zip(items, rows):
         result = row[4]
-        if item["layer"] not in layers or result in (OK, UNTESTED, NOT_CHECKED):
+        if item["layer"] not in layers or result in (OK, UNTESTED, NOT_CHECKED, IN_PROJECT):
+            continue
+        if result == NOT_IN_PROJECT:
+            absent.append(item["id"])
+            continue
+        if result == MERGE:
+            notes.append(
+                f"{item['name']}: your own {item['path']} does not have it yet; the installer never edits your file, "
+                "/pm-setup merges it with you (the entry is in .pm/templates/root/)."
+            )
             continue
         if result in (FAILED, UNREADABLE, CANNOT_COMPARE):
             notes.append(
@@ -212,7 +248,115 @@ def plan(items, rows, layers=LAYERS, system=None):
                 "check": item["check"],
             }
         )
+    if absent and project is not None:
+        steps.append(init_step(project, layers, absent))
     return steps, notes
+
+
+def init_step(project, layers, ids):
+    """The step that runs pm_init into the project. --keep-existing because the user reads its plan first (preview):
+    the project's own AGENTS.md, hooks or settings are kept and listed for /pm-setup, never overwritten."""
+    flags = ["--keep-existing", *(["--map"] if "map" in layers else [])]
+    args = [sys.executable, str(PM_INIT), str(project), *flags]
+    return {
+        "id": "pm-init",
+        "ids": ids,  # the project items it sets up, checked again afterwards
+        "name": ".pm and project files",
+        "why": f"{len(ids)} not in project",
+        "command": " ".join(f'"{a}"' if " " in a else a for a in ["python", str(PM_INIT), str(project), *flags]),
+        "needs": sys.executable,
+        "shell": args,
+        "preview": [*args[:3], "--check", *flags[1:]],  # read-only: prints every write and what is kept
+        "check": None,
+    }
+
+
+def project_outcome(code, rows):
+    """Like outcome(), for the installer step, from its exit code and the re-checked project rows."""
+    if code not in (0, None):
+        return "failed", f"the installer failed (exit code {code}). Read its output; y tries again, s skips it."
+    absent = [row[0] for row in rows if row[4] == NOT_IN_PROJECT]
+    merge = [row[0] for row in rows if row[4] == MERGE]
+    if absent:
+        return "unverified", f"still not in the project: {', '.join(absent)}."
+    if merge:
+        return "merge", (
+            f"done. Yours to merge with /pm-setup: {', '.join(merge)} (listed in .pm/local/merge-by-hand.md)."
+        )
+    return "done", "done, the project files are in place."
+
+
+def user_scan(home=None):
+    """Names of the skills, MCP servers and plugins the user already has, for the similar-items note (DESIGN.md).
+
+    Only names are read: never a server's command, headers or keys. Missing or unreadable files give empty lists.
+    """
+    home = Path(home or Path.home())
+    skills = sorted(
+        {p.parent.name for folder in (".claude/skills", ".agents/skills") for p in (home / folder).glob("*/SKILL.md")}
+    )
+
+    def keys(path, *where):
+        try:
+            data = json.loads((home / path).read_text(encoding="utf-8"))
+            for key in where:
+                data = data.get(key) or {}
+            return sorted(data) if isinstance(data, dict) else []
+        except (OSError, ValueError, AttributeError):
+            return []
+
+    return {
+        "skills": skills,
+        "mcp": keys(".claude.json", "mcpServers"),
+        "plugins": [name.split("@")[0] for name in keys(".claude/plugins/installed_plugins.json", "plugins")],
+    }
+
+
+def similar(items, scan, layers=LAYERS):
+    """One sentence per package item the user already has something like (bom.toml `similar`)."""
+    lines = []
+    for item in items:
+        if item["layer"] not in layers or not item.get("similar"):
+            continue
+        found = [
+            f"{kind} {name}"
+            for kind, names in (("skill", scan["skills"]), ("MCP server", scan["mcp"]), ("plugin", scan["plugins"]))
+            for name in names
+            if any(name == alias or name.startswith(alias + "-") for alias in item["similar"])
+        ]
+        if found:
+            lines.append(
+                f"{item['name']}: you already have {', '.join(found)}. Both stay; /pm-setup asks which to use."
+            )
+    return lines
+
+
+def read_record(project):
+    try:
+        return json.loads((Path(project) / RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def write_record(project, layers, similar_lines, today):
+    """Keep what setup did in the project (git-ignored), once .pm/ is there: the rerun and /pm-setup read it."""
+    if not (Path(project) / ".pm").is_dir():
+        return False
+    record = {
+        "source": str(PM_INIT.parents[3]),
+        "layers": list(layers),
+        "bom": bom_hash(),
+        "date": today,
+        "similar": similar_lines,
+    }
+    path = Path(project) / RECORD
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
+    return True
+
+
+def bom_hash(path=BOM):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()[:12]
 
 
 def needs(command, system=None):
@@ -296,8 +440,11 @@ def worst(rows):
 def next_step(rows):
     """One plain sentence on what to do now, from the worst status in the table."""
     named = {level: [f"{row[0]} ({row[4]})" for row in rows if LEVEL[row[4]] == level] for level in set(LEVEL.values())}
+    programs = [name for name in named["bad"] if not name.endswith(f"({NOT_IN_PROJECT})")]
+    if programs:
+        return f"Next: install or update {', '.join(programs)}, then check again."
     if named["bad"]:
-        return f"Next: install or update {', '.join(named['bad'])}, then check again."
+        return f"Next: set up the project files ({len(named['bad'])} not in your project yet)."
     if named["warn"]:
         return f"All programs are installed. Worth a look: {', '.join(named['warn'])}."
     if named["good"]:
@@ -323,21 +470,27 @@ def main(argv=None, run=probe):
     parser = argparse.ArgumentParser(description="Check this machine against bom.toml and list what is left to do.")
     parser.add_argument("--layers", default=",".join(LAYERS), help="comma-separated layers (default: %(default)s)")
     parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
+    parser.add_argument("--project", help="the project folder: also check its project files")
     args = parser.parse_args(argv)
     layers = tuple(layer.strip() for layer in args.layers.split(",") if layer.strip())
     try:
         if not layers or set(layers) - set(LAYERS):
             raise ValueError(f"--layers takes {', '.join(LAYERS)}")
+        if args.project and not Path(args.project).is_dir():
+            raise ValueError(f"--project: {args.project} is not a folder")
         items = load()
     except (ValueError, OSError) as error:  # a bad entry, or bom.toml missing or unreadable
         print(error, file=sys.stderr)
         return 2
-    rows = check_all(items, run)
-    steps, notes = plan(items, rows, layers)
+    project = Path(args.project).resolve() if args.project else None
+    rows = check_all(items, run, project)
+    steps, notes = plan(items, rows, layers, project=project)
+    alike = similar(items, user_scan(), layers)  # information only: never a reason to stop
     if args.json:
         keys = ("name", "installed", "minimum", "tested", "status", "path")
         table = [{"id": item["id"], "layer": item["layer"], **dict(zip(keys, row))} for item, row in zip(items, rows)]
-        print(json.dumps({"os": this_os(), "layers": layers, "items": table, "steps": steps, "notes": notes}, indent=1))
+        found = {"os": this_os(), "layers": layers, "items": table, "steps": steps, "notes": notes, "similar": alike}
+        print(json.dumps(found, indent=1))
         return 1 if steps or notes else 0
     widths = [max(len(str(r[i])) for r in [COLUMNS, *rows]) for i in range(len(COLUMNS))]
     for row in [COLUMNS, *rows]:
@@ -357,6 +510,8 @@ def main(argv=None, run=probe):
         print(f"To do on {this_os()} ({', '.join(layers)}): nothing, every program these layers need is ready.")
     for note in notes:
         print(f"Note: {note}")
+    for line in alike:
+        print(f"Already on this machine: {line}")
     if steps:
         print("Show the user each command and run it only after they say yes; then run this again until it exits 0.")
     return 1 if steps or notes else 0

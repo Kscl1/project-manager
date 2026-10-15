@@ -2,12 +2,14 @@
 #
 # id      stable key, never renamed.
 # kind    command: the TUI runs `check` (a command and its arguments, never a shell line) and reads the version.
-#         project-file: lives in the user's project at `path`; not checked yet.
+#         project-file: lives in the user's project at `path`, checked when setup is given the project folder;
+#         `has` is text the file must hold (a file of the user's own without it is "merge by hand").
 #         manual: nothing on the machine to check.
 # min     below it the TUI warns. tested: above it the TUI says "not tested yet". Until an older version has been
 #         tried, min equals tested. Leave both out when unknown. Command items need both.
 # install.* and upgrade.* run through the platform shell only after the user presses Enter on that step (DESIGN.md);
 # note is text shown to the user. upgrade.<os> is used for an item below its minimum when install does not upgrade.
+# similar: names of skills, MCP servers or plugins the user may already have that do the same job (shown, never removed).
 
 # Core: required for the first trial.
 
@@ -77,8 +79,7 @@ id = "pm-package"
 name = ".pm package"
 kind = "project-file"
 layer = "core"
-path = ".pm"
-install.all = "python <product>/template/.pm/tools/pm_init.py <project>"
+path = ".pm/VERSION"  # written by pm_init, which sets up every project-file item below
 
 [[item]]
 id = "pm-hooks"
@@ -86,6 +87,7 @@ name = "Opener and compaction hooks"
 kind = "project-file"
 layer = "core"
 path = ".claude/settings.json"
+has = "pm_board.py --resume"
 
 [[item]]
 id = "context7-mcp"
@@ -93,6 +95,8 @@ name = "Context7 MCP"
 kind = "project-file"
 layer = "core"
 path = ".mcp.json"
+has = '"context7"'
+similar = ["context7"]
 note = "Configured in the project; the scan does not start the server."
 
 [[item]]
@@ -102,6 +106,7 @@ kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-grilling"
 ref = "mattpocock/skills@49dd158 (grilling)"
+similar = ["grilling"]
 
 [[item]]
 id = "pm-grill-me"
@@ -110,6 +115,7 @@ kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-grill-me"
 ref = "mattpocock/skills@49dd158 (grill-me)"
+similar = ["grill-me"]
 
 [[item]]
 id = "pm-scratch"
@@ -117,6 +123,7 @@ name = "Skill pm-scratch"
 kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-scratch"
+similar = ["scratch"]
 
 [[item]]
 id = "pm-feedback"
@@ -124,6 +131,14 @@ name = "Skill pm-feedback"
 kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-feedback"
+
+[[item]]
+id = "pm-setup"
+name = "Skill pm-setup"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-setup"
+note = "Run /pm-setup in your coding agent after this setup: it fits .pm to your project with you."
 
 # Map: optional in the first trial.
 
@@ -143,3 +158,5 @@ name = "LikeC4 MCP"
 kind = "project-file"
 layer = "map"
 path = ".mcp.json"
+has = '"likec4"'
+similar = ["likec4"]
