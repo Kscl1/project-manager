@@ -1,0 +1,43 @@
+// The shelf architecture map. Update it when a component, an external system or a data flow changes.
+
+specification {
+  element actor
+  element system
+  element component
+  element storage
+}
+
+model {
+  reader = actor 'Reader' {
+    description 'Keeps a reading list from the terminal'
+  }
+
+  shelf = system 'shelf' {
+    cli = component 'CLI' {
+      description 'shelf/cli.py: parses add and list'
+    }
+    store = component 'Store' {
+      description 'shelf/store.py: loads and saves the list'
+    }
+    books = storage 'books.json' {
+      description 'The reading list, one JSON file'
+    }
+
+    cli -> store 'adds and lists books'
+    store -> books 'reads and writes'
+  }
+
+  reader -> shelf.cli 'runs commands'
+}
+
+views {
+  view index {
+    title 'shelf'
+    include *
+  }
+
+  view inside of shelf {
+    title 'Inside shelf'
+    include *
+  }
+}
