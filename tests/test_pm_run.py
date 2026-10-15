@@ -619,12 +619,26 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         with log.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "message", "message": {"role": "assistant", "stopReason": "error"}}) + "\n")
         os.utime(log, (1000, 1000))  # the clock is patched; keep the write in its past
-        self.assertEqual(len(self.tick_at(run, state, 1200, **consts)), 3, "the log grew, so the nudge was not idle")
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir(exist_ok=True)
+        out.write_text("# a\n\nhalf done\n", encoding="utf-8")
+        self.assertEqual(len(self.tick_at(run, state, 1200, **consts)), 3, "log and output changed: not idle")
         self.assertEqual(len(self.tick_at(run, state, 1300, **consts)), 3, "no growth: the budget of one is used")
         self.assertEqual(state["a"]["state"], "handed-over")
         self.assertEqual(len(state["a"]["attempts"]), 1)
         self.assertIn("1 nudges in a row brought no new work", attempt["why"])
         self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
+
+    def test_nudges_that_leave_the_output_unchanged_use_the_idle_budget(self):
+        run, log, attempt, state = self.settled_worker()
+        consts = {"QUIET_S": 0, "MAX_NUDGES": 1}
+        self.assertEqual(len(self.tick_at(run, state, 1100, **consts)), 2)
+        with log.open("a", encoding="utf-8") as f:  # the worker answers the nudge but does not touch its output
+            f.write(json.dumps({"type": "message", "message": {"role": "assistant", "stopReason": "stop"}}) + "\n")
+        os.utime(log, (1000, 1000))
+        self.assertEqual(len(self.tick_at(run, state, 1200, **consts)), 2, "the log grew but the output did not")
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertIn("1 nudges in a row brought no new work", attempt["why"])
 
     def test_settled_turn_selects_full_brief_or_self_contained_resume(self):
         for seq, worked, no_seq, expected in (
