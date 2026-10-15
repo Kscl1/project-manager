@@ -268,6 +268,26 @@ class PmInitTest(unittest.TestCase):
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7", "likec4"})
 
+    def test_map_skill_comes_with_map_and_then_stays(self):
+        skill = self.root / ".agents" / "skills" / "pm-likec4-dsl"
+        self.assertEqual(self.run_init().returncode, 0)
+        self.assertFalse(skill.exists())
+        self.assertFalse((self.root / ".claude" / "skills" / "pm-likec4-dsl").exists())
+
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)  # map chosen later
+        self.assertTrue((skill / "LICENSE").is_file())
+        self.assertTrue((skill / "references" / "model.md").is_file())
+        pointer = (self.root / ".claude" / "skills" / "pm-likec4-dsl" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(pointer.startswith("---\nname: pm-likec4-dsl\n"))
+
+        (skill / "SKILL.md").write_text("old\n", encoding="utf-8")
+        result = self.run_init(self.root, "--upgrade")  # an upgrade without --map keeps the map skill current
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((skill / "SKILL.md").read_bytes(), (SKILLS / "pm-likec4-dsl" / "SKILL.md").read_bytes())
+        manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
+        self.assertIn("  .agents/skills/pm-likec4-dsl/SKILL.md", manifest)
+
     def test_map_later_lists_likec4_and_rewrites_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = (self.root / ".mcp.json").read_bytes()

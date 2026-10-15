@@ -86,9 +86,9 @@ python template/.pm/tools/pm_init.py ../my-project
 
 ## Map layer (optional)
 
-[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.59.4 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
+[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.59.4 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.59.4) teaches it the syntax; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
 
-The swarm layer (Pi, Herdr and parallel workers) comes in a later release. You do not need it to start.
+The swarm layer (Pi, Herdr and parallel workers) comes in a later release. You do not need it to start. If you already use [Pi](https://github.com/earendil-works/pi), it finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
 
 ## After setup: /pm-setup
 
