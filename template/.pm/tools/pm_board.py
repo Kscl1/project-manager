@@ -1,4 +1,4 @@
-"""Turkish status board for the Backlog.md task files. Standard library only.
+"""Status board in English for the Backlog.md task files. Standard library only.
 
 Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD] [--tree | --resume | --did [DAY] | --commits TASK]
 """
@@ -20,15 +20,9 @@ def find_root(start):
 
 ROOT = find_root(Path(__file__).resolve().parent)
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
-ACIL_LIMIT = 1
-STATUS = {
-    "Active": "Devam ediyor",
-    "In review": "İncelemede",
-    "Owner check": "Sahip kontrolü",
-    "Ready": "Sırada",
-    "Done": "Bitti",
-}
-SECTIONS = ["Devam ediyor", "İncelemede", "Sahip kontrolü", "Sırada", "Bitti"]
+URGENT_LIMIT = 1
+# The Backlog status names, in board order; a task with any other status goes to "Other".
+SECTIONS = ["Active", "In review", "Owner check", "Ready", "Done"]
 
 
 def default_tasks_dir():
@@ -92,7 +86,7 @@ def read_task(path):
         "status": fields.get("status", ""),
         "type": fields.get("type", ""),
         "parent": fields.get("parent_task_id", ""),
-        "acil": "urgent" in labels or "acil" in labels,
+        "urgent": "urgent" in labels or "acil" in labels,
     }
 
 
@@ -102,16 +96,16 @@ def order(task):
 
 
 def line(task):
-    return f"- {task['id']} · {task['title']}" + (" (acil)" if task["acil"] else "")
+    return f"- {task['id']} · {task['title']}" + (" (urgent)" if task["urgent"] else "")
 
 
 def section(name, tasks):
-    items = "\n".join(line(t) for t in sorted(tasks, key=order)) or "- (yok)"
+    items = "\n".join(line(t) for t in sorted(tasks, key=order)) or "- (none)"
     return f"## {name}\n{items}"
 
 
 def tree_block(tasks, today):
-    """The Epic tree with direct-child progress as Turkish Markdown."""
+    """The Epic tree with direct-child progress as Markdown."""
     by_id = {task["id"]: task for task in tasks}
     children = {}
     for task in tasks:
@@ -127,8 +121,7 @@ def tree_block(tasks, today):
             return []
         seen.add(task["id"])
         kids = sorted(children.get(task["id"], []), key=order)
-        name = STATUS.get(task["status"], task["status"])
-        text = f"{'  ' * depth}{line(task)} · {name}"
+        text = f"{'  ' * depth}{line(task)} · {task['status']}"
         if task["type"] == "epic" or kids:
             done = sum(1 for kid in kids if kid["status"] == "Done")
             text += f" [{done}/{len(kids)}]"
@@ -138,7 +131,7 @@ def tree_block(tasks, today):
         return out
 
     roots = [t for t in tasks if not t["parent"] and (t["type"] == "epic" or has_children(t))]
-    lines = [f"# Epic ağacı ({today})"]
+    lines = [f"# Epic tree ({today})"]
     seen = set()
     for root in sorted(roots, key=order):
         lines.extend(render(root, 0, seen))
@@ -152,20 +145,18 @@ def tree_block(tasks, today):
     if orphans:
         orphan_lines = []
         for orphan in sorted(orphans, key=order):
-            orphan_lines.append(
-                f"{line(orphan)} · {STATUS.get(orphan['status'], orphan['status'])} (ebeveyn yok: {orphan['parent']})"
-            )
+            orphan_lines.append(f"{line(orphan)} · {orphan['status']} (no parent: {orphan['parent']})")
             seen.add(orphan["id"])
             for kid in sorted(children.get(orphan["id"], []), key=order):
                 orphan_lines.extend(render(kid, 1, seen))
-        blocks.append("## Sahipsiz\n" + "\n".join(orphan_lines))
+        blocks.append("## Orphans\n" + "\n".join(orphan_lines))
 
     # Cycles: tasks with an existing parent that no root reaches (finding 2).
     cycle_ids = _cycle_ids(tasks, by_id, seen)
     if cycle_ids:
         cycle_tasks = sorted((by_id[cid] for cid in cycle_ids), key=order)
-        items = "\n".join(f"{line(t)} · {STATUS.get(t['status'], t['status'])} (döngü)" for t in cycle_tasks)
-        blocks.append(f"## Döngü\n{items}")
+        items = "\n".join(f"{line(t)} · {t['status']} (cycle)" for t in cycle_tasks)
+        blocks.append(f"## Cycle\n{items}")
 
     return "\n\n".join(blocks)
 
@@ -197,7 +188,7 @@ def _cycle_ids(tasks, by_id, seen):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    parser = argparse.ArgumentParser(description="Print a Turkish status board from Backlog tasks.")
+    parser = argparse.ArgumentParser(description="Print an English status board from Backlog tasks.")
     parser.add_argument("--tasks", default=None)
     parser.add_argument("--today", default=date.today().isoformat())
     parser.add_argument("--tree", action="store_true", help="print only the Epic tree")
@@ -230,30 +221,33 @@ def main():
     by = {name: [] for name in SECTIONS}
     other = []
     for task in tasks:
-        name = STATUS.get(task["status"])
+        name = task["status"] if task["status"] in SECTIONS else None
         (other if name is None else by[name]).append(task)
 
-    in_scope = by["Devam ediyor"] + by["İncelemede"] + by["Sahip kontrolü"]
-    wip = sum(1 for t in in_scope if not t["acil"] and not t["parent"])  # sub-tasks are not limited
-    acil = sum(1 for t in in_scope if t["acil"])
-    devam = len(by["Devam ediyor"])
-    inceleme = len(by["İncelemede"])
-    owner = len(by["Sahip kontrolü"])
-    sirada, biten = len(by["Sırada"]), len(by["Bitti"])
+    in_scope = by["Active"] + by["In review"] + by["Owner check"]
+    wip = sum(1 for t in in_scope if not t["urgent"] and not t["parent"])  # sub-tasks are not limited
+    urgent = sum(1 for t in in_scope if t["urgent"])
+    active = len(by["Active"])
+    in_review = len(by["In review"])
+    owner_check = len(by["Owner check"])
+    ready, done = len(by["Ready"]), len(by["Done"])
 
     blocks = [
-        f"# Durum panosu ({args.today})",
-        f"WIP: {wip}/{WIP_LIMIT} · Acil: {acil}/{ACIL_LIMIT} · Devam ediyor: {devam} · İncelemede: {inceleme} · Sahip kontrolü: {owner} · Sırada: {sirada} · Biten: {biten}",
+        f"# Status board ({args.today})",
+        (
+            f"WIP: {wip}/{WIP_LIMIT} · Urgent: {urgent}/{URGENT_LIMIT} · Active: {active}"
+            f" · In review: {in_review} · Owner check: {owner_check} · Ready: {ready} · Done: {done}"
+        ),
     ]
     if wip > WIP_LIMIT:
-        blocks.append(f"⚠️ WIP sınırı aşıldı: {wip}/{WIP_LIMIT}")
-    if acil > ACIL_LIMIT:
-        blocks.append(f"⚠️ Acil şerit dolu: {acil}/{ACIL_LIMIT}")
-    if sirada < 2:
-        blocks.append(f"Hazır: {sirada} (< 2) → planlama zamanı")
+        blocks.append(f"⚠️ WIP limit exceeded: {wip}/{WIP_LIMIT}")
+    if urgent > URGENT_LIMIT:
+        blocks.append(f"⚠️ Urgent lane full: {urgent}/{URGENT_LIMIT}")
+    if ready < 2:
+        blocks.append(f"Ready: {ready} (< 2) → time to plan")
     blocks += [section(name, by[name]) for name in SECTIONS]
     if other:
-        blocks.append(section("Diğer", other))
+        blocks.append(section("Other", other))
 
     print("\n\n".join(blocks))
     return 0

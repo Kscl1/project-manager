@@ -22,6 +22,7 @@ python .pm/tools/pm_board.py --resume          # git and active-task handoff
 python .pm/tools/pm_board.py --tree            # Epic → package → leaf
 backlog browser                                # create and edit tasks
 python .pm/tools/pm_check.py --stale          # doc freshness hints
+python -m unittest discover -s .pm/tests      # the package's own tests
 ```
 
 Edit task fields in Backlog's browser; documents are plain Markdown, read in any editor (D-98). `--resume` and `--tree` are board interfaces (D-45, D-51); verify the installed version supports them.
