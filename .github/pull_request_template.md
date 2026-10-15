@@ -1,4 +1,5 @@
 <!-- Public repo: no private task or decision IDs, no people, no local paths, no agent session links.
+     When a private decision drives the change, give its reason in plain words instead of its ID.
      Length tracks the change: a one-line fix gets one line here. -->
 
 ## What and why
