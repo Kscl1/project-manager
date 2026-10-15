@@ -18,7 +18,36 @@ It is not a framework or a harness. It is a folder of conventions (`.pm/`), one 
 
 ## Install
 
-See `template/README.md`.
+You need Python 3.11 or newer, Git, and the [Backlog.md](https://github.com/MrLesk/Backlog.md) CLI 1.52 or newer (`npm i -g backlog.md`, which needs Node.js). On Windows, use `python`; the `python3` alias there is a stub.
+
+1. Clone this repo **next to** your project, not inside it:
+
+   ```bash
+   git clone https://github.com/Kscl1/project-manager.git
+   ```
+
+2. Your project must be a git repository. For a new project, create the folder and run `git init` in it first.
+
+3. From your project folder, install the package and check it:
+
+   ```bash
+   python ../project-manager/template/.pm/tools/pm_init.py . --name my-project
+   python .pm/tools/pm_check.py
+   ```
+
+   The installer copies `template/.pm/` to `.pm/`, writes `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` if they are missing, and sets git's hooks path to `.pm/hooks`. `pm_check` should print `No problems found`.
+
+4. Open your first task. Use `backlog browser`, or the command line:
+
+   ```bash
+   backlog task create "Add a hello script" --type task --ac "python hello.py prints hello" --ac "README says how to run it"
+   ```
+
+   Tasks are Markdown files in `.pm/backlog/tasks/`. Each `--ac` adds one acceptance criterion; `pm_check` needs every open task to have a `--type` (`epic`, `package`, `task` or `bug`).
+
+5. Commit. The pre-commit hook runs `pm_check` on staged docs.
+
+Then read `.pm/README.md` in your project. Upgrades and installs into an existing project are covered in `template/README.md`.
 
 ## Status
 
