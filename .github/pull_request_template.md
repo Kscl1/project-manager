@@ -1,17 +1,13 @@
-<!-- Title: type(scope): what this change does, short and imperative, e.g. "docs(readme): give the first install step by step". -->
+<!-- Public or future-public repo: no private task or decision IDs, no people, no local machine paths. -->
 
 ## What and why
-
-<!-- What changes, and why this way. The first sentence should make sense on its own. -->
+<!-- State the change and the reason briefly. -->
 
 ## How it was tested
-
-<!-- The commands you ran and what they showed; say what was not tested. -->
+<!-- Name the relevant CI check; add only evidence it does not show (command or scenario, and the result) and any gaps. If untested, say why. -->
 
 ## Risks and follow-ups
-
-<!-- What could break, what you left out on purpose, what comes next. "None" is fine. -->
+<!-- Only concrete caveats, dependencies or follow-ups. Delete this section if there are none. -->
 
 Refs: none
-
-<!-- Refs: #<issue> when there is one. This repo is or will be public: name no private task or decision IDs, no people and no paths from your own machine. -->
+<!-- Use #<issue> from this repo, or none. -->
