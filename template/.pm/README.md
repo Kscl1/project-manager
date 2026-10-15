@@ -21,9 +21,10 @@ The project's work system, installed inside its own repository. Start at the roo
 | Seed | `.pm/README.md`, `board.md`, `principles.md`, `models.md` | Written once if missing; then owned by the project and kept on upgrade. |
 | Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md`, `specs/`, `backlog/`, `worklog/` | Never overwritten. |
 
-A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
 | Root adapters | `AGENTS.md`, `CLAUDE.md`, `backlog.config.yml` | Written only when absent. Review an existing file manually. |
 | Machine-local | `.pm/local/`, worker `.pm-report.md` files, `.worktrees/` | Not distributed or committed. |
+
+A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
 
 The package lives in git, including tasks, decisions, specs and delivery records. Ignore only `.pm/local/`, `.pm-report.md` and `.worktrees/` as appropriate. Product code, tests and living product docs stay in the product's own directories. Do not use `backlog decision` or `backlog doc`: decisions live in `.pm/decisions/`, one file each with `.pm/decisions.md` as the index, product documentation in `docs/`. Backlog may recreate empty internal directories; they are not extra sources of truth.
 

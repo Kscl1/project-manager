@@ -4,14 +4,14 @@
 
 ## Install
 
-Install from this repo's `template/.pm/`, or from any project that already has `.pm/`:
+The step-by-step first install is in the root `README.md`. The general form:
 
 ```text
-python <source>/.pm/tools/pm_init.py <target> [--name NAME] [--upgrade]
+python <source>/.pm/tools/pm_init.py <target> [--name NAME] [--upgrade [--dry-run]]
 python <target>/.pm/tools/pm_check.py
 ```
 
-`<source>` is the repo containing `template/.pm/` or a project that already has `.pm/`; `<target>` is an existing target repo. Bracketed flags are optional. The installer fills missing root adapters and sets `core.hooksPath` to `.pm/hooks`. It adds ignore rules for `.pm/local/`, `.pm-report.md` and `.worktrees/`. Review any existing root `AGENTS.md` for compatibility: the installer does not overwrite it.
+`<source>` is the folder that holds the package's `.pm/`: this repo's `template/` folder (so the script is `template/.pm/tools/pm_init.py`), or any project that already has `.pm/`. `<target>` is your project folder; it should be a git repository (run `git init` first), otherwise the installer cannot set the hooks path. Keep the source clone outside `<target>`. Bracketed flags are optional; `--dry-run` works only with `--upgrade`. The installer fills missing root adapters and sets `core.hooksPath` to `.pm/hooks`. It adds ignore rules for `.pm/local/`, `.pm-report.md` and `.worktrees/`. Review any existing root `AGENTS.md` for compatibility: the installer does not overwrite it.
 
 For an existing project, repeat the command with `--upgrade` to refresh **package files** only. Project data (`.pm/backlog/`, `decisions.md`, `decisions/`, `worklog/`, `specs/`, `charter.md`, `lessons.md`) must remain untouched. The upgrade compares package files with the hash manifest written at install and backs up the old ones; there is no automatic merge, so inspect local customizations to package files before upgrading.
 
