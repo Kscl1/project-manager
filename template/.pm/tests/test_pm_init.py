@@ -268,6 +268,42 @@ class PmInitTest(unittest.TestCase):
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7", "likec4"})
 
+    def test_map_skill_comes_with_map_and_then_stays(self):
+        skill = self.root / ".agents" / "skills" / "pm-likec4-dsl"
+        self.assertEqual(self.run_init().returncode, 0)
+        self.assertFalse(skill.exists())
+        self.assertFalse((self.root / ".claude" / "skills" / "pm-likec4-dsl").exists())
+
+        dry = self.run_init(self.root, "--upgrade", "--map", "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("pm-likec4-dsl  (new in the package)", dry.stdout)
+        self.assertFalse(skill.exists())
+
+        # A core-only project cannot be the source of a map install: it has no map skill to copy.
+        other = Path(tempfile.mkdtemp(prefix="pm_other_"))
+        self.addCleanup(shutil.rmtree, other, onerror=_remove_readonly)
+        installed = self.root / ".pm" / "tools" / "pm_init.py"
+        from_core = subprocess.run(
+            [sys.executable, str(installed), str(other), "--map"], capture_output=True, text=True, encoding="utf-8"
+        )
+        self.assertNotEqual(from_core.returncode, 0)
+        self.assertIn("no pm-likec4-dsl", from_core.stderr)
+        self.assertFalse((other / ".pm").exists())
+
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)  # map chosen later
+        self.assertTrue((skill / "LICENSE").is_file())
+        self.assertTrue((skill / "references" / "model.md").is_file())
+        pointer = (self.root / ".claude" / "skills" / "pm-likec4-dsl" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(pointer.startswith("---\nname: pm-likec4-dsl\n"))
+
+        (skill / "SKILL.md").write_text("old\n", encoding="utf-8")
+        result = self.run_init(self.root, "--upgrade")  # an upgrade without --map keeps the map skill current
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((skill / "SKILL.md").read_bytes(), (SKILLS / "pm-likec4-dsl" / "SKILL.md").read_bytes())
+        manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
+        self.assertIn("  .agents/skills/pm-likec4-dsl/SKILL.md", manifest)
+
     def test_map_later_lists_likec4_and_rewrites_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = (self.root / ".mcp.json").read_bytes()

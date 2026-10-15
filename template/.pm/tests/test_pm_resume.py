@@ -267,6 +267,41 @@ class ResumeSummaryTest(unittest.TestCase):
         warnings = self.warnings_section(self.run_resume().stdout)
         self.assertIn("(2025-06-02-0900-new.md) are done now: TASK-1, TASK-1.1\n", warnings)
 
+    def commit_files(self, message, *paths):
+        for path in paths:
+            (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / path).write_text("x\n", encoding="utf-8")
+        run_git(self.root, "add", "-A")
+        run_git(self.root, "commit", "-m", message)
+
+    def test_warns_when_folders_change_after_the_map(self):
+        # No map, no warning: the map layer is optional (D-118).
+        self.commit_files("start", "src/app/main.py")
+        self.commit_files("more", "src/lib/util.py")
+        self.assertNotIn("Map may be", self.warnings_section(self.run_resume().stdout))
+
+        self.commit_files("map", "map/model.c4")
+        # New files in known folders, docs, dot-folders and the map's own folder are no structural change.
+        self.commit_files("same shape", "src/app/cli.py", "docs/guide/a.md", ".github/x.yml", "map/sub/b.c4")
+        self.assertNotIn("Map may be", self.warnings_section(self.run_resume().stdout))
+
+        self.commit_files("new module", "src/store/db.py")
+        run_git(self.root, "rm", "-q", "src/lib/util.py")
+        run_git(self.root, "commit", "-m", "drop lib")
+        warnings = self.warnings_section(self.run_resume().stdout)
+        self.assertIn("Map may be out of date", warnings)
+        self.assertIn(": src/lib, src/store\n", warnings)
+
+        # The map catches up: the warning goes away.
+        (self.root / "map" / "model.c4").write_text("y\n", encoding="utf-8")
+        run_git(self.root, "commit", "-am", "map store")
+        self.assertNotIn("Map may be", self.warnings_section(self.run_resume().stdout))
+
+        # A map kept beside the code does not hide that code's folders.
+        self.commit_files("map beside code", "src/model.c4")
+        self.commit_files("new module", "src/api/routes.py")
+        self.assertIn(": src/api\n", self.warnings_section(self.run_resume().stdout))
+
     def test_last_closed_tasks_show_their_summary_newest_first(self):
         self.commit_subjects(["setup"])
 

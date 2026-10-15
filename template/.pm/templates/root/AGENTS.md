@@ -22,7 +22,7 @@ Workers: skip this section; your brief names your tools. The lead picks the tool
 | Situation | Do | Why |
 |---|---|---|
 | The user asks for a change, fix or study | On your own: a Backlog task with acceptance criteria first (`backlog task create`) | The work, its evidence and its result have one home |
-| A component, module, service or link between them was added, removed or renamed | On your own: update the LikeC4 map and run `npx likec4 validate` | The next model reads the map, not this chat |
+| A component, module, service or link between them was added, removed or renamed | On your own: update the LikeC4 map (DSL in the `pm-likec4-dsl` skill) and run `npx likec4 validate` | The next model reads the map, not this chat |
 | You need a library's, framework's or API's syntax, config or setup | On your own: look it up with Context7 | Current docs beat a model's memory |
 | A piece of work or a long lookup can run apart from you | On your own, within the models in `.pm/models.md`: a worker or helper in a visible pane (`.pm/roles/lead.md`) | The user sees and can stop every agent |
 | A plan or design is about to be settled with questions still open | Offer once: `/pm-grill-me` | Gaps show up before the work, not after |

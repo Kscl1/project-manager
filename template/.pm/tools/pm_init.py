@@ -5,7 +5,9 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--che
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
 - Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them (D-49).
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code (D-116);
-  --upgrade replaces them too. The project's own skills are never touched.
+  --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
+  deleted.
+  The project's own skills are never touched.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
   run pm_board --resume when a session starts and after a compaction) and .mcp.json (Context7; LikeC4 with --map).
@@ -53,6 +55,7 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
 SKILLS = PKG.parent / ".agents" / "skills"  # shipped skills sit next to the package; theirs all start with pm- (D-116)
+MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -86,15 +89,21 @@ def read_manifest(target):
     return {name: digest for digest, name in pairs}
 
 
-def shipped_skills():
-    return sorted(p for p in SKILLS.glob("pm-*") if (p / "SKILL.md").is_file())
+def shipped_skills(target, map_layer=False):
+    """The pm-* skills next to the package; a map skill only with --map or once the project has it."""
+    return sorted(
+        p
+        for p in SKILLS.glob("pm-*")
+        if (p / "SKILL.md").is_file()
+        and (p.name not in MAP_SKILLS or map_layer or (target / ".agents" / "skills" / p.name).exists())
+    )
 
 
-def package_parts(target):
+def package_parts(target, map_layer=False):
     """Yield (source, installed copy, manifest key prefix) for every package folder; skills are keyed from the root."""
     for part in PACKAGE:
         yield PKG / part, target / ".pm" / part, part
-    for skill in shipped_skills():
+    for skill in shipped_skills(target, map_layer):
         yield skill, target / ".agents" / "skills" / skill.name, f".agents/skills/{skill.name}"
 
 
@@ -405,7 +414,7 @@ def plan(target, args, conflicts):
     """Every change the install makes, as (action, path relative to the project, note), before anything is written.
     main() makes exactly these changes; the tests check that no file is written outside this list."""
     entries, copies = [], 0
-    for _, dst, _ in package_parts(target):
+    for _, dst, _ in package_parts(target, args.map):
         if not dst.exists():
             entries.append(("copy", dst, ""))
         elif args.upgrade:
@@ -413,7 +422,7 @@ def plan(target, args, conflicts):
         else:
             continue
         copies += 1
-    for skill in shipped_skills():
+    for skill in shipped_skills(target, args.map):
         pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
         if not pointer.exists() or args.upgrade:
             entries.append(("write", pointer, "points Claude Code to the skill"))
@@ -458,7 +467,7 @@ def main(argv=None):
     parser.add_argument("--name", help="Backlog project name (default: the target folder name)")
     parser.add_argument("--upgrade", action="store_true", help="replace package files; project data is never touched")
     parser.add_argument("--dry-run", action="store_true", help="with --upgrade: list what would change, write nothing")
-    parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server to a new .mcp.json")
+    parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server and skill")
     parser.add_argument("--check", action="store_true", help="print the plan and the conflicts, write nothing")
     parser.add_argument(
         "--keep-existing", action="store_true", help="install even if the project has its own AGENTS.md, hooks..."
@@ -471,6 +480,9 @@ def main(argv=None):
     if (target / ".pm").resolve() == PKG:
         sys.exit("this is the package's own project; install into another folder")
     name = args.name or target.name
+    missing = sorted(MAP_SKILLS - {p.name for p in SKILLS.glob("pm-*")}) if args.map else []
+    if missing:  # an installed project used as the source carries only the layers it chose
+        sys.exit(f"--map: this package has no {', '.join(missing)}; install from the project-manager checkout")
     conflicts = find_conflicts(target)
     first = not (target / ".pm" / "VERSION").exists()
     stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
@@ -499,8 +511,14 @@ def main(argv=None):
         if not args.upgrade:
             sys.exit("--dry-run only makes sense with --upgrade")
         total = sum(
-            report_changes(src, dst, part, manifest) for src, dst, part in package_parts(target) if dst.exists()
+            report_changes(src, dst, part, manifest)
+            for src, dst, part in package_parts(target, args.map)
+            if dst.exists()
         )
+        for _, dst, _ in package_parts(target, args.map):
+            if not dst.exists():
+                say("new", dst, NOTES["new"])
+                total += 1
         print(
             f"\nDry run: {total} package file(s) would change; nothing was written."
             + ("" if manifest else " No manifest yet: run one real upgrade to record one.")
@@ -508,9 +526,9 @@ def main(argv=None):
         return 0
     merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
-    for src, dst, part in package_parts(target):
+    for src, dst, part in package_parts(target, args.map):
         copy_dir(src, dst, args.upgrade, backup, manifest, part)
-    for skill in shipped_skills():
+    for skill in shipped_skills(target, args.map):
         write_pointer(skill, target, args.upgrade)
     write_manifest(target)
     for part in SEED:

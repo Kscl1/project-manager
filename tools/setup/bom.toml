@@ -160,3 +160,12 @@ layer = "map"
 path = ".mcp.json"
 has = '"likec4"'
 similar = ["likec4"]
+
+[[item]]
+id = "pm-likec4-dsl"
+name = "Skill pm-likec4-dsl"
+kind = "project-file"
+layer = "map"
+path = ".agents/skills/pm-likec4-dsl"
+ref = "likec4/likec4@v1.59.4 (likec4-dsl)"
+similar = ["likec4-dsl"]

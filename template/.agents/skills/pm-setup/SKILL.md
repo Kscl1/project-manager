@@ -49,7 +49,7 @@ One child task per item; split a large item if needed. Do not ask the whole list
 7. **Charter.** If `.pm/charter.md` is missing, build it from `.pm/templates/charter.md`, in small questions: why the project exists, for whom, what is out of scope, what result counts as success. Fill its links from real project paths. Leave review gates the template names as pending; never mark them passed.
 8. **Models.** Go through `.pm/models.md` with the user: which roles they need and which accounts or tools they already have. Do not ask them to buy anything or store a credential. A role nobody can fill stays recorded as open.
 9. **Similar tools.** For each `similar` line in `setup.json`, ask which one the user wants to use: ours, theirs or both. Both may stay; a duplicate MCP server is harmless but costs context. Remove nothing of theirs; note the choice in the task.
-10. **Map.** Only if `map` is in the chosen layers: check that `.mcp.json` names `likec4` (item 6 adds it when listed), then offer to draw a first small model of the project's main parts with the user, and check it with `npx likec4@1.59.4 validate`. Map not chosen: skip this item and say so.
+10. **Map.** Only if `map` is in the chosen layers: check that `.mcp.json` names `likec4` (item 6 adds it when listed), then offer to draw a first small model of the project's main parts with the user (the `pm-likec4-dsl` skill holds the syntax), and check it with `npx likec4@1.59.4 validate`. Map not chosen: skip this item and say so.
 
 If an item is blocked, move to the next independent one and record the dependency. If a later change affects an earlier answer, check it again.
 
