@@ -25,15 +25,15 @@ from pathlib import Path
 SCRIPT_SOURCE = Path(__file__).resolve().parent.parent / "tools" / "pm_resume.py"
 
 HEADINGS = [
-    "# Devam özeti",
-    "## Git durumu",
-    "## Son 5 commit",
-    "## Açık görevler",
-    "## Senden beklenenler",
-    "## Uyarılar",
+    "# Resume summary",
+    "## Git status",
+    "## Last 5 commits",
+    "## Open tasks",
+    "## Waiting on the owner",
+    "## Warnings",
 ]
 
-ACTIVE_TASK_LINE = "- TASK-1.2 · Package B: resume summary [Devam ediyor]"
+ACTIVE_TASK_LINE = "- TASK-1.2 · Package B: resume summary [Active]"
 LIVE_LINES = [
     "  Next: Run tests",
     "  Evidence: abc123 passed 4 tests",
@@ -45,7 +45,7 @@ LIVE_LINES = [
 # lines without the two-space output indent.
 LIVE_BLOCK = "\n".join(line.lstrip() for line in LIVE_LINES)
 
-MISSING_WORKER_BLOCK = "Next: Bekle\nWorker: GPT-6 Luna · .worktrees/missing · .worktrees/missing/.pm-report.md"
+MISSING_WORKER_BLOCK = "Next: Wait\nWorker: GPT-6 Luna · .worktrees/missing · .worktrees/missing/.pm-report.md"
 
 NO_WORKER_BLOCK = "Next: Run tests\nEvidence: abc123 passed 4 tests\nBlocker: none\nNeeds owner: nothing"
 
@@ -133,8 +133,8 @@ class ResumeSummaryTest(unittest.TestCase):
         )
 
     def warnings_section(self, out):
-        self.assertIn("## Uyarılar", out)
-        return out.split("## Uyarılar", 1)[1]
+        self.assertIn("## Warnings", out)
+        return out.split("## Warnings", 1)[1]
 
     def test_heading_order_and_git_sections(self):
         subjects = [
@@ -164,57 +164,57 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertNotIn(subjects[0], out)
 
     def test_active_task_live_block_and_status_filter(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=LIVE_BLOCK)
-        write_task(self.root, "TASK-2.2", "Hazir paket", "Ready")
-        write_task(self.root, "TASK-3.3", "Inceleme paketi", "In review", notes="Next: Review bekle")
-        write_task(self.root, "TASK-4.4", "Sahip paketi", "Owner check", notes="Next: Onay bekle")
-        write_task(self.root, "TASK-5.5", "Bitmis paket", "Done")
+        write_task(self.root, "TASK-2.2", "Ready package", "Ready")
+        write_task(self.root, "TASK-3.3", "Review package", "In review", notes="Next: Awaiting review")
+        write_task(self.root, "TASK-4.4", "Owner check package", "Owner check", notes="Next: Awaiting approval")
+        write_task(self.root, "TASK-5.5", "Done package", "Done")
 
         result = self.run_resume()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        out = result.stdout.split("## Açık görevler", 1)[1].split("## Senden beklenenler", 1)[0]
+        out = result.stdout.split("## Open tasks", 1)[1].split("## Waiting on the owner", 1)[0]
         self.assertIn(ACTIVE_TASK_LINE, out)
         for line in LIVE_LINES:
             self.assertIn(line, out)
         self.assertIn("TASK-3.3", out)
-        self.assertIn("[İncelemede]", out)
+        self.assertIn("[In review]", out)
         self.assertIn("TASK-4.4", out)
-        self.assertIn("[Sahip kontrolü]", out)
+        self.assertIn("[Owner check]", out)
         self.assertNotIn("TASK-2.2", out)
-        self.assertNotIn("Hazir paket", out)
+        self.assertNotIn("Ready package", out)
         self.assertNotIn("TASK-5.5", out)
-        self.assertNotIn("Bitmis paket", out)
+        self.assertNotIn("Done package", out)
 
     def test_owner_section_lists_open_tasks_waiting_on_owner(self):
-        self.commit_subjects(["kurulum"])
-        write_task(self.root, "TASK-1", "Hazir", "Ready", notes="Needs owner: A/B/C seçimi")
-        write_task(self.root, "TASK-2", "Aktif", "Active", notes="Needs owner: none")
-        write_task(self.root, "TASK-3", "Bitmis", "Done", notes="Needs owner: eski istek")
-        write_task(self.root, "TASK-4", "Sessiz", "Ready")
-        write_task(self.root, "TASK-5", "Sablon", "Active", notes="Needs owner: nothing")
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-1", "Ready", "Ready", notes="Needs owner: A/B/C choice")
+        write_task(self.root, "TASK-2", "Active", "Active", notes="Needs owner: none")
+        write_task(self.root, "TASK-3", "Done", "Done", notes="Needs owner: old request")
+        write_task(self.root, "TASK-4", "Silent", "Ready")
+        write_task(self.root, "TASK-5", "Template", "Active", notes="Needs owner: nothing")
 
         result = self.run_resume()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        section = result.stdout.split("## Senden beklenenler", 1)[1].split("## Bekleyen", 1)[0]
-        self.assertIn("- TASK-1 [Sırada]: A/B/C seçimi", section)
+        section = result.stdout.split("## Waiting on the owner", 1)[1].split("## Waiting", 1)[0]
+        self.assertIn("- TASK-1 [Ready]: A/B/C choice", section)
         self.assertNotIn("TASK-2", section)
         self.assertNotIn("TASK-3", section)
         self.assertNotIn("TASK-4", section)
         self.assertNotIn("TASK-5", section)
 
     def test_owner_line_with_a_parenthetical_counts(self):
-        self.commit_subjects(["kurulum"])
-        write_task(self.root, "TASK-1", "Iki lead", "Active", notes="Needs owner (both leads agree): dört karar")
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-1", "Two leads", "Active", notes="Needs owner (both leads agree): four decisions")
 
         result = self.run_resume()
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        section = result.stdout.split("## Senden beklenenler", 1)[1].split("## Bekleyen", 1)[0]
-        self.assertIn("- TASK-1 [Devam ediyor]: dört karar", section)
+        section = result.stdout.split("## Waiting on the owner", 1)[1].split("## Waiting", 1)[0]
+        self.assertIn("- TASK-1 [Active]: four decisions", section)
 
     def test_warns_when_commits_follow_the_newest_worklog(self):
         worklog_dir = self.root / ".pm" / "worklog"
@@ -252,15 +252,15 @@ class ResumeSummaryTest(unittest.TestCase):
         text = "## Asked\n\n1. TASK-1\n\n## Next: resume here\n\n1. TASK-1, then TASK-1.1.\n2. TASK-2.\n\n## Found\n\nTASK-3\n"
         (worklog_dir / "2025-06-02-0900-new.md").write_text(text, encoding="utf-8")
         write_task(self.root, "TASK-2", "Open", "Active", notes="Next: more")
-        self.assertNotIn("Next bölümünde", self.warnings_section(self.run_resume().stdout))
+        self.assertNotIn("are done now", self.warnings_section(self.run_resume().stdout))
 
         for task_id in ("TASK-1", "TASK-1.1", "TASK-3"):
             write_task(self.root, task_id, "Closed", "Done")
         warnings = self.warnings_section(self.run_resume().stdout)
-        self.assertIn("(2025-06-02-0900-new.md) Next bölümünde artık biten görevler: TASK-1, TASK-1.1\n", warnings)
+        self.assertIn("(2025-06-02-0900-new.md) are done now: TASK-1, TASK-1.1\n", warnings)
 
     def test_last_closed_tasks_show_their_summary_newest_first(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
 
         def done(task_id, title, updated, summary, folder="tasks"):
             path = write_task(self.root, task_id, title, "Done")
@@ -283,8 +283,8 @@ class ResumeSummaryTest(unittest.TestCase):
         write_task(self.root, "TASK-6", "Still open", "Ready", notes="Next: later")
 
         out = self.run_resume().stdout
-        self.assertLess(out.index("## Son 5 commit"), out.index("## Son kapanan görevler"))
-        section = out.split("## Son kapanan görevler", 1)[1].split("\n## ", 1)[0]
+        self.assertLess(out.index("## Last 5 commits"), out.index("## Recently closed tasks"))
+        section = out.split("## Recently closed tasks", 1)[1].split("\n## ", 1)[0]
         order = [line.split(" · ")[0] for line in section.splitlines() if line.startswith("- ")]
         self.assertEqual(order, ["- TASK-4", "- TASK-3", "- TASK-2"])
         self.assertIn(
@@ -349,13 +349,13 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertNotIn("Model C", out, "TASK-1.1 and TASK-10 are other tasks")
 
     def test_no_closed_section_without_done_tasks(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1", "Open", "Ready", notes="Next: later")
-        self.assertNotIn("## Son kapanan görevler", self.run_resume().stdout)
+        self.assertNotIn("## Recently closed tasks", self.run_resume().stdout)
 
     def test_drafts_listed_only_when_present(self):
-        self.commit_subjects(["kurulum"])
-        self.assertNotIn("## Taslaklar", self.run_resume().stdout)
+        self.commit_subjects(["setup"])
+        self.assertNotIn("## Drafts", self.run_resume().stdout)
         draft = write_task(self.root, "task-9", "Private idea", "Draft")
         drafts_dir = self.root / ".pm" / "backlog" / "drafts"
         drafts_dir.mkdir(parents=True, exist_ok=True)
@@ -365,35 +365,35 @@ class ResumeSummaryTest(unittest.TestCase):
 
         out = self.run_resume().stdout
 
-        self.assertIn("## Taslaklar\n- DRAFT-1 · Private idea", out)
-        self.assertLess(out.index("## Taslaklar"), out.index("## Uyarılar"))
+        self.assertIn("## Drafts\n- DRAFT-1 · Private idea", out)
+        self.assertLess(out.index("## Drafts"), out.index("## Warnings"))
 
     def test_weekly_audit_warning_until_a_recent_weekly_run(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         audits = self.root / ".pm" / "local" / "audits"
 
-        self.assertIn("Haftalık belge kontrolü zamanı (hiç çalışmadı)", self.warnings_section(self.run_resume().stdout))
+        self.assertIn("Weekly doc audit due (never ran)", self.warnings_section(self.run_resume().stdout))
 
         (audits / "weekly-2020-01-01").mkdir(parents=True)
         (audits / "weekly-2020-01-01" / "lead-verification.md").write_text("all true\n", encoding="utf-8")
-        self.assertIn("(son: 2020-01-01)", self.warnings_section(self.run_resume().stdout))
+        self.assertIn("(last: 2020-01-01)", self.warnings_section(self.run_resume().stdout))
 
         today = audits / f"weekly-{date.today().isoformat()}"
         today.mkdir()
         (audits / "delivery-2099-01-01").mkdir()
-        self.assertIn("(son: 2020-01-01)", self.warnings_section(self.run_resume().stdout), "an empty folder counts")
+        self.assertIn("(last: 2020-01-01)", self.warnings_section(self.run_resume().stdout), "an empty folder counts")
 
         (today / "lead-verification.md").write_text("\n", encoding="utf-8")
-        self.assertIn("(son: 2020-01-01)", self.warnings_section(self.run_resume().stdout), "an empty file counts")
+        self.assertIn("(last: 2020-01-01)", self.warnings_section(self.run_resume().stdout), "an empty file counts")
 
         (today / "lead-verification.md").write_text("15 findings, all true\n", encoding="utf-8")
-        self.assertNotIn("Haftalık belge kontrolü", self.run_resume().stdout)
+        self.assertNotIn("Weekly doc audit", self.run_resume().stdout)
 
     def held_section(self, out):
-        return out.split("## Bekleyen ve eskiyen işler", 1)[1].split("## Uyarılar", 1)[0]
+        return out.split("## Waiting and ageing work", 1)[1].split("## Warnings", 1)[0]
 
     def test_held_section_lists_stale_ready_tasks_and_passed_review_dates(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         future = (date.today() + timedelta(days=30)).isoformat()
         write_task(self.root, "TASK-1", "Old and silent", "Ready")
         write_task(self.root, "TASK-2", "Held with a date", "Ready", notes=f"Review by: {future} · Sam · after TASK-9")
@@ -403,16 +403,16 @@ class ResumeSummaryTest(unittest.TestCase):
 
         section = self.held_section(self.run_resume().stdout)
 
-        self.assertIn("WIP): 1/7 · Sırada: 4", section)
+        self.assertIn("WIP): 1/7 · Ready: 4", section)
         self.assertIn("💤 TASK-1 ·", section)
-        self.assertIn("(açılış 2025-06-01): Old and silent", section)
+        self.assertIn("(opened 2025-06-01): Old and silent", section)
         self.assertNotIn("TASK-2", section)
-        self.assertIn("⏰ TASK-3 · gözden geçirme tarihi geçti: 2025-07-01", section)
+        self.assertIn("⏰ TASK-3 · review date passed: 2025-07-01", section)
         self.assertNotIn("TASK-4", section)
         self.assertNotIn("TASK-5", section)
 
     def test_passed_review_date_shows_for_open_tasks_of_any_status(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         passed = "Review by: 2025-07-01 · Sam · after TASK-9"
         for task_id, status in (("TASK-1", "Active"), ("TASK-2", "In review"), ("TASK-3", "Owner check")):
             write_task(self.root, task_id, f"Followup {task_id}", status, notes=passed)
@@ -421,11 +421,11 @@ class ResumeSummaryTest(unittest.TestCase):
         section = self.held_section(self.run_resume().stdout)
 
         for task_id in ("TASK-1", "TASK-2", "TASK-3"):
-            self.assertIn(f"⏰ {task_id} · gözden geçirme tarihi geçti", section)
+            self.assertIn(f"⏰ {task_id} · review date passed", section)
         self.assertNotIn("TASK-4", section)
 
     def test_age_counts_from_the_newest_reviewed_date_and_ignores_updated_date(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         old, recent = (date.today() - timedelta(days=40)).isoformat(), (date.today() - timedelta(days=3)).isoformat()
         write_task(self.root, "TASK-1", "Reviewed twice", "Ready", notes=f"Reviewed: {old}\nReviewed: {recent}")
         path = write_task(self.root, "TASK-2", "Touched lately", "Ready", notes="Next: a plain note")
@@ -443,10 +443,10 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertNotIn("TASK-1", section)
         self.assertIn("💤 TASK-2 ·", section)
         self.assertNotIn("TASK-3", section)
-        self.assertIn("💤 TASK-4 · 15 gündür", section)
+        self.assertIn("💤 TASK-4 · waiting 15 days", section)
 
     def test_wip_counts_top_level_tasks_only(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1", "Epic", "Active")
         write_task(self.root, "TASK-1.1", "Leaf", "Active")
         write_task(self.root, "TASK-2", "Finished parent", "Active")
@@ -462,7 +462,7 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("WIP): 2/7 ·", self.held_section(self.run_resume().stdout))
 
     def test_report_findings_skip_fenced_examples_and_other_sections(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         report = self.root / ".pm" / "local" / "audits" / "weekly-2025-06-01" / "report.md"
         report.parent.mkdir(parents=True)
         report.write_text(
@@ -478,44 +478,48 @@ class ResumeSummaryTest(unittest.TestCase):
 
         warnings = self.warnings_section(self.run_resume().stdout)
 
-        self.assertIn("Sonuçsuz denetim: TASK-1 bulgu 2 için sonuç yok", warnings)
+        self.assertIn("Audit without outcomes: TASK-1 has no outcome for finding 2", warnings)
         for number in ("99", "77", "88"):
             self.assertNotIn(number, warnings)
 
     def test_open_audit_task_without_outcomes_warns(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         report = self.root / ".pm" / "local" / "audits" / "weekly-2025-06-01" / "report.md"
         report.parent.mkdir(parents=True)
         report.write_text("## Findings\n\n| # | Where |\n|---|---|\n| 1 | a |\n| 2 | b |\n", encoding="utf-8")
         line = "Audit report: .pm/local/audits/weekly-2025-06-01/report.md"
         write_task(self.root, "TASK-1", "Audit", "Active", notes=line)
 
-        self.assertIn("Sonuçsuz denetim: TASK-1 bulgulara", self.warnings_section(self.run_resume().stdout))
+        self.assertIn(
+            "Audit without outcomes: TASK-1 has no outcome written for its findings",
+            self.warnings_section(self.run_resume().stdout),
+        )
 
         table = (
             "Audit outcomes:\n| # | Verified | Outcome | Evidence |\n|---|---|---|---|\n| 1 | yes | fixed | abc1234 |"
         )
         write_task(self.root, "TASK-1", "Audit", "Active", notes=line + "\n" + table)
         self.assertIn(
-            "Sonuçsuz denetim: TASK-1 bulgu 2 için sonuç yok", self.warnings_section(self.run_resume().stdout)
+            "Audit without outcomes: TASK-1 has no outcome for finding 2",
+            self.warnings_section(self.run_resume().stdout),
         )
 
         write_task(self.root, "TASK-1", "Audit", "Active", notes=line + "\n" + table + "\n| 2 | yes | asked | TASK-1 |")
-        self.assertNotIn("Sonuçsuz denetim", self.run_resume().stdout)
+        self.assertNotIn("Audit without outcomes", self.run_resume().stdout)
 
     def test_owner_section_lists_drafts_waiting_on_owner(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         drafts = self.root / ".pm" / "backlog" / "drafts"
         drafts.mkdir(parents=True)
         draft = write_task(self.root, "DRAFT-1", "Private idea", "Draft", notes="Needs owner: try the shortcut")
         draft.rename(drafts / "draft-1 - private-idea.md")
 
-        section = self.run_resume().stdout.split("## Senden beklenenler", 1)[1].split("## Bekleyen", 1)[0]
+        section = self.run_resume().stdout.split("## Waiting on the owner", 1)[1].split("## Waiting", 1)[0]
 
-        self.assertIn("- DRAFT-1 [Taslak]: try the shortcut", section)
+        self.assertIn("- DRAFT-1 [Draft]: try the shortcut", section)
 
     def test_backlog_section_markers_preserve_live_block(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
         write_task(
             self.root,
@@ -530,27 +534,27 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for line in LIVE_LINES:
             self.assertIn(line, result.stdout)
-        self.assertNotIn("Sahipsiz worktree: .worktrees/b1-resume", self.warnings_section(result.stdout))
+        self.assertNotIn("Orphan worktree: .worktrees/b1-resume", self.warnings_section(result.stdout))
 
     def test_warnings_for_orphan_missing_and_pending_report(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("orphan")
         self.make_worktree("b1-resume", with_report=True)
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=LIVE_BLOCK)
-        write_task(self.root, "TASK-9.9", "Kayip worktree", "Active", notes=MISSING_WORKER_BLOCK)
+        write_task(self.root, "TASK-9.9", "Lost worktree", "Active", notes=MISSING_WORKER_BLOCK)
 
         result = self.run_resume()
 
         self.assertEqual(result.returncode, 0, result.stderr)
         out = result.stdout
         section = self.warnings_section(out)
-        self.assertIn("- ⚠️ Sahipsiz worktree: .worktrees/orphan", section)
-        self.assertIn("- ⚠️ Eksik worktree: TASK-9.9", section)
-        self.assertIn("- ⚠️ Bekleyen rapor: .worktrees/b1-resume/.pm-report.md", section)
-        self.assertNotIn("- (yok)", section)
+        self.assertIn("- ⚠️ Orphan worktree: .worktrees/orphan", section)
+        self.assertIn("- ⚠️ Missing worktree: TASK-9.9", section)
+        self.assertIn("- ⚠️ Pending report: .worktrees/b1-resume/.pm-report.md", section)
+        self.assertNotIn("- (none)", section)
 
     def test_multiple_worker_lines_render_and_reference_worktrees(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
         self.make_worktree("b2-resume-tests")
         notes = (
@@ -570,11 +574,11 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("Worker: GPT-6 Luna · .worktrees/b1-resume", out)
         self.assertIn("Worker: Kimi K3 · .worktrees/b2-resume-tests", out)
         section = self.warnings_section(out)
-        self.assertNotIn("Sahipsiz worktree: .worktrees/b1-resume", section)
-        self.assertNotIn("Sahipsiz worktree: .worktrees/b2-resume-tests", section)
+        self.assertNotIn("Orphan worktree: .worktrees/b1-resume", section)
+        self.assertNotIn("Orphan worktree: .worktrees/b2-resume-tests", section)
 
     def test_missing_worktree_warns_per_worker(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         notes = (
             "Next: Run tests\n"
             "Worker: GPT-6 Luna · .worktrees/missing-a · .worktrees/missing-a/.pm-report.md\n"
@@ -586,12 +590,12 @@ class ResumeSummaryTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         section = self.warnings_section(result.stdout)
-        self.assertEqual(section.count("- ⚠️ Eksik worktree: TASK-1.2"), 2)
-        self.assertIn("Eksik worktree: TASK-1.2 · .worktrees/missing-a", section)
-        self.assertIn("Eksik worktree: TASK-1.2 · .worktrees/missing-b", section)
+        self.assertEqual(section.count("- ⚠️ Missing worktree: TASK-1.2"), 2)
+        self.assertIn("Missing worktree: TASK-1.2 · .worktrees/missing-a", section)
+        self.assertIn("Missing worktree: TASK-1.2 · .worktrees/missing-b", section)
 
     def test_find_root_resolves_root_from_nested_package_layout(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=LIVE_BLOCK)
 
@@ -614,12 +618,12 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn(ACTIVE_TASK_LINE, result.stdout)
 
     def test_done_task_worker_names_worktree_without_being_listed(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("old-worker")
         write_task(
             self.root,
             "TASK-6.6",
-            "Tamamlanan gorev",
+            "Finished task",
             "Done",
             notes="Worker: Kimi K3 · .worktrees/old-worker · .worktrees/old-worker/.pm-report.md",
         )
@@ -629,10 +633,10 @@ class ResumeSummaryTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("TASK-6.6", result.stdout)
-        self.assertNotIn("Sahipsiz worktree: .worktrees/old-worker", self.warnings_section(result.stdout))
+        self.assertNotIn("Orphan worktree: .worktrees/old-worker", self.warnings_section(result.stdout))
 
     def test_no_pending_report_warning_without_report_files(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("orphan")
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=NO_WORKER_BLOCK)
 
@@ -641,11 +645,11 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = result.stdout
         section = self.warnings_section(out)
-        self.assertIn("- ⚠️ Sahipsiz worktree: .worktrees/orphan", section)
-        self.assertNotIn("Bekleyen rapor", section)
+        self.assertIn("- ⚠️ Orphan worktree: .worktrees/orphan", section)
+        self.assertNotIn("Pending report", section)
 
     def test_missing_live_fields_show_question_mark(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes="Next: Run tests")
 
         result = self.run_resume()
@@ -658,12 +662,12 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("Needs owner: ?", out)
 
     def test_malformed_task_file_does_not_crash(self):
-        self.commit_subjects(["kurulum"])
+        self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
         tasks_dir = self.root / ".pm" / "backlog" / "tasks"
         tasks_dir.mkdir(parents=True, exist_ok=True)
-        (tasks_dir / "task-7.7 - bozuk.md").write_text(
-            "---\nid: TASK-7.7\ntitle: Bozuk gorev\nstatus: Active\n## Implementation Notes\nNext: yok\n",
+        (tasks_dir / "task-7.7 - broken.md").write_text(
+            "---\nid: TASK-7.7\ntitle: Broken task\nstatus: Active\n## Implementation Notes\nNext: yok\n",
             encoding="utf-8",
         )
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=LIVE_BLOCK)

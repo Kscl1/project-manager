@@ -96,15 +96,15 @@ class SampleTreeOutputTest(PmTreeTestCase):
 
         self.assertEqual(result.returncode, 0)
         expected = (
-            "# Epic ağacı (2026-09-23)\n"
-            "- TASK-1 · Epic A · Devam ediyor [1/2]\n"
-            "  - TASK-1.1 · Package A1 · Bitti [1/1]\n"
-            "    - TASK-1.1.1 · Leaf · Bitti\n"
-            "  - TASK-1.2 · Package A2 · Sırada\n"
-            "- TASK-5 · Small epic · Sırada [0/0]\n"
+            "# Epic tree (2026-09-23)\n"
+            "- TASK-1 · Epic A · Active [1/2]\n"
+            "  - TASK-1.1 · Package A1 · Done [1/1]\n"
+            "    - TASK-1.1.1 · Leaf · Done\n"
+            "  - TASK-1.2 · Package A2 · Ready\n"
+            "- TASK-5 · Small epic · Ready [0/0]\n"
             "\n"
-            "## Sahipsiz\n"
-            "- TASK-9 · Lost child · Sırada (ebeveyn yok: TASK-8)\n"
+            "## Orphans\n"
+            "- TASK-9 · Lost child · Ready (no parent: TASK-8)\n"
         )
         self.assertEqual(result.stdout.strip(), expected.strip())
 
@@ -117,35 +117,35 @@ class EpicWithoutChildrenTest(PmTreeTestCase):
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        expected = "# Epic ağacı (2026-09-23)\n- TASK-5 · Small epic · Sırada [0/0]\n"
+        expected = "# Epic tree (2026-09-23)\n- TASK-5 · Small epic · Ready [0/0]\n"
         self.assertEqual(result.stdout.strip(), expected.strip())
-        self.assertNotIn("## Sahipsiz", result.stdout)
+        self.assertNotIn("## Orphans", result.stdout)
 
 
 class OrphanSectionTest(PmTreeTestCase):
-    def test_orphan_listed_under_sahipsiz(self):
-        """Rule 6: a task whose parent id does not exist goes under '## Sahipsiz'."""
+    def test_orphan_listed_under_orphans(self):
+        """Rule 6: a task whose parent id does not exist goes under '## Orphans'."""
         self.make_task("task-1.md", "TASK-1", "Epic A", "Active", type_="epic")
         self.make_task("task-9.md", "TASK-9", "Lost child", "Ready", parent="TASK-8")
 
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Sahipsiz", result.stdout)
-        self.assertIn("- TASK-9 · Lost child · Sırada (ebeveyn yok: TASK-8)", result.stdout)
+        self.assertIn("## Orphans", result.stdout)
+        self.assertIn("- TASK-9 · Lost child · Ready (no parent: TASK-8)", result.stdout)
         # the orphan is not a tree node: no indented line for it
         self.assertNotIn("  - TASK-9", result.stdout)
 
-    def test_sahipsiz_section_absent_without_orphans(self):
-        """Rule 6: the '## Sahipsiz' section is omitted when there are no orphans."""
+    def test_orphan_section_absent_without_orphans(self):
+        """Rule 6: the '## Orphans' section is omitted when there are no orphans."""
         self.make_task("task-1.md", "TASK-1", "Epic A", "Active", type_="epic")
         self.make_task("task-1-1.md", "TASK-1.1", "Package A1", "Done", parent="TASK-1")
 
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        self.assertNotIn("## Sahipsiz", result.stdout)
-        self.assertNotIn("ebeveyn yok", result.stdout)
+        self.assertNotIn("## Orphans", result.stdout)
+        self.assertNotIn("no parent", result.stdout)
 
 
 class CycleTest(PmTreeTestCase):
@@ -161,7 +161,7 @@ class CycleTest(PmTreeTestCase):
         self.assertEqual(result.stdout.count("TASK-1 ·"), 1)
         self.assertEqual(result.stdout.count("TASK-2 ·"), 1)
         # both parents exist, so nothing is an orphan
-        self.assertNotIn("## Sahipsiz", result.stdout)
+        self.assertNotIn("## Orphans", result.stdout)
 
 
 class OrphanSubtreeTest(PmTreeTestCase):
@@ -174,26 +174,26 @@ class OrphanSubtreeTest(PmTreeTestCase):
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Sahipsiz", result.stdout)
-        self.assertIn("- TASK-9 · Lost hub · Sırada (ebeveyn yok: TASK-8)", result.stdout)
-        self.assertIn("  - TASK-9.1 · Lost kid · Bitti", result.stdout)
+        self.assertIn("## Orphans", result.stdout)
+        self.assertIn("- TASK-9 · Lost hub · Ready (no parent: TASK-8)", result.stdout)
+        self.assertIn("  - TASK-9.1 · Lost kid · Done", result.stdout)
 
 
 class CycleSectionTest(PmTreeTestCase):
-    def test_non_epic_cycle_listed_under_dongu(self):
-        """Finding 2: a parent cycle among non-epic tasks is listed under '## Döngü'."""
+    def test_non_epic_cycle_listed_under_cycle(self):
+        """Finding 2: a parent cycle among non-epic tasks is listed under '## Cycle'."""
         self.make_task("task-1.md", "TASK-1", "Cycle A", "Active", parent="TASK-2")
         self.make_task("task-2.md", "TASK-2", "Cycle B", "Ready", parent="TASK-1")
 
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("## Döngü", result.stdout)
-        self.assertIn("- TASK-1 · Cycle A · Devam ediyor (döngü)", result.stdout)
-        self.assertIn("- TASK-2 · Cycle B · Sırada (döngü)", result.stdout)
+        self.assertIn("## Cycle", result.stdout)
+        self.assertIn("- TASK-1 · Cycle A · Active (cycle)", result.stdout)
+        self.assertIn("- TASK-2 · Cycle B · Ready (cycle)", result.stdout)
         self.assertEqual(result.stdout.count("TASK-1 ·"), 1)
         self.assertEqual(result.stdout.count("TASK-2 ·"), 1)
-        self.assertNotIn("## Sahipsiz", result.stdout)
+        self.assertNotIn("## Orphans", result.stdout)
 
 
 class EpicOrphanTest(PmTreeTestCase):
@@ -206,22 +206,22 @@ class EpicOrphanTest(PmTreeTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout.count("TASK-2 ·"), 1)
-        self.assertIn("- TASK-2 · Lost epic · Devam ediyor (ebeveyn yok: TASK-0)", result.stdout)
-        self.assertIn("  - TASK-2.1 · Epic kid · Bitti", result.stdout)
+        self.assertIn("- TASK-2 · Lost epic · Active (no parent: TASK-0)", result.stdout)
+        self.assertIn("  - TASK-2.1 · Epic kid · Done", result.stdout)
         # never printed as a tree root with a progress bracket
-        self.assertNotIn("Lost epic · Devam ediyor [", result.stdout)
+        self.assertNotIn("Lost epic · Active [", result.stdout)
 
 
 class BoardUnchangedTest(PmTreeTestCase):
-    def test_board_without_tree_still_prints_durum_panosu(self):
-        """The normal board (no --tree) still prints '# Durum panosu'."""
+    def test_board_without_tree_still_prints_status_board(self):
+        """The normal board (no --tree) still prints '# Status board'."""
         self.make_task("task-1.md", "TASK-1", "Epic A", "Active", type_="epic")
 
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", TODAY)
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("# Durum panosu (2026-09-23)", result.stdout)
-        self.assertNotIn("Epic ağacı", result.stdout)
+        self.assertIn("# Status board (2026-09-23)", result.stdout)
+        self.assertNotIn("Epic tree", result.stdout)
 
 
 class RootSelectionTest(PmTreeTestCase):
@@ -233,7 +233,7 @@ class RootSelectionTest(PmTreeTestCase):
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("- TASK-1 · Epic A · Devam ediyor [0/0]", result.stdout)
+        self.assertIn("- TASK-1 · Epic A · Active [0/0]", result.stdout)
         self.assertNotIn("TASK-7", result.stdout)
 
     def test_parentless_non_epic_with_children_is_root(self):
@@ -244,7 +244,7 @@ class RootSelectionTest(PmTreeTestCase):
         result = self.run_tree()
 
         self.assertEqual(result.returncode, 0)
-        expected = "# Epic ağacı (2026-09-23)\n- TASK-7 · Hub · Sırada [1/1]\n  - TASK-7.1 · Kid · Bitti\n"
+        expected = "# Epic tree (2026-09-23)\n- TASK-7 · Hub · Ready [1/1]\n  - TASK-7.1 · Kid · Done\n"
         self.assertEqual(result.stdout.strip(), expected.strip())
 
 
