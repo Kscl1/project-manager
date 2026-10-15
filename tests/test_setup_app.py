@@ -41,7 +41,7 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
                 [str(cell) for cell in table.get_row_at(0)], ["A", "1.3", "1.0", "1.2", "! not tested yet", "/bin/a"]
             )
             self.assertEqual(str(table.get_row_at(1)[4]), "✗ missing")
-            self.assertEqual(str(table.get_row_at(2)[0]), "1 project item, set up later")
+            self.assertEqual(str(table.get_row_at(2)[0]), "1 item not checked on this screen")
             self.assertEqual(str(table.get_row_at(2)[4]), "· not checked")
             summary = str(setup.query_one("#summary").content)
             self.assertIn("3 items: 1 not tested yet, 1 missing, 1 not checked", summary)
@@ -210,7 +210,8 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
     async def test_keys_queued_while_a_step_ran_do_not_run_the_next(self):
         found = {"a": (None, False, None), "b": (None, False, None)}
         setup = self.make(ITEMS, found)
-        with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
+        # A long quiet window, so a slow test machine cannot let the second y through by being slow
+        with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"), patch.object(app, "QUIET_S", 60):
             async with setup.run_test(size=(120, 35)) as pilot:
                 await self.open_install(setup, pilot)
                 await pilot.press("y", "y")  # the second y arrives as the first step returns

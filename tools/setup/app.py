@@ -237,7 +237,7 @@ class SetupApp(App):
         empty = Text("-", style="dim")
         for result, label, style in (
             (bom.NOT_IN_PROJECT, "{n} project file{s}, one step sets them up", self.colour("bad") or ""),
-            (bom.NOT_CHECKED, "{n} project item{s}, set up later", "dim"),
+            (bom.NOT_CHECKED, "{n} item{s} not checked on this screen", "dim"),
         ):
             n = sum(1 for row in self.rows if row[4] == result)
             if n:
