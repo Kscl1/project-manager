@@ -1,6 +1,8 @@
 #!/bin/sh
-# This repo's own checks (D-86), run by .pm/hooks/pre-commit after the doc check.
-# 1. gitleaks: no secret in the staged changes. 2. ruff: staged Python passes lint and format.
+# The product repo's commit checks, run as the pre-commit hook (git config core.hooksPath .githooks).
+# 0. optional: the command in `git config pm.localcheck`, e.g. a maintainer's leak check whose private word
+#    lists live outside this repo; unset in a fresh clone. 1. gitleaks: no secret in the staged changes.
+# 2. ruff: staged Python passes lint and format.
 # Tool versions: tools/dev-tools.txt. A missing tool blocks the commit; it never skips silently.
 
 need() {
@@ -8,6 +10,12 @@ need() {
   echo "$1 not found, commit blocked. Install it: see tools/dev-tools.txt" >&2
   exit 1
 }
+
+localcheck=$(git config --get pm.localcheck || true)
+if [ -n "$localcheck" ] && ! sh -c "$localcheck"; then
+  echo "pm.localcheck failed, commit blocked: $localcheck" >&2
+  exit 1
+fi
 
 need gitleaks
 if ! gitleaks git --pre-commit --staged --redact --no-banner --log-level warn; then
