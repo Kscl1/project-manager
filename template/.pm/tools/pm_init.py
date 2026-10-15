@@ -5,7 +5,8 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--che
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
 - Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them (D-49).
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code (D-116);
-  --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays.
+  --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
+  deleted.
   The project's own skills are never touched.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
@@ -479,6 +480,9 @@ def main(argv=None):
     if (target / ".pm").resolve() == PKG:
         sys.exit("this is the package's own project; install into another folder")
     name = args.name or target.name
+    missing = sorted(MAP_SKILLS - {p.name for p in SKILLS.glob("pm-*")}) if args.map else []
+    if missing:  # an installed project used as the source carries only the layers it chose
+        sys.exit(f"--map: this package has no {', '.join(missing)}; install from the project-manager checkout")
     conflicts = find_conflicts(target)
     first = not (target / ".pm" / "VERSION").exists()
     stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
@@ -507,8 +511,14 @@ def main(argv=None):
         if not args.upgrade:
             sys.exit("--dry-run only makes sense with --upgrade")
         total = sum(
-            report_changes(src, dst, part, manifest) for src, dst, part in package_parts(target) if dst.exists()
+            report_changes(src, dst, part, manifest)
+            for src, dst, part in package_parts(target, args.map)
+            if dst.exists()
         )
+        for _, dst, _ in package_parts(target, args.map):
+            if not dst.exists():
+                say("new", dst, NOTES["new"])
+                total += 1
         print(
             f"\nDry run: {total} package file(s) would change; nothing was written."
             + ("" if manifest else " No manifest yet: run one real upgrade to record one.")

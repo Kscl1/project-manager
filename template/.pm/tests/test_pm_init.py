@@ -274,6 +274,22 @@ class PmInitTest(unittest.TestCase):
         self.assertFalse(skill.exists())
         self.assertFalse((self.root / ".claude" / "skills" / "pm-likec4-dsl").exists())
 
+        dry = self.run_init(self.root, "--upgrade", "--map", "--dry-run")
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("pm-likec4-dsl  (new in the package)", dry.stdout)
+        self.assertFalse(skill.exists())
+
+        # A core-only project cannot be the source of a map install: it has no map skill to copy.
+        other = Path(tempfile.mkdtemp(prefix="pm_other_"))
+        self.addCleanup(shutil.rmtree, other, onerror=_remove_readonly)
+        installed = self.root / ".pm" / "tools" / "pm_init.py"
+        from_core = subprocess.run(
+            [sys.executable, str(installed), str(other), "--map"], capture_output=True, text=True, encoding="utf-8"
+        )
+        self.assertNotEqual(from_core.returncode, 0)
+        self.assertIn("no pm-likec4-dsl", from_core.stderr)
+        self.assertFalse((other / ".pm").exists())
+
         self.assertEqual(self.run_init(self.root, "--map").returncode, 0)  # map chosen later
         self.assertTrue((skill / "LICENSE").is_file())
         self.assertTrue((skill / "references" / "model.md").is_file())

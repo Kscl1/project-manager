@@ -297,6 +297,11 @@ class ResumeSummaryTest(unittest.TestCase):
         run_git(self.root, "commit", "-am", "map store")
         self.assertNotIn("Map may be", self.warnings_section(self.run_resume().stdout))
 
+        # A map kept beside the code does not hide that code's folders.
+        self.commit_files("map beside code", "src/model.c4")
+        self.commit_files("new module", "src/api/routes.py")
+        self.assertIn(": src/api\n", self.warnings_section(self.run_resume().stdout))
+
     def test_last_closed_tasks_show_their_summary_newest_first(self):
         self.commit_subjects(["setup"])
 

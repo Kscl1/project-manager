@@ -385,16 +385,21 @@ def worklog_next_warning(tasks):
     return f"- ⚠️ Tasks in the Next section of the newest worklog ({newest.name}) are done now: {', '.join(done)}"
 
 
-def folders(listing, skip):
-    """The folders up to two levels deep that hold a tracked file, leaving out dot-folders, docs/ and `skip`."""
+MAP_FILES = (".c4", ".likec4", "likec4.config.json", "likec4.config.js", "likec4.config.ts", ".likec4rc")
+
+
+def folders(listing):
+    """The folders up to two levels deep that hold a tracked file other than a map file, outside dot-folders and
+    docs/. A folder with only map files in it is not counted, so the map's own folder never trips the warning."""
     found = set()
     for path in listing.split("\0"):
+        if path.endswith(MAP_FILES):
+            continue
         parts = path.split("/")[:-1][:2]
         for depth in range(1, len(parts) + 1):
-            folder = "/".join(parts[:depth])
-            if parts[0] == "docs" or any(p.startswith(".") for p in parts[:depth]) or folder in skip:
+            if parts[0] == "docs" or parts[depth - 1].startswith("."):
                 break
-            found.add(folder)
+            found.add("/".join(parts[:depth]))
     return found
 
 
@@ -411,8 +416,7 @@ def map_warning():
     then = git_stdout(["ls-tree", "-r", "-z", "--name-only", last], None) if last else None
     if then is None:
         return None
-    skip = {path.rsplit("/", 1)[0] for path in maps if "/" in path}
-    changed = sorted(folders(now, skip) ^ folders(then, skip))
+    changed = sorted(folders(now) ^ folders(then))
     if not changed:
         return None
     shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
