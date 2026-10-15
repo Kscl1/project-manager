@@ -77,7 +77,7 @@ def load(path=BOM):
             raise ValueError(f"{where}: min is above tested")
         if item["kind"] == "command":
             check = item.get("check")
-            if not check or not all(isinstance(arg, str) for arg in check):
+            if not isinstance(check, list) or not check or not all(isinstance(arg, str) for arg in check):
                 raise ValueError(f"{where}: a command item needs check, a list of strings")
             if check[0] == "npx":
                 raise ValueError(f"{where}: npx may download; the scan must stay read-only")
@@ -176,22 +176,26 @@ def plan(items, rows, layers=LAYERS, system=None):
 
     A step is a dict: id, name, why (the status), command (the text to run), needs (the program that runs it),
     shell (the argument list that runs it) and check (the command that verifies it afterwards). Only a missing or
-    below-minimum command item becomes a step. One without a command for this OS, or whose check failed, is a note.
+    below-minimum command item becomes a step. One without a command for this OS, or one that is installed but
+    could not be verified (check failed, version unreadable or cannot compare), is a note: never ready.
     """
     system = system or this_os()
     steps, notes = [], []
     for item, row in zip(items, rows):
         result = row[4]
-        if item["layer"] not in layers or result not in (MISSING, BELOW, FAILED):
+        if item["layer"] not in layers or result in (OK, UNTESTED, NOT_CHECKED):
             continue
-        if result == FAILED:
+        if result in (FAILED, UNREADABLE, CANNOT_COMPARE):
             notes.append(
-                f"{item['name']}: installed but its version check failed; run {' '.join(item['check'])} "
-                "and read the error before reinstalling."
+                f"{item['name']}: installed, but it could not be verified ({result}); run "
+                f"{' '.join(item['check'])} and read its output before reinstalling."
             )
             continue
         install, upgrade = item.get("install", {}), item.get("upgrade", {})
-        command = (result == BELOW and upgrade.get(system)) or install.get(system) or install.get("all")
+        if result == BELOW and upgrade.get(system):
+            command = upgrade[system]
+        else:
+            command = install.get(system) or install.get("all")
         if not command:
             notes.append(
                 f"{item['name']} ({result}): no install command for {system}; {item.get('note', 'install it by hand.')}"
@@ -325,7 +329,7 @@ def main(argv=None, run=probe):
         if not layers or set(layers) - set(LAYERS):
             raise ValueError(f"--layers takes {', '.join(LAYERS)}")
         items = load()
-    except ValueError as error:
+    except (ValueError, OSError) as error:  # a bad entry, or bom.toml missing or unreadable
         print(error, file=sys.stderr)
         return 2
     rows = check_all(items, run)

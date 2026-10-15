@@ -174,6 +174,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(self.ran, ["get a"])
                 self.assertEqual(screen.states, ["done", "waiting"])
                 self.assertEqual(screen.current, 1)  # moved on to the next open step
+                screen.quiet_until = 0  # time passes; the user reads step 2
                 await pilot.press("y")
                 await pilot.pause()
                 self.assertTrue(screen.finished)
@@ -183,6 +184,58 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertNotIsInstance(setup.screen, (app.ChooseScreen, app.InstallScreen))
                 self.assertEqual(str(setup.query_one(app.DataTable).get_row_at(1)[4]), "✓ ok")
+
+    async def test_resizing_on_install_leaves_its_table_alone(self):
+        found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
+        setup = self.make(ITEMS, found)
+        async with setup.run_test(size=(120, 35)) as pilot:
+            await self.open_install(setup, pilot)
+            await pilot.resize_terminal(80, 24)
+            await pilot.pause()
+            table = setup.screen.query_one(app.DataTable)
+            self.assertEqual(
+                [str(column.label) for column in table.columns.values()], ["Step", "Program", "Why", "State"]
+            )
+            self.assertEqual(table.row_count, 1)
+            self.assertEqual(len(setup.table.columns), 5)  # the Check table followed the new width
+
+    async def test_keys_queued_while_a_step_ran_do_not_run_the_next(self):
+        found = {"a": (None, False, None), "b": (None, False, None)}
+        setup = self.make(ITEMS, found)
+        with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
+            async with setup.run_test(size=(120, 35)) as pilot:
+                await self.open_install(setup, pilot)
+                await pilot.press("y", "y")  # the second y arrives as the first step returns
+                await pilot.pause()
+                self.assertEqual(self.ran, ["get a"])
+                self.assertEqual(setup.screen.states, ["done", "waiting"])
+                setup.screen.quiet_until = 0  # time passes; the user reads step 2 and presses y
+                await pilot.press("y")
+                await pilot.pause()
+                self.assertEqual(self.ran, ["get a", "get b"])
+
+    async def test_back_to_choose_plans_from_the_new_rows(self):
+        found = {"a": (None, False, None), "b": (None, False, None)}
+        setup = self.make(ITEMS, found)
+        with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
+            async with setup.run_test(size=(120, 35)) as pilot:
+                await self.open_install(setup, pilot)
+                await pilot.press("y")
+                await pilot.pause()
+                await pilot.press("escape")
+                await pilot.pause()
+                self.assertIsInstance(setup.screen, app.ChooseScreen)
+                self.assertEqual([step["id"] for step in setup.screen.steps], ["b"])
+                self.assertEqual(str(setup.table.get_row_at(0)[4]), "✓ ok")
+
+    async def test_short_terminal_scrolls_to_the_command(self):
+        found = {"a": (None, False, None), "b": (None, False, None)}
+        setup = self.make(ITEMS, found)
+        async with setup.run_test(size=(80, 12)) as pilot:
+            await self.open_install(setup, pilot)
+            body = setup.screen.query_one("#body")
+            self.assertIsInstance(body, app.VerticalScroll)
+            self.assertGreater(body.max_scroll_y, 0)
 
     async def test_a_failed_step_stays_and_can_be_skipped(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}

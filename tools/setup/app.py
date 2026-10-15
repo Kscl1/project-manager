@@ -9,6 +9,7 @@ usage: python tools/setup/app.py    (in the TUI's own virtual environment, see D
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import bom
@@ -16,7 +17,7 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import VerticalScroll
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, SelectionList, Static
 from textual.widgets.selection_list import Selection
@@ -35,14 +36,15 @@ LAYER_TEXT = {
 }
 # Install screen: what each step state shows, and its level for the colour (bom.outcome names the states).
 STATES = {
-    "waiting": ("· waiting", "skip"),
-    "done": ("✓ done", "good"),
-    "not-found": ("! not found yet", "warn"),
-    "unverified": ("! not verified", "warn"),
-    "too-old": ("✗ still too old", "bad"),
-    "failed": ("✗ failed", "bad"),
-    "skipped": ("· skipped", "skip"),
+    "waiting": ("waiting", "skip"),
+    "done": ("done", "good"),
+    "not-found": ("not found yet", "warn"),
+    "unverified": ("not verified", "warn"),
+    "too-old": ("still too old", "bad"),
+    "failed": ("failed", "bad"),
+    "skipped": ("skipped", "skip"),
 }
+QUIET_S = 0.8  # after a step returns, y is ignored this long: keys queued while it ran must not run the next
 FINISHED = {"done", "not-found", "unverified", "skipped"}  # nothing more this screen can do for these
 
 CSS = """
@@ -108,12 +110,15 @@ class SetupApp(App):
         self.scanning = False
         self.rows = []
         self.shown = []  # the index in self.rows of each table line; not-checked items share one line
+        # Kept here, not queried: while Choose or Install is on top, a query would find their widgets.
+        self.table = CheckTable(cursor_type="row", zebra_stripes=True)
+        self.summary = Static(id="summary", classes="hint")
 
     def compose(self) -> ComposeResult:
         yield Header()
         with VerticalScroll(id="body"):
-            yield CheckTable(cursor_type="row", zebra_stripes=True)
-            yield Static(id="summary", classes="hint")
+            yield self.table
+            yield self.summary
         yield Footer()
 
     def on_mount(self):
@@ -136,7 +141,7 @@ class SetupApp(App):
         self.scanning = True
         self.rows = []
         self.fill()
-        self.query_one("#summary", Static).update("Checking what is installed. Nothing is installed or changed.")
+        self.summary.update("Checking what is installed. Nothing is installed or changed.")
         self.refresh_bindings()
         self.check()
 
@@ -151,7 +156,7 @@ class SetupApp(App):
         self.rows = rows
         self.fill()
         level = bom.worst(rows)  # "worth a look" is still good news: only "needs action" turns the sentence red
-        self.query_one("#summary", Static).update(
+        self.summary.update(
             Text.assemble(
                 (bom.summary(rows), "bold"),
                 "\n",
@@ -168,7 +173,7 @@ class SetupApp(App):
 
     def fill(self, width=None):
         """Redraws the table from self.rows; the Path column only on a wide terminal."""
-        table = self.query_one(DataTable)
+        table = self.table
         wide = (width or self.size.width) >= WIDE
         keep = table.cursor_row
         table.clear(columns=True)
@@ -188,7 +193,7 @@ class SetupApp(App):
 
     def action_copy_path(self):
         """c copies the highlighted row's path; it works when the Path column is hidden on a narrow terminal too."""
-        self.copy_row_path(self.query_one(DataTable).cursor_row)
+        self.copy_row_path(self.table.cursor_row)
 
     def copy_row_path(self, line):
         """Copies the full path of a table line; the shared not-checked line has none."""
@@ -248,7 +253,7 @@ class ChooseScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="body"):
+        with VerticalScroll(id="body"):
             yield Static("Choose what to set up. Space or a click ticks a layer; core is always on.", classes="hint")
             yield SelectionList(
                 *(
@@ -263,6 +268,10 @@ class ChooseScreen(Screen):
     def on_mount(self):
         self.query_one("#steps").border_title = "What this machine needs"
         self.query_one(SelectionList).focus()
+        self.update_steps()
+
+    def on_screen_resume(self):
+        """Back from Install: its re-checks changed the rows, so plan again."""
         self.update_steps()
 
     def on_selection_list_selected_changed(self):
@@ -319,10 +328,11 @@ class InstallScreen(Screen):
         self.steps = steps
         self.states = ["waiting"] * len(steps)
         self.messages = [""] * len(steps)
+        self.quiet_until = 0.0
 
     def compose(self) -> ComposeResult:
         yield Header()
-        with Vertical(id="body"):
+        with VerticalScroll(id="body"):
             yield DataTable(cursor_type="row", zebra_stripes=True)
             yield Static(id="command", classes="panel")
             yield Static(id="install-hint", classes="hint")
@@ -355,7 +365,8 @@ class InstallScreen(Screen):
         table.clear()
         for number, (step, state) in enumerate(zip(self.steps, self.states), 1):
             label, level = STATES[state]
-            table.add_row(str(number), step["name"], step["why"], Text(label, style=self.app.colour(level) or "dim"))
+            state_cell = Text(f"{SYMBOLS[level]} {label}", style=self.app.colour(level) or "dim")
+            table.add_row(str(number), step["name"], step["why"], state_cell)
         table.move_cursor(row=keep)
         self.show_current()
         self.refresh_bindings()
@@ -381,9 +392,7 @@ class InstallScreen(Screen):
     def final_words(self):
         """What happened, and what is still left, once every step is finished."""
         left = [
-            f"{step['name']} ({STATES[state][0][2:]})"
-            for step, state in zip(self.steps, self.states)
-            if state != "done"
+            f"{step['name']} ({STATES[state][0]})" for step, state in zip(self.steps, self.states) if state != "done"
         ]
         done = self.states.count("done")
         text = f"All steps are finished: {done} of {len(self.steps)} done."
@@ -394,6 +403,9 @@ class InstallScreen(Screen):
     def action_run(self):
         index = self.current
         step = self.steps[index]
+        if time.monotonic() < self.quiet_until:  # a key pressed while the last step ran
+            self.app.notify(f"Read step {index + 1} first, then press y to run it.")
+            return
         if self.states[index] == "done":
             self.app.notify(f"{step['name']} is already done.")
             return
@@ -405,6 +417,7 @@ class InstallScreen(Screen):
             self.redraw()
             return
         code = self.app.runner(step["command"])
+        self.quiet_until = time.monotonic() + QUIET_S
         if code is None:  # the terminal cannot hand over: the user runs it elsewhere
             self.app.copy(step["command"])
             self.messages[index] = (
@@ -419,9 +432,13 @@ class InstallScreen(Screen):
         self.settle(self.current, None)
 
     def settle(self, index, code):
+        """Re-checks the step's program and stores the new row, so Choose and Check do not plan it again."""
         bom.refresh_path()
-        item = next(item for item in self.app.items if item["id"] == self.steps[index]["id"])
-        self.states[index], self.messages[index] = bom.outcome(code, bom.check_one(item, self.app.probe))
+        at = next(i for i, item in enumerate(self.app.items) if item["id"] == self.steps[index]["id"])
+        row = bom.check_one(self.app.items[at], self.app.probe)
+        self.app.rows[at] = row
+        self.app.fill()
+        self.states[index], self.messages[index] = bom.outcome(code, row)
         self.advance(index)
 
     def action_skip(self):

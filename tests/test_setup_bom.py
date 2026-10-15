@@ -208,6 +208,9 @@ class Load(unittest.TestCase):
     def test_command_needs_versions(self):
         self.assert_rejected(GOOD.replace('tested = "2.54.0"', ""), "needs min and tested")
 
+    def test_check_must_be_a_list(self):
+        self.assert_rejected(GOOD.replace('["git", "--version"]', '"git"'), "check, a list of strings")
+
     def test_install_lines_need_a_known_os(self):
         self.assertEqual(
             self.load_text(GOOD + 'install.linux = "sudo pacman -S git"\n')[0]["install"]["linux"], "sudo pacman -S git"
@@ -265,7 +268,15 @@ class Plan(unittest.TestCase):
         self.assertEqual(steps, [])
         self.assertEqual(len(notes), 2)
         self.assertIn("no install command for windows; Get it from git-scm.com.", notes[0])
-        self.assertIn("version check failed; run node", notes[1])
+        self.assertIn("could not be verified (check failed); run node", notes[1])
+
+    def test_unverified_versions_are_notes_not_ready(self):
+        items = [item("git", install={"all": "get git"}), item("py", install={"all": "get py"})]
+        rows = [row("Git", bom.UNREADABLE), row("Py", bom.CANNOT_COMPARE, "3.15.0rc1")]
+        steps, notes = bom.plan(items, rows, system="linux")
+        self.assertEqual(steps, [])
+        self.assertIn("could not be verified (version unreadable)", notes[0])
+        self.assertIn("could not be verified (cannot compare)", notes[1])
 
     def test_unticked_layer_is_left_out(self):
         items = [item("likec4", layer="map", install={"all": "npm i -g likec4"})]
@@ -325,7 +336,7 @@ class Main(unittest.TestCase):
         code, out = self.run_main(["--layers", "core"], {"git": ("/bin/git", False, None)})
         self.assertEqual(code, 1)
         self.assertIn("nothing can run automatically", out)
-        self.assertIn("Note: Git: installed but its version check failed", out)
+        self.assertIn("Note: Git: installed, but it could not be verified (check failed)", out)
 
     def test_nothing_left_exit_0(self):
         code, out = self.run_main(["--layers", "core"], {})
@@ -338,6 +349,11 @@ class Main(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(data["steps"][0]["id"], "git")
         self.assertEqual(next(i for i in data["items"] if i["id"] == "git")["status"], bom.MISSING)
+
+    def test_missing_bom_exit_2(self):
+        with patch.object(bom, "BOM", Path("no-such-folder/bom.toml")), patch("sys.stderr"):
+            with patch.object(bom.load, "__defaults__", (Path("no-such-folder/bom.toml"),)):
+                self.assertEqual(bom.main([]), 2)
 
     def test_bad_layer_exit_2(self):
         with patch("sys.stderr"):
