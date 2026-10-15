@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PY=$(command -v python || command -v python3); if [ -n \"$PY\" ] && [ -f .pm/tools/pm_board.py ]; then \"$PY\" .pm/tools/pm_board.py --resume; fi",
+            "timeout": 60
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PY=$(command -v python || command -v python3); if [ -n \"$PY\" ] && [ -f .pm/tools/pm_board.py ]; then \"$PY\" .pm/tools/pm_board.py --resume; echo; echo 'Context was just compacted. Re-read the active task file named above before the next action.'; fi",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

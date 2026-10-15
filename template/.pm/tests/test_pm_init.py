@@ -1,5 +1,6 @@
 """Subprocess tests for the .pm package installer."""
 
+import json
 import os
 import shutil
 import stat
@@ -231,6 +232,108 @@ class PmInitTest(unittest.TestCase):
         result = self.run_init(package_project)
 
         self.assertNotEqual(result.returncode, 0)
+
+    def snapshot(self):
+        """Every file under the project (outside .git) with its bytes, plus the staged index."""
+        files = {
+            p.relative_to(self.root).as_posix(): p.read_bytes()
+            for p in self.root.rglob("*")
+            if p.is_file() and ".git" not in p.relative_to(self.root).parts
+        }
+        index = subprocess.run([GIT, "ls-files", "-s"], cwd=self.root, capture_output=True, text=True).stdout
+        return files, index
+
+    def test_second_run_changes_nothing(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        before = self.snapshot()
+
+        second = self.run_init()
+
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertEqual(self.snapshot(), before)
+        self.assertNotIn("  write ", second.stdout)
+
+    def test_session_hooks_and_mcp_are_written(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        settings = json.loads((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+        matchers = {group["matcher"] for group in settings["hooks"]["SessionStart"]}
+        self.assertEqual(matchers, {"startup|resume|clear", "compact"})
+        servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+        self.assertEqual(set(servers), {"context7"})
+
+    def test_map_adds_likec4_to_the_installers_own_mcp_file(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+        self.assertEqual(set(servers), {"context7", "likec4"})
+
+    def test_own_settings_and_mcp_are_never_edited(self):
+        (self.root / ".claude").mkdir()
+        own_settings = '{"permissions": {"allow": ["Bash(ls)"]}}\n'
+        own_mcp = '{"mcpServers": {"mine": {"command": "mine"}}}\n'
+        (self.root / ".claude" / "settings.json").write_text(own_settings, encoding="utf-8")
+        (self.root / ".mcp.json").write_text(own_mcp, encoding="utf-8")
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"), own_settings)
+        self.assertEqual((self.root / ".mcp.json").read_text(encoding="utf-8"), own_mcp)
+        merge = result.stdout.split("Merge by hand", 1)[1]
+        self.assertIn(".claude/settings.json", merge)
+        self.assertIn("context7", merge)
+
+    def test_own_agents_file_stops_a_first_install(self):
+        (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
+        self.assertIn("conflict", result.stdout)
+        self.assertFalse((self.root / ".pm").exists())
+        self.assertFalse((self.root / ".claude").exists())
+
+    def test_keep_existing_installs_and_keeps_own_files(self):
+        (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
+        (self.root / "CLAUDE.md").write_text("Use tabs.\n", encoding="utf-8")
+
+        result = self.run_init(self.root, "--keep-existing")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
+        self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "Use tabs.\n")
+        self.assertTrue((self.root / ".pm" / "tools" / "pm_check.py").is_file())
+        merge = result.stdout.split("Merge by hand", 1)[1]
+        self.assertIn("AGENTS.md", merge)
+        self.assertIn("@AGENTS.md", merge)
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- AGENTS.md:", kept)
+        self.assertEqual(self.run_init().returncode, 0)
+        self.assertEqual((self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8"), kept)
+
+    def test_own_git_hooks_are_left_alone(self):
+        hook = self.root / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+        stopped = self.run_init()
+        kept = self.run_init(self.root, "--keep-existing")
+
+        self.assertEqual(stopped.returncode, 3, stopped.stdout)
+        self.assertEqual(kept.returncode, 0, kept.stdout + kept.stderr)
+        hooks_path = subprocess.run([GIT, "config", "--get", "core.hooksPath"], cwd=self.root, capture_output=True)
+        self.assertNotEqual(hooks_path.returncode, 0, "core.hooksPath must stay unset")
+
+    def test_check_prints_the_plan_and_writes_nothing(self):
+        result = self.run_init(self.root, "--check")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Plan for", result.stdout)
+        self.assertIn(".mcp.json", result.stdout)
+        self.assertEqual([p.name for p in self.root.iterdir()], [".git"])
 
 
 if __name__ == "__main__":
