@@ -13,7 +13,7 @@ Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md
 
 The **lead** creates and closes scoped Backlog tasks with acceptance criteria and evidence. **Workers never create or edit Backlog tasks; they report to the lead.** The lead uses `backlog browser` to inspect or edit tasks. Product docs stay in `docs/`, not Backlog's doc/decision commands. Run `python .pm/tools/pm_check.py` before committing docs, and do not bypass hooks.
 
-When the package itself misbehaves (a `.pm/` tool, rule, role card or template, not this project's code), do not patch `.pm/` here: write a report from `.pm/templates/feedback.md` into `.pm/local/feedback/` and tell the owner, who carries it to the package's home project.
+When the package itself misbehaves (a `.pm/` tool, rule, role card or template, not this project's code), do not patch `.pm/` here: run the `pm-feedback` skill (or `python .pm/tools/pm_feedback.py`). It writes a diagnosis-only feedback report into `.pm/local/feedback/`, shows it to the owner and opens an issue in the package's home repo only on their yes.
 
 ## Lead only: which tool when
 
