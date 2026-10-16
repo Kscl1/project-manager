@@ -1,6 +1,6 @@
 # Project charter: <project name>
 
-The entry door of the project file (D-62): why the project exists, what it will not do, how it is accepted, and where every other answer lives. The lead writes it; the owner approves intent and acceptance; a different-family frontier model challenges the assumptions. Copy into `.pm/charter.md` once, then keep it as project data.
+The entry door of the project file: why the project exists, what it will not do, how it is accepted, and where every other answer lives. The lead writes it; the owner approves intent and acceptance; a different-family frontier model challenges the assumptions. Copy into `.pm/charter.md` once, then keep it as project data.
 
 **Status:** Draft · version 0.1 (<date>) · owner approval pending
 

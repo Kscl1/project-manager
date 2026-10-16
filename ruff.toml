@@ -1,4 +1,4 @@
-# Python lint and format rules for this repo's tools (D-86). Run by .githooks/pre-commit and CI.
+# Python lint and format rules for this repo's tools. Run by .githooks/pre-commit and CI.
 line-length = 120
 target-version = "py38"  # the package tools support Python 3.8+
 include = ["*.py"]  # ruff 0.16 would also reformat code blocks in our Markdown docs

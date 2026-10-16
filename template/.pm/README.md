@@ -49,7 +49,7 @@ python -m unittest discover -s .pm/tests   # the package's own tests, standard l
 python -m unittest discover -s .pm/swarm   # with --swarm: pm_run against a fake Herdr, about 80 s
 ```
 
-Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor (D-98).
+Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor.
 
 ## When the package misbehaves
 

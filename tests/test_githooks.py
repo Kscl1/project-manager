@@ -1,4 +1,4 @@
-"""Tests for this repo's own hooks in .githooks/ (D-86).
+"""Tests for this repo's own hooks in .githooks/.
 
 commit-msg is tested on message files. pre-commit is tested in a temp git repo with real staged changes;
 those tests need gitleaks and ruff on PATH (CI installs them from tools/dev-tools.txt).

@@ -4,8 +4,8 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--swa
                                    [--check | --keep-existing | --upgrade]
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
-- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them (D-49).
-- Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code (D-116);
+- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them.
+- Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
   --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
   deleted.
   The project's own skills are never touched.
@@ -57,7 +57,8 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
-SKILLS = PKG.parent / ".agents" / "skills"  # shipped skills sit next to the package; theirs all start with pm- (D-116)
+# Shipped skills sit next to the package; their names all start with pm-, a namespace apart from the user's own skills.
+SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
@@ -234,7 +235,7 @@ def add_lines(target, name, wanted):
     with path.open("a", encoding="utf-8", newline="\n") as out:
         if lines and lines[-1].strip():
             out.write("\n")
-        out.write("# project-management package (D-55)\n" + "\n".join(missing) + "\n")
+        out.write("# project-management package\n" + "\n".join(missing) + "\n")
     say("update", path, ", ".join(missing))
 
 
@@ -256,7 +257,7 @@ def version_is_current(target):
 
 
 def write_version(target):
-    """Stamp which package revision is installed, so a feedback report can name it (REQ-42)."""
+    """Stamp which package revision is installed, so a feedback report can name it."""
     commit = package_commit()
     path = target / ".pm" / "VERSION"
     if path.exists() and path.read_text(encoding="utf-8").startswith(f"package: {commit}\n"):

@@ -2,7 +2,7 @@
 # The product repo's commit message check, run as the commit-msg hook (git config core.hooksPath .githooks):
 # - title: type(scope): subject, types feat fix docs refactor test chore, no trailing period
 #   (git's own "Merge ..." and "Revert ..." titles are allowed)
-# - ends with Assisted-by: <model> (<thinking level>); a squash lists each model once (D-71);
+# - ends with Assisted-by: <model> (<thinking level>); a squash lists each model once;
 #   merge commits may omit it; work done without a model ends with: Assisted-by: none (human)
 # - no Co-authored-by and no "Generated with" lines
 # - one line 'Refs: #<issue>' (several comma-separated) or 'Refs: none' before the Assisted-by line(s);
@@ -16,7 +16,7 @@ revert=0
 add() { problems="$problems
   - $1"; }
 
-if printf '%s\n' "$msg" | grep -qi '^co-authored-by:'; then add "remove the Co-authored-by line (D-71 uses Assisted-by)"; fi
+if printf '%s\n' "$msg" | grep -qi '^co-authored-by:'; then add "remove the Co-authored-by line (it makes the model a co-author on GitHub; use Assisted-by)"; fi
 if printf '%s\n' "$msg" | grep -qi 'generated with'; then add "remove the \"Generated with\" line"; fi
 
 case "$title" in
