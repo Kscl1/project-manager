@@ -13,7 +13,7 @@ The Check screen is read-only: it never installs, upgrades or downloads anything
 id = "git"                          # stable key
 name = "Git"
 kind = "command"                    # command | project-file | manual
-layer = "core"                      # core | map (first trial); swarm comes later
+layer = "core"                      # core | map | swarm
 check = ["git", "--version"]        # a command and its arguments, never a shell line
 min = "2.54.0"                      # below this the TUI warns
 tested = "2.54.0"                   # above this the TUI says "not tested yet"
@@ -22,11 +22,11 @@ install.linux = "sudo pacman -S --needed git"
 note = "Preinstalled on Omarchy."
 ```
 
-- **command**: the TUI runs `check` and reads the version. `min` and `tested` are required. `npx` is refused, because it may download.
+- **command**: the TUI runs `check` and reads the version. `min` and `tested` are required. `npx` is refused, because it may download. For a check that lists packages (`pi list --no-approve` for the Pi extensions), `package` names the one to find (`npm:pi-web-access`). The listed name is only what Pi's settings ask for, so the version is read from the `package.json` in the folder printed under it: not listed is missing, listed without a readable `package.json` is "version unreadable", never ready. A package Pi marks `(filtered)` (its settings pick only some of its resources) is "version unreadable" too, because what it loads is unknown. `--no-approve` makes Pi list only the user's own packages, without a project's trust question: the check covers the user-level install the workers share, not a project's own `.pi/settings.json`.
 - **project-file**: lives in the user's project at `path` (the `.pm` package, the hooks, `.mcp.json`, the `pm-` skills, with the upstream `ref` for copied skills). Checked only when setup is started with the project folder (`app.py <folder>`, `bom.py --project <folder>`); without one it is "not checked". `has` is text the file must hold: the hooks file must run `pm_board.py --resume`, `.mcp.json` must name the server.
 - **manual**: nothing on the machine to check (LikeC4 runs through `npx` with a pinned version).
 
-Unknown versions are left out, never written as "not set". Until an older version has been tried, `min` equals `tested`. `note` is text shown to the user. `install.*` and `upgrade.*` are shown too, and run through the platform shell only after the user presses Enter on that step (see Running a step). `load()` stops with a plain message on a duplicate id, an unknown kind, a malformed version or `min` above `tested`.
+Unknown versions are left out, never written as "not set". Until an older version has been tried, `min` equals `tested`. `note` is text shown to the user: under its step on Install and in the plain To do list, or as the note when there is no command for this OS. `install.*` and `upgrade.*` are shown too, and run through the platform shell only after the user presses Enter on that step (see Running a step). `load()` stops with a plain message on a duplicate id, an unknown kind, a malformed version or `min` above `tested`.
 
 `similar` lists names of skills, MCP servers or plugins that do the same job as the item (see Similar items).
 
@@ -63,7 +63,7 @@ The version is the first word that starts like `3.11` or `3.11.9`. Git's `.windo
 ## Screens
 
 1. **Check**: the project folder, then the table, columns item, installed, minimum, tested, status, path; the next step under it. The items this screen does not check (LikeC4, and the project files when no folder was given) share one dim line at the end, because a beginner reads nine "not checked" lines as nine problems; `python tools/setup/bom.py` still lists them one by one. `c` copies the highlighted line's path, and so does a click on a Path cell (see Copying). Under the table: what the user already has that is similar (see Similar items), and on a rerun when it was set up before. `Enter` goes on to Choose once the scan has ended, or straight to Done on a rerun with nothing left (see The record).
-2. **Choose**: the layers as a checklist (core ticked and locked, map optional; space or a click ticks) and, under it, what this machine needs for the ticked layers: each step with its official command, then the notes. `Enter` goes on to Install; nothing runs yet. `Esc` goes back. When there is nothing to run it says so and `Enter` goes to Done.
+2. **Choose**: the layers as a checklist (core ticked and locked; map ticked and swarm unticked on a first run, as last chosen on a rerun; space or a click ticks) and, under it, what this machine needs for the ticked layers: each step with its official command, then the notes. `Enter` goes on to Install; nothing runs yet. `Esc` goes back. When there is nothing to run it says so and `Enter` goes to Done.
 3. **Install**: the steps in a list, the highlighted one's full command in a panel titled "Step 2 of 3: Node.js". `y` runs it, `s` skips it, `c` copies it, `r` checks its program again; arrows pick another step. `Enter` never runs a step: pressed twice on Choose, it must not start an installer. For 0.8 seconds after a step returns, `y` is ignored with a hint: a key pressed while the installer ran must not start the next step before the user has read it. `Esc` goes back to Choose, which plans again from the re-checked rows, so a step already done is not offered twice. Once every step is finished, the screen says what is still open and `Enter` goes to Done.
 4. **Done**: what is ready for the chosen layers, what is still open, the notes (a note means "worth a look", never "ready") and what is left for `/pm-setup` to merge; then how to go on in the project: the terminal commands (`cd <project>`, `claude`, then `/pm-setup`; `c` copies them) and, on Windows, `o`, which opens Claude Desktop's documented link `claude://code/new?folder=<the project, URL-encoded>` (a new Code session in that folder). `Esc` goes back to Check and checks everything again. Done writes the record.
 
@@ -121,8 +121,16 @@ tools/setup/.venv/Scripts/python tools/setup/app.py <your project folder>
 
 The TUI has its own virtual environment (ignored by git), so the user's Python stays untouched. This also avoids PEP 668: a distribution that marks its Python as externally managed (Arch does) refuses system-wide `pip install`; whether it does depends on that marker file, not on Linux as such. Tests: `python -m unittest discover -s tests`; the app tests skip where Textual is missing.
 
+## Layers that are not chosen
+
+Every item is checked, but Check counts and shows only the ticked layers: an optional layer nobody chose must not
+make the table look broken (`bom.chosen`). One dim line says which layers are not chosen; ticking one on Choose
+redraws Check under it. The swarm starts unticked (`DEFAULT_LAYERS`), because it needs Pi, Herdr and a model login.
+`bom.AFTER` holds what a layer still needs once every step is done and no check can see (swarm: start `herdr` once,
+sign in to a model in Pi); Done and the plain output say it on a "Then:" line. Herdr comes from its own installer,
+which installs the newest release and checks its SHA-256, so it often shows as not tested yet, like Claude Code.
+
 ## Left for later, on purpose
 
-- The swarm layer (Pi, Herdr, Pi extensions).
 - A one-line bootstrap that makes the virtual environment for the user, and a run on a clean machine.
 - Renovate watching `bom.toml`.

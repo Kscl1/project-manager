@@ -10,6 +10,7 @@
 # install.* and upgrade.* run through the platform shell only after the user presses Enter on that step (DESIGN.md);
 # note is text shown to the user. upgrade.<os> is used for an item below its minimum when install does not upgrade.
 # similar: names of skills, MCP servers or plugins the user may already have that do the same job (shown, never removed).
+# package: for a check that lists packages (`pi list`), the name it lists; the version comes from that package's folder.
 
 # Core: required for the first trial.
 
@@ -169,3 +170,62 @@ layer = "map"
 path = ".agents/skills/pm-likec4-dsl"
 ref = "likec4/likec4@v1.59.4 (likec4-dsl)"
 similar = ["likec4-dsl"]
+
+# Swarm: optional, unticked until the user chooses it. Workers run in visible Herdr panes, driven by pm_run.
+
+[[item]]
+id = "pi"
+name = "Pi"
+kind = "command"
+layer = "swarm"
+check = ["pi", "--version"]
+min = "1.0.3"
+tested = "1.0.3"
+install.windows = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
+install.linux = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
+note = "Needs Node.js first. Pi workers reach a model through the account you sign in with in Pi (/login)."
+
+[[item]]
+id = "herdr"
+name = "Herdr"
+kind = "command"
+layer = "swarm"
+check = ["herdr", "--version"]
+min = "0.9.3"
+tested = "0.9.3"
+install.windows = "irm https://herdr.dev/install.ps1 | iex"
+install.linux = "curl -fsSL https://herdr.dev/install.sh | sh"
+note = "Herdr's own installer puts the newest release on PATH and checks its SHA-256, so it often shows as not tested yet. On Linux it installs to ~/.local/bin; if herdr is not found afterwards, add that folder to PATH as the installer says. With mise, mise use -g herdr works too."
+
+[[item]]
+id = "pi-mcp-adapter"
+name = "Pi extension pi-mcp-adapter"
+kind = "command"
+layer = "swarm"
+check = ["pi", "list", "--no-approve"]  # the user's own Pi packages; --no-approve skips any project's, and its trust question
+package = "npm:pi-mcp-adapter"
+min = "2.36.0"
+tested = "2.36.0"
+install.windows = "pi install npm:pi-mcp-adapter@2.36.0"
+install.linux = "pi install npm:pi-mcp-adapter@2.36.0"
+note = "Gives Pi workers the project's MCP servers from .mcp.json, such as Context7. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
+
+[[item]]
+id = "pi-web-access"
+name = "Pi extension pi-web-access"
+kind = "command"
+layer = "swarm"
+check = ["pi", "list", "--no-approve"]
+package = "npm:pi-web-access"
+min = "0.35.0"
+tested = "0.35.0"
+install.windows = "pi install npm:pi-web-access@0.35.0"
+install.linux = "pi install npm:pi-web-access@0.35.0"
+note = "Web search and page reading for Pi workers. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
+
+[[item]]
+id = "pm-run"
+name = "pm_run (swarm runner)"
+kind = "project-file"
+layer = "swarm"
+path = ".pm/swarm/pm_run.py"

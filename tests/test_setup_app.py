@@ -31,7 +31,7 @@ MAP = {"id": "m", "name": "M", "kind": "command", "layer": "map", "check": ["m"]
 class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
     async def test_table_shows_each_item(self):
         found = {"a": ("/bin/a", True, "1.3"), "b": (None, False, None)}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]])
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]])
         async with setup.run_test(size=(120, 35)) as pilot:
             await setup.workers.wait_for_complete()
             await pilot.pause()
@@ -49,7 +49,7 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_path_column_only_when_wide(self):
         found = {"a": ("/bin/a", True, "1.1"), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]])
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]])
         async with setup.run_test(size=(80, 24)) as pilot:
             await setup.workers.wait_for_complete()
             await pilot.pause()
@@ -62,7 +62,7 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_check_again_reads_new_versions(self):
         found = {"a": (None, False, None), "b": (None, False, None)}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]])
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]])
         async with setup.run_test() as pilot:
             await setup.workers.wait_for_complete()
             await pilot.pause()
@@ -94,7 +94,7 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_c_and_a_click_copy_the_full_path(self):
         found = {"a": ("/a/very/long/folder/a", True, "1.1"), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]])
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]])
         copied = []
         async with setup.run_test(size=(80, 24)) as pilot:
             setup.copy_to_clipboard = copied.append
@@ -111,7 +111,7 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_copies_a_message_for_the_agent(self):
         found = {"a": ("/bin/a", True, "1.1"), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]])
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]])
         copied = []
         async with setup.run_test() as pilot:
             setup.copy_to_clipboard = copied.append
@@ -120,6 +120,49 @@ class CheckScreenTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("bom.py", copied[0])
             self.assertIn("--layers core,map", copied[0])
             self.assertIn("only after I say yes", copied[0])
+
+
+SWARM = {"id": "h", "name": "Herdr", "kind": "command", "layer": "swarm", "check": ["h"], "min": "1.0",
+         "tested": "1.0", "install": {"all": "get h"}, "note": "Its installer puts it on PATH."}  # fmt: skip
+
+
+@unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
+class SwarmLayerTest(unittest.IsolatedAsyncioTestCase):
+    """The swarm is opted into: until it is ticked its missing programs are neither counted nor offered."""
+
+    async def test_unchosen_swarm_is_not_counted_until_ticked(self):
+        found = {"a": ("/bin/a", True, "1.1"), "h": (None, False, None)}
+        setup = app.SetupApp([ITEMS[0], SWARM], lambda check, **_: found[check[0]], system="linux")
+        async with setup.run_test(size=(120, 35)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(setup.query_one(app.DataTable).row_count, 1)
+            summary = str(setup.query_one("#summary").content)
+            self.assertNotIn("Herdr", summary)
+            self.assertIn("Not chosen: swarm.", summary)
+            await pilot.press("enter")
+            await pilot.pause()
+            setup.screen.query_one(app.SelectionList).select("swarm")
+            await pilot.pause()
+            self.assertIn("get h", str(setup.screen.query_one("#steps").content))
+            self.assertEqual(setup.query_one(app.DataTable).row_count, 2)  # Check, under Choose, counts it now
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertIn("Its installer puts it on PATH.", str(setup.screen.query_one("#command").content))
+
+    async def test_done_names_what_no_check_can_see(self):
+        found = {"a": ("/bin/a", True, "1.1"), "h": ("/bin/h", True, "1.0")}
+        setup = app.SetupApp([ITEMS[0], SWARM], lambda check, **_: found[check[0]], system="linux")
+        async with setup.run_test(size=(120, 35)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.press("enter")
+            await pilot.pause()
+            setup.screen.query_one(app.SelectionList).select("swarm")
+            await pilot.press("enter")
+            await pilot.pause()
+            done = str(setup.screen.query_one("#done").content)
+            self.assertIn("Everything for core, map, swarm is ready.", done)
+            self.assertIn("Then: Before the first pm_run job: start herdr once", done)
 
 
 @unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
@@ -137,7 +180,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
                 found[command.split()[-1]] = ("/bin/x", True, "1.1")
             return code
 
-        return app.SetupApp(items, lambda check: found[check[0]], runner=runner, system="linux")
+        return app.SetupApp(items, lambda check, **_: found[check[0]], runner=runner, system="linux")
 
     async def open_install(self, setup, pilot):
         await setup.workers.wait_for_complete()
@@ -264,7 +307,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_exit_0_but_not_found_is_not_done(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda step: 0, system="linux")
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]], runner=lambda step: 0, system="linux")
         with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
             async with setup.run_test(size=(120, 35)) as pilot:
                 await self.open_install(setup, pilot)
@@ -287,7 +330,7 @@ class ChooseAndInstallTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_terminal_that_cannot_hand_over_copies_and_r_rechecks(self):
         found = {"a": (None, False, None), "b": ("/bin/b", True, "1.1")}
-        setup = app.SetupApp(ITEMS, lambda check: found[check[0]], runner=lambda step: None, system="linux")
+        setup = app.SetupApp(ITEMS, lambda check, **_: found[check[0]], runner=lambda step: None, system="linux")
         copied = []
         with patch.object(app.shutil, "which", lambda name: f"/bin/{name}"):
             async with setup.run_test(size=(120, 35)) as pilot:
@@ -334,7 +377,7 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
     def make(self, system="linux"):
         found = {"a": ("/bin/a", True, "1.1")}
         return app.SetupApp(
-            PROJECT_ITEMS, lambda check: found[check[0]], self.runner, system, project=self.project, home=self.home
+            PROJECT_ITEMS, lambda check, **_: found[check[0]], self.runner, system, project=self.project, home=self.home
         )
 
     async def test_installer_step_then_done_with_pm_setup(self):

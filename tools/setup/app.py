@@ -35,6 +35,7 @@ STUCK = "Stuck? Press a to copy a message for your coding agent; it can finish t
 LAYER_TEXT = {
     "core": "Core: what every project needs",
     "map": "Map: architecture diagrams of your project (optional)",
+    "swarm": "Swarm: worker agents in visible Herdr panes, run by pm_run (optional)",
 }
 # Install screen: what each step state shows, and its level for the colour (bom.outcome names the states).
 STATES = {
@@ -165,7 +166,7 @@ class SetupApp(App):
         self.project = Path(project).resolve() if project else None
         self.home = home  # tests pass a folder; None is the user's home
         self.record = bom.read_record(self.project) if self.project else None
-        self.layers = bom.LAYERS
+        self.layers = bom.DEFAULT_LAYERS
         if self.record and self.record.get("layers"):  # a rerun starts from what was chosen last time
             self.layers = tuple(layer for layer in bom.LAYERS if layer == "core" or layer in self.record["layers"])
         self.similar = []
@@ -220,6 +221,7 @@ class SetupApp(App):
     def show(self, rows, similar=()):
         self.rows, self.similar = rows, list(similar)
         self.fill()
+        rows = bom.chosen(self.items, rows, self.layers)  # a layer nobody ticked is not counted against them
         level = bom.worst(rows)  # "worth a look" is still good news: only "needs action" turns the sentence red
         text = Text()
         if self.project:
@@ -231,6 +233,9 @@ class SetupApp(App):
         text.append(bom.next_step(rows), self.colour("good" if level == "warn" else level) or "")
         if not self.project:
             text.append(f"\n{NO_PROJECT}", "dim")
+        left_out = [layer for layer in bom.LAYERS if layer not in self.layers]
+        if left_out:
+            text.append(f"\nNot chosen: {', '.join(left_out)}. Tick it on the next screen to set it up.", "dim")
         for line in self.similar:
             text.append(f"\nAlready on this machine: {line}", "dim")
         merge = bom.merge_list(self.project) if self.project else []
@@ -264,7 +269,8 @@ class SetupApp(App):
         # A beginner reads nine "not checked" or nine "not in project" lines as nine problems, while one step (or
         # none) settles them all; each group gets one line that says so plainly.
         grouped = (bom.NOT_CHECKED, bom.NOT_IN_PROJECT)
-        self.shown = [i for i, row in enumerate(self.rows) if row[4] not in grouped]
+        mine = [i for i, item in enumerate(self.items[: len(self.rows)]) if item["layer"] in self.layers]
+        self.shown = [i for i in mine if self.rows[i][4] not in grouped]
         for *cells, result, path in (self.rows[i] for i in self.shown):
             level = bom.LEVEL[result]
             status = Text(f"{SYMBOLS[level]} {result}", style=self.colour(level) or "")
@@ -274,7 +280,7 @@ class SetupApp(App):
             (bom.NOT_IN_PROJECT, "{n} project file{s}, one step sets them up", self.colour("bad") or ""),
             (bom.NOT_CHECKED, "{n} item{s} not checked on this screen", "dim"),
         ):
-            n = sum(1 for row in self.rows if row[4] == result)
+            n = sum(1 for i in mine if self.rows[i][4] == result)
             if n:
                 name = Text(label.format(n=n, s="s" if n != 1 else ""), style="dim")
                 status = Text(f"{SYMBOLS[bom.LEVEL[result]]} {result}", style=style)
@@ -367,7 +373,9 @@ class ChooseScreen(Screen):
 
     def on_selection_list_selected_changed(self):
         selected = self.query_one(SelectionList).selected
-        self.app.layers = tuple(layer for layer in bom.LAYERS if layer == "core" or layer in selected)
+        app = self.app
+        app.layers = tuple(layer for layer in bom.LAYERS if layer == "core" or layer in selected)
+        app.show(app.rows, bom.similar(app.items, bom.user_scan(app.home), app.layers))  # Check, under this screen
         self.update_steps()
 
     def update_steps(self):
@@ -489,6 +497,8 @@ class InstallScreen(Screen):
         panel = self.query_one("#command", Static)
         panel.border_title = f"Step {index + 1} of {len(self.steps)}: {step['name']}"
         text = Text(step["command"], "bold")
+        if step.get("note"):  # where an installer puts the program, what it needs first
+            text.append(f"\n{step['note']}", "dim")
         if step.get("preview") and state not in FINISHED:
             usable, plan = self.previews.get(index, (False, "asking the installer for its plan..."))
             text.append(f"\n\nWhat it will do (nothing is written yet):\n{plan_summary(plan)}")
@@ -621,6 +631,9 @@ class DoneScreen(Screen):
             text.append(f"✓ Everything for {', '.join(app.layers)} is ready.", app.colour("good") or "")
         for note in notes:
             text.append(f"\nNote: {note}", "dim")
+        for layer in app.layers:  # what no check can see, such as a model login
+            if layer in bom.AFTER:
+                text.append(f"\nThen: {bom.AFTER[layer]}", app.colour("warn") or "")
         merge = bom.merge_list(app.project) if app.project else []
         if merge:
             text.append(f"\nKept as yours, for /pm-setup to merge with you: {bom.merge_names(merge)}.")
