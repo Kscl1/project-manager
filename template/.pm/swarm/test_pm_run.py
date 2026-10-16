@@ -261,8 +261,12 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--settings", settings]
             + ["--permission-mode", "acceptEdits"],
         )
-        # The project's MCP servers start without the approval dialog that would swallow the brief.
-        self.assertEqual(json.loads(Path(settings).read_text(encoding="utf-8")), {"enableAllProjectMcpServers": True})
+        # The project's MCP servers start without the approval dialog that would swallow the brief, and Claude Code's
+        # bundled skills are off. No allow rules: Claude Code's own read-only check is stricter than a prefix.
+        self.assertEqual(
+            json.loads(Path(settings).read_text(encoding="utf-8")),
+            {"enableAllProjectMcpServers": True, "disableBundledSkills": True},
+        )
         self.assertEqual(herdr["ran"], [[herdr["gone"]["run-a-1"]["pane"], "$env:X=1"]])
 
     def test_pi_is_the_default_harness_and_runs_no_setup(self):
@@ -520,6 +524,11 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("run-a-1", self.herdr_state()["agents"])
         self.assertIn("WAITING a", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
 
+    def test_brief_tells_the_worker_to_ask_the_lead_for_a_helper(self):
+        prompt = pm_run.launch_prompt(self.job("a", "ok"))
+        self.assertIn("Do not start a helper", prompt)
+        self.assertIn("Helper needed:", prompt)
+
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
         (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
@@ -666,6 +675,59 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 2)
                 self.assertEqual(state["a"]["state"], "started")
                 self.assertNotIn("quota", attempt)
+
+    def test_expired_sign_in_is_handed_over_without_a_nudge(self):
+        for error, screen in (
+            (None, "Not logged in · Please run /login\n"),
+            (None, "some earlier output\n● Login expired · Please run /login\n"),
+            (None, '  ⎿  API Error: 401 {"type":"authentication_error","message":"OAuth token has expired"}\n'),
+            ("401 Unauthorized: invalid api key", "working"),
+        ):
+            with self.subTest(screen=screen, error=error):
+                run, log, attempt, state = self.settled_worker(error, screen)
+                prompts = self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)
+                self.assertEqual(len(prompts), 1, "the brief is not resent before the owner signs in again")
+                self.assertEqual(state["a"]["state"], "handed-over")
+                self.assertIn("sign-in needed", attempt["why"])
+                self.assertIn("/login", run.log_path.read_text(encoding="utf-8"))
+                self.assertNotIn("quota", attempt)
+                run.log_path.unlink()
+
+    def test_prose_about_logins_and_a_routers_status_line_are_still_nudged(self):
+        prose = "## Next\n\nHand over on a 401 and on an expired OAuth token; document it.\n"
+        # The reviewer's own cases (16 Oct): prose that names the banner or quotes the error mid-sentence.
+        named = "Document the Login expired banner.\nThe old API Error: 401 test passed: please run /login first.\n"
+        quoted = "> API Error: 401 (example only; authentication is healthy)\n`Please run /login` is the hint.\n"
+        # A Claude Code pane on a token-signed profile, as Herdr read it on 16 Oct: the hint above the input box.
+        status_line = (
+            "● Write(R-sol.md)\n\n✽ Whisking… (11s)\n" + " " * 60 + "Not logged in · Run /login\n" + "─" * 90 + "\n❯\n"
+        )
+        for screen in (prose, named, quoted, status_line):
+            with self.subTest(screen=screen):
+                run, log, attempt, state = self.settled_worker("500", screen)
+                self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 2)
+                self.assertEqual(state["a"]["state"], "started")
+                self.assertNotIn("login", attempt)
+
+    def test_every_question_in_one_session_is_reported(self):
+        run, log, attempt, state = self.settled_worker()
+        job = self.job("a", "nothing")
+        # (Herdr state, its state counter): a question seen twice, an answer seen working, a second question, then
+        # an answer and a third question that both fell between two ticks (16 Oct, Sol's review run).
+        for status, seq in (("blocked", 3), ("blocked", 3), ("working", 4), ("blocked", 5), ("blocked", 7)):
+
+            def status_of(attempt, status=status, seq=seq):
+                attempt["state_seq"] = seq
+                return status
+
+            with patch.dict(os.environ, self.env), patch.object(
+                pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+            ), patch.object(run, "status_of", side_effect=status_of):
+                run.tick([job], state, {})
+        waiting = [line for line in run.log_path.read_text(encoding="utf-8").splitlines() if "WAITING a" in line]
+        self.assertEqual(len(waiting), 3, "one line per question, not per tick, the later questions too")
+        self.assertIn("question 3 in this session", waiting[-1])
+        self.assertEqual(state["a"]["state"], "started")
 
     def test_limit_banner_with_a_reset_time_is_a_used_up_quota(self):
         run, log, attempt, state = self.settled_worker("500", "You've hit your limit · resets 3am (Europe/Istanbul)\n")
