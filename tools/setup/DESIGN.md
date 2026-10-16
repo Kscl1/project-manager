@@ -131,8 +131,11 @@ sign in to a model in Pi); Done and the plain output say it on a "Then:" line. H
 which installs the newest release and checks its SHA-256, so it often shows as not tested yet, like Claude Code.
 
 The EVREN layer starts unticked too: one item, evren-bridge, from its own repo. Its install line is the repo's README
-(clone to `~/evren-bridge`, then its dependency; on Linux from pacman, since Arch's Python refuses pip), and its check
-reads the clone's release tag (`git describe --tags --abbrev=0`), which `tested` follows. The user's EVREN key is never
+(clone to `~/evren-bridge` and its dependency; on Linux from pacman, since Arch's Python refuses pip), and its check
+reads the clone's release tag (`git describe --tags --abbrev=0`), which `tested` follows. An older clone is pulled
+(`upgrade.<os>`), never cloned again. The check sees the clone, not `rich`: on Windows the line runs pip even when the
+clone is already there, so `y` can retry a failed dependency install; on Linux rich comes first, so a clone never
+stands without it. The user's EVREN key is never
 asked for, written or shown: `AFTER` names it as the step left to the user. Nothing outside the layer refers to it, and
 `pm_init` gets no flag for it.
 

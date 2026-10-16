@@ -482,6 +482,13 @@ class EvrenLayer(unittest.TestCase):
         steps, notes = bom.plan([self.evren], [row], layers=("core", "evren"), system="windows")
         self.assertEqual(([s["id"] for s in steps], steps[0]["needs"], notes), (["evren-bridge"], "git", []))
 
+    def test_older_clone_is_pulled_not_cloned_again(self):
+        row = ("evren-bridge", "1.0.0", "1.1.0", "1.1.0", bom.BELOW, "~/evren-bridge")
+        for system in ("windows", "linux"):
+            steps, _ = bom.plan([self.evren], [row], layers=("core", "evren"), system=system)
+            self.assertIn("pull --ff-only", steps[0]["command"], system)
+            self.assertNotIn("git clone", steps[0]["command"], system)
+
     def test_absent_bridge_changes_nothing_for_the_other_layers(self):
         def fake(present):
             def run(check, folder=None, **_):
