@@ -185,7 +185,7 @@ min = "1.0.3"
 tested = "1.0.3"
 install.windows = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
 install.linux = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
-note = "Needs Node.js first. Pi workers reach a model through the account you sign in with in Pi (/login)."
+note = "Needs Node.js first. Pi workers reach a model through the account you sign in with in Pi (/login); a ChatGPT plan works through OpenAI, Sign in with ChatGPT."
 
 [[item]]
 id = "herdr"

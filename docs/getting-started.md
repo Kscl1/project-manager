@@ -95,7 +95,7 @@ The swarm runs helper agents as workers you can watch: each one in its own [Herd
 - [Pi](https://github.com/earendil-works/pi), with the extensions `pi-mcp-adapter` (the project's MCP servers, such as Context7, for Pi workers) and `pi-web-access` (web search and pages). Pi finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
 - Herdr, from its own installer, which puts the newest release on your PATH and checks its SHA-256.
 
-Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
+Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
 
 A worker in Claude Code starts without Claude Code's bundled skills (such as `/code-review`, which starts its own hidden helper); your own Claude Code setup is not changed. Which commands it may run without asking follows your Claude Code settings: read-only ones such as `git status` never ask. When a worker asks, pm_run writes `WAITING` and the Herdr tab to answer in.
 

@@ -35,7 +35,7 @@ AFTER = {
     ),
     "swarm": (
         "Before the first pm_run job: start herdr once in a terminal and leave it running, "
-        "and sign in to a model in Pi (run pi, then /login)."
+        "and sign in to a model in Pi (run pi, then /login; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT)."
     ),
 }
 SYSTEMS = ("windows", "linux", "macos", "all")  # the keys of install.<os> and upgrade.<os>
