@@ -463,6 +463,14 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertNotIn("Traceback", result.stderr)
                 self.assertFalse((self.run_dir / "pm_run.lease").exists())
 
+    def test_missing_herdr_says_how_to_fix_it(self):
+        self.env["PM_RUN_HERDR"] = str(self.run_dir / "no-herdr-here.exe")
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("install Herdr or set PM_RUN_HERDR", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
     def test_verify_timeout_is_a_failed_check_with_a_receipt_reason(self):
         self.env["PM_RUN_VERIFY_S"] = "0.1"
         self.jobs(self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(1)"'))
