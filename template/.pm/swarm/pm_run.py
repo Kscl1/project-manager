@@ -17,14 +17,17 @@ full brief again when no turn ran (no completion_seq advance and no observed wor
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
-A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit is handed over at once,
-without a nudge: a resent brief would hit the same limit until it resets. A bare 429 (an upstream outage answers
-with it too) is nudged as before.
+A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
+out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
+the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
+is nudged as before.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes.
 A dependency that failed, was blocked, handed-over, check-failed or is only artifact-present blocks its successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
+Each question pm_run sees is logged as WAITING, a later one in the same session too, even when the answer to the one
+before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
        python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table and exit
@@ -36,8 +39,10 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "harness": "pi" | "claude", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"]}]   (paths the worker may write besides `out`, e.g. code it builds)
-                       (harness "claude" starts Claude Code with --model and args; thinking applies to Pi only;
-                        both start without in-process sub-agent tools: a helper is its own pm_run job, so it is visible too)
+                       (harness "claude" starts Claude Code with --model and args, without its bundled skills
+                        (CLAUDE_SETTINGS); thinking applies to Pi only;
+                        both start without in-process sub-agent tools: a helper is its own pm_run job, so it is visible
+                        too, and a worker that wants one writes "Helper needed" in its output for the lead)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
 Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts it). The Herdr server must be running
 (start `herdr` once).
@@ -89,14 +94,41 @@ QUOTA = re.compile(
     r"usage limit|quota|limit reached|(?:hit|reached) your (?:usage )?limit|out of (?:extra )?usage", re.I
 )
 ERROR_LINE = re.compile(r"\berror\b|\b429\b|\bresets?\b", re.I)
+# A sign-in that ran out. Pi's own error message is trusted as it is (LOGIN). On the pane only a line that starts
+# with the harness's answer counts (LOGIN_LINE): Claude Code answers "Not logged in · Please run /login" or
+# "API Error: 401 ...", and its run still ends as a success. A worker's prose that names these words does not start
+# with them, and the hint "Not logged in · Run /login" that a token-signed profile (a router) shows in its status line
+# the whole time has no "Please".
+LOGIN = re.compile(
+    r"please run /login|login expired|oauth token (?:has )?expired|invalid (?:x-)?api[ -]key|authentication_error"
+    r"|\b401\b",
+    re.I,
+)
+# Only the marks Claude Code itself puts before a message (●, ⎿) may come first, so a quoted example ("> API Error:
+# 401", "`Please run /login`") does not count. A bare example line that looks exactly like the error still does.
+LOGIN_LINE = re.compile(
+    r"^[\s●⎿]*(?:api error:? 401\b|(?:not logged in|login expired|invalid api key|oauth token has expired)\W+"
+    r"please run /login|please run /login)",
+    re.I,
+)
 PROMPT = (
     "Read the brief file(s) {briefs} and do the task. Your output file is {out}. Create it early and fill it "
     "section by section. Only when it is complete, append the exact last line <!-- done -->. Write only that file{also}. "
-    "Do not ask questions: if something blocks you, write the blocker into the output file and finish."
+    "Do not ask questions: if something blocks you, write the blocker into the output file and finish. "
+    "Do not start a helper (a sub-agent, a background task, a skill that runs its own agent): if one would help, write "
+    "'Helper needed: <what and why>' into the output file and go on with what you can; the lead decides."
 )
 # Every helper runs in its own Herdr pane through pm_run, where the owner can watch it, so an agent started here
 # gets no in-process sub-agent tools. Applies to this run only; the owner's own Pi and Claude Code setup is unchanged.
-CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}  # the project's MCP servers (Context7...) start unasked
+CLAUDE_SETTINGS = {
+    "enableAllProjectMcpServers": True,  # the project's MCP servers (Context7...) start unasked
+    # Claude Code's own skills (code-review, claude-api, dataviz...) fire on a brief's words, and code-review starts its
+    # own background helper that --disallowedTools does not stop. The project's and plugins' skills stay.
+    "disableBundledSkills": True,
+}
+# No allow rules for shell commands: Claude Code runs read-only commands (ls, cat, grep, Get-Content, read-only git)
+# without a prompt in both shells and checks their arguments, so `git diff --output=x` still asks. A prefix rule
+# would let that through.
 NO_HELPERS = {"pi": ["--exclude-tools", "Agent,SubagentWorkflow"], "claude": ["--disallowedTools", "Agent,Workflow"]}
 RESUME = (
     "Your previous turn ended before the output was finished. Re-read the brief file(s) {briefs} and {out}, "
@@ -178,8 +210,8 @@ def stall_cause(job, content):
     return cause + ("; probe inconclusive (check the probe URL)" if inconclusive else "")
 
 
-def quota_sign(attempt, screen):
-    """The provider's message that the quota or usage limit is used up, at a settled turn, or None.
+def stop_sign(attempt, screen):
+    """("login" or "quota", the message) when a settled turn hit a wall a resent brief cannot pass, else None.
 
     Pi's error from this turn is in its session log (turn_end); Claude Code prints the API error in its pane, so an
     error line among the last ten pane lines counts too. Worker prose that only mentions a quota does not, and neither
@@ -189,9 +221,11 @@ def quota_sign(attempt, screen):
     lines = (
         [line for line in pane_content(screen).splitlines() if line.strip()][-10:] if isinstance(screen, str) else []
     )
-    for line in [error] + [line for line in lines if ERROR_LINE.search(line)]:
-        if QUOTA.search(line):
-            return " ".join(line.split())[:160]
+    for line in [error] + lines:
+        if LOGIN_LINE.search(line) or line is error and LOGIN.search(line):
+            return "login", " ".join(line.split())[:160]
+        if (line is error or ERROR_LINE.search(line)) and QUOTA.search(line):
+            return "quota", " ".join(line.split())[:160]
     return None
 
 
@@ -430,6 +464,8 @@ class Run:
         attempt.pop("herdr_error", None)
         agent = got["result"]["agent"]
         attempt["completion_seq"] = agent.get("completion_seq")
+        if "state_change_seq" in agent:
+            attempt["state_seq"] = agent["state_change_seq"]
         return agent["agent_status"]
 
     def stop(self, attempt):
@@ -493,11 +529,17 @@ class Run:
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue  # no kill, nudge or retry on a failed query, even after the hard limit
             if status == "blocked":
-                if not a.get("asked"):
-                    a["asked"] = now
-                    self.log(f"WAITING {job['id']}: the worker asks for input in Herdr tab {job['id']}")
+                # A new question: the flag clears once the worker moves on, and Herdr's state counter grows even
+                # when an answer and the next question both fall between two ticks.
+                if not a.get("asking") or a.get("state_seq") != a.get("asked_seq"):
+                    a.update(asking=True, asked=now, asked_seq=a.get("state_seq"), asks=a.get("asks", 0) + 1)
+                    self.log(
+                        f"WAITING {job['id']}: the worker asks for input in Herdr tab {job['id']} "
+                        f"(question {a['asks']} in this session)"
+                    )
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue
+            a.pop("asking", None)
             if status == "working":
                 a["worked"] = True
                 self.warn_pane(job, a, now)
@@ -536,7 +578,7 @@ class Run:
                     if not a.get("held"):
                         a["held"] = True
                         self.log(f"HOLD {job['id']}: turn looks settled but Pi wrote its log {quiet:.0f} s ago; {why}")
-                elif self.quota_hand_over(job, s, a, why):
+                elif self.stop_hand_over(job, s, a, why):
                     continue
                 elif not self.nudge(job, s, a, now, size, why):
                     continue
@@ -620,15 +662,21 @@ class Run:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
         return True
 
-    def quota_hand_over(self, job, s, a, why):
-        """Hand over a settled worker whose provider says the quota or usage limit is used up; True when it did."""
-        sign = quota_sign(a, herdr("agent", "read", a["name"], "--source", "visible", plain=True))
-        if sign:
-            a["quota"] = sign
+    def stop_hand_over(self, job, s, a, why):
+        """Hand over a settled worker whose quota is used up or whose sign-in ran out; True when it did."""
+        sign = stop_sign(a, herdr("agent", "read", a["name"], "--source", "visible", plain=True))
+        if not sign:
+            return False
+        kind, text = sign
+        a[kind] = text
+        if kind == "login":
+            what = "sign the harness in again (Claude Code: run claude, then /login), then rerun the job"
+            self.hand_over(job, s, f'sign-in needed: "{text}"; not resent, {what}; {why}')
+        else:
             self.hand_over(
-                job, s, f'provider quota or usage limit: "{sign}"; not resent, rerun the job after it resets; {why}'
+                job, s, f'provider quota or usage limit: "{text}"; not resent, rerun the job after it resets; {why}'
             )
-        return bool(sign)
+        return True
 
     def hand_over(self, job, s, why):
         """Stop watching a live worker without closing it: the lead reads its tab and decides."""

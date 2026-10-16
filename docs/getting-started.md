@@ -97,6 +97,8 @@ The swarm runs helper agents as workers you can watch: each one in its own [Herd
 
 Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
 
+A worker in Claude Code starts without Claude Code's bundled skills (such as `/code-review`, which starts its own hidden helper); your own Claude Code setup is not changed. Which commands it may run without asking follows your Claude Code settings: read-only ones such as `git status` never ask. When a worker asks, pm_run writes `WAITING` and the Herdr tab to answer in.
+
 ## After setup: /pm-setup
 
 Open your project, not the project-manager folder, in Claude Code:
