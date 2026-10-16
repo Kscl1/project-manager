@@ -27,5 +27,7 @@ jobs:
         run: ruff check . && ruff format --check .
       - name: Package tests
         run: python -m unittest discover -s template/.pm/tests
-      - name: Repo tests (worker runner, commit hooks)
+      - name: Swarm layer tests (worker runner, fake Herdr)
+        run: python -m unittest discover -s template/.pm/swarm
+      - name: Repo tests (setup screen, commit hooks)
         run: python -m unittest discover -s tests

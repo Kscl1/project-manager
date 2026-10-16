@@ -1,6 +1,7 @@
 """Install the project-management package into a project, or upgrade it.
 
-Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--check | --keep-existing | --upgrade]
+Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--swarm]
+                                   [--check | --keep-existing | --upgrade]
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
 - Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them (D-49).
@@ -8,6 +9,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
   deleted.
   The project's own skills are never touched.
+- The swarm layer (.pm/swarm: pm_run, which runs workers as visible Herdr agents, and its tests) comes only with
+  --swarm, then is upgraded like the other package files until deleted.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
   run pm_board --resume when a session starts and after a compaction) and .mcp.json (Context7; LikeC4 with --map).
@@ -56,6 +59,7 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
 SKILLS = PKG.parent / ".agents" / "skills"  # shipped skills sit next to the package; theirs all start with pm- (D-116)
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
+SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -99,10 +103,12 @@ def shipped_skills(target, map_layer=False):
     )
 
 
-def package_parts(target, map_layer=False):
+def package_parts(target, map_layer=False, swarm=False):
     """Yield (source, installed copy, manifest key prefix) for every package folder; skills are keyed from the root."""
     for part in PACKAGE:
         yield PKG / part, target / ".pm" / part, part
+    if (PKG / SWARM).is_dir() and (swarm or (target / ".pm" / SWARM).exists()):
+        yield PKG / SWARM, target / ".pm" / SWARM, SWARM
     for skill in shipped_skills(target, map_layer):
         yield skill, target / ".agents" / "skills" / skill.name, f".agents/skills/{skill.name}"
 
@@ -414,7 +420,7 @@ def plan(target, args, conflicts):
     """Every change the install makes, as (action, path relative to the project, note), before anything is written.
     main() makes exactly these changes; the tests check that no file is written outside this list."""
     entries, copies = [], 0
-    for _, dst, _ in package_parts(target, args.map):
+    for _, dst, _ in package_parts(target, args.map, args.swarm):
         if not dst.exists():
             entries.append(("copy", dst, ""))
         elif args.upgrade:
@@ -468,6 +474,7 @@ def main(argv=None):
     parser.add_argument("--upgrade", action="store_true", help="replace package files; project data is never touched")
     parser.add_argument("--dry-run", action="store_true", help="with --upgrade: list what would change, write nothing")
     parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server and skill")
+    parser.add_argument("--swarm", action="store_true", help="also add pm_run, which runs workers in Herdr")
     parser.add_argument("--check", action="store_true", help="print the plan and the conflicts, write nothing")
     parser.add_argument(
         "--keep-existing", action="store_true", help="install even if the project has its own AGENTS.md, hooks..."
@@ -480,9 +487,18 @@ def main(argv=None):
     if (target / ".pm").resolve() == PKG:
         sys.exit("this is the package's own project; install into another folder")
     name = args.name or target.name
-    missing = sorted(MAP_SKILLS - {p.name for p in SKILLS.glob("pm-*")}) if args.map else []
-    if missing:  # an installed project used as the source carries only the layers it chose
-        sys.exit(f"--map: this package has no {', '.join(missing)}; install from the project-manager checkout")
+    # An installed project used as the source carries only the layers it chose. A layer asked for, or one the target
+    # already has, must be in the source: otherwise the upgrade would drop it from the manifest and stop updating it.
+    skills = {p.name for p in SKILLS.glob("pm-*")}
+    missing = sorted(
+        n for n in MAP_SKILLS if n not in skills and (args.map or (target / ".agents" / "skills" / n).exists())
+    )
+    if (args.swarm or (target / ".pm" / SWARM).is_dir()) and not (PKG / SWARM).is_dir():
+        missing.append(f"{SWARM}/")
+    if missing:
+        sys.exit(
+            f"this package has no {', '.join(missing)}, which this project needs; use the project-manager checkout"
+        )
     conflicts = find_conflicts(target)
     first = not (target / ".pm" / "VERSION").exists()
     stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
@@ -512,10 +528,10 @@ def main(argv=None):
             sys.exit("--dry-run only makes sense with --upgrade")
         total = sum(
             report_changes(src, dst, part, manifest)
-            for src, dst, part in package_parts(target, args.map)
+            for src, dst, part in package_parts(target, args.map, args.swarm)
             if dst.exists()
         )
-        for _, dst, _ in package_parts(target, args.map):
+        for _, dst, _ in package_parts(target, args.map, args.swarm):
             if not dst.exists():
                 say("new", dst, NOTES["new"])
                 total += 1
@@ -526,7 +542,7 @@ def main(argv=None):
         return 0
     merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
-    for src, dst, part in package_parts(target, args.map):
+    for src, dst, part in package_parts(target, args.map, args.swarm):
         copy_dir(src, dst, args.upgrade, backup, manifest, part)
     for skill in shipped_skills(target, args.map):
         write_pointer(skill, target, args.upgrade)

@@ -1,4 +1,4 @@
-"""Scenario tests for tools/pm_run.py with a fake Herdr (no model, no terminal, no Herdr server).
+"""Scenario tests for .pm/swarm/pm_run.py with a fake Herdr (no model, no terminal, no Herdr server).
 
 The fake Herdr keeps its state in a JSON file and reads each worker's behaviour from the job's `model` field:
   ok        writes a finished artifact on the first prompt, then settles
@@ -12,6 +12,7 @@ The fake Herdr keeps its state in a JSON file and reads each worker's behaviour 
   lost      loses the first brief without working; the resent brief finishes
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -23,10 +24,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools import pm_run
-
-ROOT = Path(__file__).resolve().parent.parent
-PM_RUN = ROOT / "tools" / "pm_run.py"
+HERE = Path(__file__).resolve().parent
+PM_RUN = HERE / "pm_run.py"
+_PM_RUN_SPEC = importlib.util.spec_from_file_location("pm_run", PM_RUN)
+pm_run = importlib.util.module_from_spec(_PM_RUN_SPEC)
+_PM_RUN_SPEC.loader.exec_module(pm_run)
 
 FAKE_HERDR = r"""
 import json, os, re, sys, time
@@ -935,8 +937,8 @@ class HerdrSafetyTest(unittest.TestCase):
 
     def test_stall_env_overrides_default(self):
         result = subprocess.run(
-            [sys.executable, "-c", "from tools.pm_run import STALL_S; print(STALL_S)"],
-            cwd=ROOT,
+            [sys.executable, "-c", "from pm_run import STALL_S; print(STALL_S)"],
+            cwd=HERE,
             env={**os.environ, "PM_RUN_STALL_S": "12"},
             capture_output=True,
             text=True,
@@ -955,9 +957,9 @@ class HerdrSafetyTest(unittest.TestCase):
             [
                 sys.executable,
                 "-c",
-                "import json; from tools.pm_run import herdr; print(json.dumps(herdr('workspace', 'list')))",
+                "import json; from pm_run import herdr; print(json.dumps(herdr('workspace', 'list')))",
             ],
-            cwd=ROOT,
+            cwd=HERE,
             env=env,
             capture_output=True,
             text=True,

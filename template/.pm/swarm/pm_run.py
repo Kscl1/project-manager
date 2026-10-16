@@ -23,9 +23,9 @@ before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, wit
 A dependency that failed, was blocked, handed-over, check-failed or is only artifact-present blocks its successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
 
-usage: python tools/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
-       python tools/pm_run.py <run-dir> --status        print the receipt table and exit
-       python tools/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
+usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
+       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table and exit
+       python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
