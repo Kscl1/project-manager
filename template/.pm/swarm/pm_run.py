@@ -1,4 +1,4 @@
-"""Run worker jobs as visible Herdr agents and keep a receipt per attempt (experimental, D-79, D-85).
+"""Run worker jobs as visible Herdr agents and keep a receipt per attempt (experimental).
 
 Herdr starts and shows the workers (one Herdr workspace per run, one tab per attempt) and tells us when a turn
 has settled. This tool only decides whether a job is done. A job is **verified** only when all of these hold:
@@ -11,7 +11,7 @@ because a rerun costs a whole job and the fault is often the check itself; fix t
 Herdr's own `done` badge proves nothing on its own: an aborted turn also ends as `done`.
 Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json, at most 60 s between tries), and
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
-quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry (REQ-87); when the log is not found (another harness, a
+quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry; when the log is not found (another harness, a
 lookup gap) it nudges at once. A nudge goes to the same session: RESUME, or the
 full brief again when no turn ran (no completion_seq advance and no observed working state).
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
@@ -29,12 +29,12 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
-                       "bucket": "evren", "thinking": "high",
+                       "bucket": "router", "thinking": "high",
                        "harness": "pi" | "claude", "setup": "shell line run in the pane first", "args": [...],
-                       "probe": "http://127.0.0.1:20128/v1/models",  (optional HTTP health probe; never include a secret)
+                       "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"]}]   (paths the worker may write besides `out`, e.g. code it builds)
                        (harness "claude" starts Claude Code with --model and args; thinking applies to Pi only;
-                        both start without in-process sub-agent tools, D-97: a helper is its own pm_run job)
+                        both start without in-process sub-agent tools: a helper is its own pm_run job, so it is visible too)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
 Herdr binary: PM_RUN_HERDR, else ~/.herdr-pinned/v0.9.3/herdr.exe. The Herdr server must be running (start `herdr` once).
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check).
@@ -83,8 +83,8 @@ PROMPT = (
     "section by section. Only when it is complete, append the exact last line <!-- done -->. Write only that file{also}. "
     "Do not ask questions: if something blocks you, write the blocker into the output file and finish."
 )
-# D-97: every helper runs in its own Herdr pane through pm_run, so an agent started here gets no in-process
-# sub-agent tools. Applies to this run only; the owner's own Pi and Claude Code setup is unchanged.
+# Every helper runs in its own Herdr pane through pm_run, where the owner can watch it, so an agent started here
+# gets no in-process sub-agent tools. Applies to this run only; the owner's own Pi and Claude Code setup is unchanged.
 CLAUDE_SETTINGS = {"enableAllProjectMcpServers": True}  # the project's MCP servers (Context7...) start unasked
 NO_HELPERS = {"pi": ["--exclude-tools", "Agent,SubagentWorkflow"], "claude": ["--disallowedTools", "Agent,Workflow"]}
 RESUME = (
@@ -590,7 +590,7 @@ class Run:
         return True
 
     def hand_over(self, job, s, why):
-        """Stop watching a live worker without closing it: the lead reads its tab and decides (REQ-87)."""
+        """Stop watching a live worker without closing it: the lead reads its tab and decides."""
         a = s["attempts"][-1]
         s["state"] = "handed-over"
         a.update(why=why, ended=time.time())

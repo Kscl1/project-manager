@@ -829,7 +829,7 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
     def test_probe_only_at_warning_and_http_evidence(self):
         from urllib.error import HTTPError, URLError
 
-        url = "http://127.0.0.1:20128/v1/models"
+        url = "http://127.0.0.1:8080/v1/models"
         for code, expected in (
             (200, "no evidence yet"),
             (429, "quota or rate limit"),
