@@ -97,8 +97,8 @@ ERROR_LINE = re.compile(r"\berror\b|\b429\b|\bresets?\b", re.I)
 # A sign-in that ran out. Pi's own error message is trusted as it is (LOGIN). On the pane only a line that starts
 # with the harness's answer counts (LOGIN_LINE): Claude Code answers "Not logged in · Please run /login" or
 # "API Error: 401 ...", and its run still ends as a success. A worker's prose that names these words does not start
-# with them, and the hint "Not logged in · Run /login" that a token-signed profile (a router) shows in its status line
-# the whole time has no "Please".
+# with them, and the hint "Not logged in · Run /login" that a profile signed in with a key or token shows in its status
+# line the whole time has no "Please".
 LOGIN = re.compile(
     r"please run /login|login expired|oauth token (?:has )?expired|invalid (?:x-)?api[ -]key|authentication_error"
     r"|\b401\b",

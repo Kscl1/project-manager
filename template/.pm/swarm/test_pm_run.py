@@ -693,12 +693,13 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertNotIn("quota", attempt)
                 run.log_path.unlink()
 
-    def test_prose_about_logins_and_a_routers_status_line_are_still_nudged(self):
+    def test_prose_about_logins_and_a_key_signed_status_line_are_still_nudged(self):
         prose = "## Next\n\nHand over on a 401 and on an expired OAuth token; document it.\n"
         # The reviewer's own cases (16 Oct): prose that names the banner or quotes the error mid-sentence.
         named = "Document the Login expired banner.\nThe old API Error: 401 test passed: please run /login first.\n"
         quoted = "> API Error: 401 (example only; authentication is healthy)\n`Please run /login` is the hint.\n"
-        # A Claude Code pane on a token-signed profile, as Herdr read it on 16 Oct: the hint above the input box.
+        # A Claude Code pane on a profile signed in with a key or token, as Herdr read it on 16 Oct: the hint above
+        # the input box.
         status_line = (
             "● Write(R-sol.md)\n\n✽ Whisking… (11s)\n" + " " * 60 + "Not logged in · Run /login\n" + "─" * 90 + "\n❯\n"
         )
