@@ -192,15 +192,15 @@ def main():
     parser.add_argument("--tasks", default=None)
     parser.add_argument("--today", default=date.today().isoformat())
     parser.add_argument("--tree", action="store_true", help="print only the Epic tree")
-    parser.add_argument("--resume", action="store_true", help="print the session resume summary (D-51)")
+    parser.add_argument("--resume", action="store_true", help="print the session resume summary")
     parser.add_argument(
         "--did",
         nargs="?",
         const=date.today().isoformat(),
         metavar="DAY",
-        help="print the Did part of a multi-goal worklog for DAY, default today (D-109)",
+        help="print the Did part of a multi-goal worklog for DAY, default today",
     )
-    parser.add_argument("--commits", metavar="TASK", help="print one task's commits and models (D-109)")
+    parser.add_argument("--commits", metavar="TASK", help="print one task's commits and models")
     args = parser.parse_args()
 
     if args.resume or args.did or args.commits:

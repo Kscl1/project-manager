@@ -7,7 +7,7 @@ Project-specific product rules belong here; the portable work system lives in `.
 Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md.
 
 1. `python .pm/tools/pm_board.py --resume` — compare active task notes with git, worktrees and reports; do not trust an old transcript.
-2. `.pm/charter.md` — project intent, acceptance and where every answer lives (D-62).
+2. `.pm/charter.md` — project intent, acceptance and where every answer lives.
 3. `.pm/decisions.md` — relevant decision IDs, not a second copy of their text.
 4. `.pm/README.md` and the relevant Epic requirements in `.pm/specs/<epic>/`.
 

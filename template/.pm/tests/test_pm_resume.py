@@ -231,7 +231,7 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("2025-06-02-0900-new.md", warnings)
         self.assertIn("2 commit", warnings)
 
-        # D-105: a commit is recorded by a task closed with a summary or by an open task's file (REQ-89);
+        # A commit is recorded by a task closed with a summary or by an open task's file;
         # an unknown task or a Done task without a summary records nothing.
         path = write_task(self.root, "TASK-1", "Closed", "Done")
         text = "\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\n<!-- SECTION:FINAL_SUMMARY:END -->\n"
@@ -275,7 +275,7 @@ class ResumeSummaryTest(unittest.TestCase):
         run_git(self.root, "commit", "-m", message)
 
     def test_warns_when_folders_change_after_the_map(self):
-        # No map, no warning: the map layer is optional (D-118).
+        # No map, no warning: the map layer is optional.
         self.commit_files("start", "src/app/main.py")
         self.commit_files("more", "src/lib/util.py")
         self.assertNotIn("Map may be", self.warnings_section(self.run_resume().stdout))
@@ -334,7 +334,7 @@ class ResumeSummaryTest(unittest.TestCase):
             "- TASK-4 · Newest (2025-06-04)\n  Newest summary.\n  Sam said: ship it.\n  Found: one gap.", section
         )
         self.assertIn("  Next: none.", section)
-        self.assertNotIn("Evidence: 9 tests OK", section, "only the first line and the D-105 lines are shown")
+        self.assertNotIn("Evidence: 9 tests OK", section, "only the first line and the closing-summary lines are shown")
         for absent in ("TASK-1", "TASK-5", "TASK-6"):
             self.assertNotIn(absent, section)
 

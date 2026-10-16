@@ -1,4 +1,4 @@
-"""Tests for ``python .pm/tools/pm_feedback.py`` (REQ-94.4).
+"""Tests for ``python .pm/tools/pm_feedback.py``.
 
 A throwaway project holds synthetic private data: task and decision titles, a project name, a git user, a secret in
 the environment. The error output and the command carry that data plus paths, secrets and a prompt. The tests check

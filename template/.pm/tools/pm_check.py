@@ -5,8 +5,8 @@ Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --stale        list docs whose described code changed since review (never blocks)
        python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
-Task files are checked too: a Done task needs every box checked and a `Doc impact:` line (D-64);
-an open task keeps its live Next and Evidence lines short (REQ-89).
+Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
+an open task keeps its live Next and Evidence lines short, so the resume summary stays short.
 
 A clean result means the docs are consistent, not that they are correct.
 """
@@ -34,7 +34,7 @@ ROOT = find_root(Path(__file__).resolve().parent)
 DECISIONS = next((p for p in (ROOT / ".pm" / "decisions.md", ROOT / "docs" / "decisions.md") if p.exists()), None)
 DECISION_DIR = DECISIONS.with_suffix("") if DECISIONS else None
 LINE_LIMIT = 300
-LIVE_LINE_LIMIT = 300  # characters of a live Next or Evidence line in an open task (REQ-89)
+LIVE_LINE_LIMIT = 300  # characters of a live Next or Evidence line in an open task
 # Append-only logs and dated snapshots grow by design, so they skip the line limit.
 NO_LINE_LIMIT = ("research/", "docs/research/", "docs/archive/", ".pm/decisions.md", "docs/decisions.md")
 INDEX_BEGIN, INDEX_END = "<!-- decision-index:begin -->", "<!-- decision-index:end -->"
@@ -64,7 +64,7 @@ SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", 
 DECISION = re.compile(r"^\s*-\s+(?:~~)?\*\*(D-\d+)\*\*")
 REPLACED_BY = re.compile(r"→\s*(D-\d+)")
 DECISION_FILE = re.compile(r"^D-\d+$")
-# Records that carry frontmatter by type (D-103 in project-manager). A list key may say `kayıtta yok` / `not recorded`.
+# Records that carry frontmatter by type. A list key may say `kayıtta yok` / `not recorded`.
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 RECORD_KEYS = {
     "worklog": ("type", "title", "date", "task", "models"),
@@ -423,7 +423,7 @@ def check_file(path, decisions):
                 )
             elif (ROOT / ".pm" / "local") in Path(os.path.normpath(path.parent / target_path)).parents:
                 problems.append(
-                    f"{name}:{number}: link to {target_path} points into .pm/local/, which git ignores (D-55)\n"
+                    f"{name}:{number}: link to {target_path} points into .pm/local/, which git ignores\n"
                     f"    → CI and other clones cannot see it: write the path as `code` or move the file into git"
                 )
 
@@ -480,7 +480,7 @@ def sections(lines):
 
 
 def check_done_task(name, lines):
-    """A Done task has every box checked and, if it carries a Definition of Done, a `Doc impact:` line (D-64)."""
+    """A Done task has every box checked and, if it carries a Definition of Done, a `Doc impact:` line."""
     status = next((value for _, value in read_frontmatter(lines).get("status", [])), "")
     if status.strip("'\"") != "Done":
         return []
@@ -512,7 +512,7 @@ def check_open_task_type(name, lines):
 
 
 def check_live_lines(name, lines):
-    """An open task's live Next and Evidence lines stay short; their history goes below the block (REQ-89)."""
+    """An open task's live Next and Evidence lines stay short; their history goes below the block."""
     status = next((value for _, value in read_frontmatter(lines).get("status", [])), "").strip("'\"")
     if status == "Done":
         return []

@@ -5,7 +5,7 @@ You own a goal from the owner's intent to verified, reviewable work. A peer lead
 ## Start and frame
 
 1. Run `python .pm/tools/pm_board.py --resume`. Compare its git status, recent commits, active task live blocks, worktrees and reports with the filesystem; never infer that a worker is still running merely because a worktree exists. Then run `python .pm/tools/pm_check.py --stale` and triage flags. If the resume warns that the weekly doc audit is due, run `templates/doc-audit.md` with kind `weekly`. Review every item on its held-and-stale list: keep it with a `Review by:` line, merge it or cancel it (see below), and stamp `Reviewed: <date>`.
-2. Read `.pm/charter.md` and the relevant `.pm/specs/<epic>/requirements.md`. Write the charter with the owner (D-62: entry door of the project file; the blueprint is the product's architecture document), then ask another model family to challenge expensive assumptions. For each Epic, write short requirements; add `design.md` only for a real design choice.
+2. Read `.pm/charter.md` and the relevant `.pm/specs/<epic>/requirements.md`. Write the charter with the owner (the charter is the entry door of the project file; the blueprint is the product's architecture document), then ask another model family to challenge expensive assumptions. For each Epic, write short requirements; add `design.md` only for a real design choice.
 3. Create a Backlog task with checkable acceptance criteria before work. Break Epic → packages → leaf tasks; stabilize shared interfaces before parallel work. Workers get only scoped leaf briefs (`templates/brief.md`).
 
 ## Run and hand off

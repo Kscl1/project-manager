@@ -1,4 +1,4 @@
-# Package problem report: the diagnosis only (REQ-94.4). `pm_feedback.py --send` writes the same headings.
+# Package problem report: the diagnosis only. `pm_feedback.py --send` writes the same headings.
 name: Package problem
 description: A .pm tool, hook, rule or template failed. Versions, the failed command and a short error excerpt only.
 title: "[feedback] "

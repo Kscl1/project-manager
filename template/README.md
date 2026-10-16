@@ -1,6 +1,6 @@
 # Project package
 
-`template/.pm/` is the portable work system; the installer puts it in each project's `.pm/` without taking over the product's `docs/`, `tools/` or `tests/`. Root `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` are adapters; the task data, worklog, decisions and specs live inside `.pm/` (D-47–D-49).
+`template/.pm/` is the portable work system; the installer puts it in each project's `.pm/` without taking over the product's `docs/`, `tools/` or `tests/`. Root `AGENTS.md`, `CLAUDE.md` and `backlog.config.yml` are adapters; the task data, worklog, decisions and specs live inside `.pm/`.
 
 ## Install
 
@@ -26,6 +26,6 @@ python .pm/tools/pm_check.py --stale          # doc freshness hints
 python -m unittest discover -s .pm/tests      # the package's own tests
 ```
 
-Edit task fields in Backlog's browser; documents are plain Markdown, read in any editor (D-98). `--resume` and `--tree` are board interfaces (D-45, D-51); verify the installed version supports them.
+Edit task fields in Backlog's browser; documents are plain Markdown, read in any editor. `--resume` and `--tree` are board interfaces; verify the installed version supports them.
 
 See `.pm/README.md` for the package/data ownership table and roles. `pm_check` in the git pre-commit hook checks doc consistency; a clean result does not prove the docs are true.

@@ -1,8 +1,8 @@
 """Print an English resume summary for active Backlog tasks.
 
 Usage: python .pm/tools/pm_resume.py
-       python .pm/tools/pm_resume.py --did YYYY-MM-DD   the Did part of a multi-goal worklog (D-109)
-       python .pm/tools/pm_resume.py --commits REQ-n    one task's commits and models (D-109)
+       python .pm/tools/pm_resume.py --did YYYY-MM-DD   the Did part of a multi-goal worklog
+       python .pm/tools/pm_resume.py --commits REQ-n    one task's commits and models
 """
 
 import os
@@ -24,8 +24,8 @@ def find_root(start):
 ROOT = find_root(Path(__file__).resolve().parent)
 TASKS_DIR = ROOT / ".pm" / "backlog" / "tasks"
 COMPLETED_DIR = ROOT / ".pm" / "backlog" / "completed"  # where `backlog task complete` moves Done tasks
-CLOSED_SHOWN = 3  # D-105: a one-goal session writes no worklog, so the next one reads the last closing summaries
-# The D-105 lines shown under the first line; the owner line carries the owner's name or the word Owner.
+CLOSED_SHOWN = 3  # a one-goal session writes no worklog, so the next one reads the last closing summaries
+# The closing-summary lines shown under the first line; the owner line carries the owner's name or the word Owner.
 SUMMARY_LINE = re.compile(r"(?:[A-Z][\w'-]* said|Found|Next):")
 DRAFTS_DIR = ROOT / ".pm" / "backlog" / "drafts"  # private work items (Backlog drafts); shown only when present
 WORKTREES_DIR = ROOT / ".worktrees"
@@ -33,7 +33,7 @@ AUDITS_DIR = ROOT / ".pm" / "local" / "audits"
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 WEEKLY_AUDIT_DAYS = 7
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
-REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up (REQ-61.1)
+REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
@@ -162,7 +162,7 @@ def review_fields(lines):
     """Review by (the last one written), Reviewed (the newest date), Audit report path and outcome rows.
 
     Formats: `Review by: YYYY-MM-DD · owner · reason`, `Reviewed: YYYY-MM-DD`, `Audit report: <path>`, and an
-    `Audit outcomes:` line followed by a table whose rows start with the finding number (REQ-61.1).
+    `Audit outcomes:` line followed by a table whose rows start with the finding number.
     """
     review_by, reviewed, report, outcomes, in_table = None, [], None, set(), False
     for line in lines:
@@ -331,7 +331,7 @@ def weekly_audit_warning(today):
 
 
 def worklog_gap_warning():
-    """Warn about commits after the newest worklog that no task records either (D-105).
+    """Warn about commits after the newest worklog that no task records either.
 
     A one-goal session writes no worklog, so a commit is recorded when every task its Refs line names is open
     or a draft (its file holds the work) or Done with a Final Summary; a commit with `Refs: none`, no Refs line,
@@ -362,7 +362,7 @@ def worklog_gap_warning():
 
 
 def worklog_next_warning(tasks):
-    """Name the tasks in the newest worklog's Next section that are Done by now (REQ-89).
+    """Name the tasks in the newest worklog's Next section that are Done by now.
 
     The worklog is a dated record and stays as written; this line keeps an opener from following a finished step.
     """
@@ -404,7 +404,7 @@ def folders(listing):
 
 
 def map_warning():
-    """Name the folders added or removed since the last commit that changed the LikeC4 map (D-118).
+    """Name the folders added or removed since the last commit that changed the LikeC4 map.
 
     The map is every tracked .c4 or .likec4 file; a project without one gets no warning, since the map is optional.
     """
@@ -442,7 +442,7 @@ def git_stdout(arguments, failure_warning):
 
 
 def owner_lines(tasks):
-    """Every open task that waits on the owner. Generated, so the owner list cannot go stale (D-64)."""
+    """Every open task that waits on the owner. Generated, so the owner list cannot go stale."""
     lines = []
     for task in tasks:
         needs = task["live"]["Needs owner"]
@@ -453,7 +453,7 @@ def owner_lines(tasks):
 
 
 def held_lines(tasks, drafts, today):
-    """Top-level WIP and Ready counts, then stale Ready tasks and drafts and passed Review by dates (REQ-61.1)."""
+    """Top-level WIP and Ready counts, then stale Ready tasks and drafts and passed Review by dates."""
     wip = [task for task in tasks if task["status"] in ACTIVE_STATUSES and not task["parent"]]  # top-level only
     ready = [task for task in tasks if task["status"] == "Ready"]
     lines = [f"- Open top-level work (WIP): {len(wip)}/{WIP_LIMIT} · Ready: {len(ready)} · Drafts: {len(drafts)}"]
@@ -527,7 +527,7 @@ def local_day(stamp):
 
 
 def commits(revisions="HEAD"):
-    """Commits with short hash, local author day, subject, Refs task IDs and Assisted-by models (D-109)."""
+    """Commits with short hash, local author day, subject, Refs task IDs and Assisted-by models."""
     log = git_stdout(["log", "--date=short", "--format=%h%x1f%ad%x1f%s%x1f%B%x1e", revisions], "")
     found = []
     for record in log.split("\x1e"):
@@ -549,12 +549,12 @@ def commits(revisions="HEAD"):
 
 
 def did_main(day):
-    """Print the Did part of a multi-goal worklog: tasks closed on `day` with their commits that day (D-109)."""
+    """Print the Did part of a multi-goal worklog: tasks closed on `day` with their commits that day."""
     sys.stdout.reconfigure(encoding="utf-8")
     tasks = load_tasks() + load_tasks(COMPLETED_DIR)
     closed = [task for task in tasks if task["status"] == "Done" and str(local_day(task["updated"])) == day]
     history = commits()
-    lines = ["## Did", "", f"Generated by `pm_board.py --did {day}` (D-109); write Asked and Next by hand.", ""]
+    lines = ["## Did", "", f"Generated by `pm_board.py --did {day}`; write Asked and Next by hand.", ""]
     for task in sorted(closed, key=task_order):
         summary = shorten(task["summary"][0], 300) if task["summary"] else "(no Final Summary)"
         shas = [c["sha"] for c in history if task["id"] in c["refs"] and c["day"] == day]
@@ -566,7 +566,7 @@ def did_main(day):
 
 
 def commits_main(task_id):
-    """Print one task's commits, newest first, and the models that touched them (D-109)."""
+    """Print one task's commits, newest first, and the models that touched them."""
     sys.stdout.reconfigure(encoding="utf-8")
     mine = [c for c in commits() if task_id in c["refs"]]
     lines = [f"## {task_id}: {len(mine)} commits", ""]
