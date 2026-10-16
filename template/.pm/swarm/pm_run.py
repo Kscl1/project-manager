@@ -39,7 +39,8 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        (harness "claude" starts Claude Code with --model and args; thinking applies to Pi only;
                         both start without in-process sub-agent tools: a helper is its own pm_run job, so it is visible too)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
-Herdr binary: PM_RUN_HERDR, else ~/.herdr-pinned/v0.9.3/herdr.exe. The Herdr server must be running (start `herdr` once).
+Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts it). The Herdr server must be running
+(start `herdr` once).
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
@@ -53,6 +54,7 @@ Pi diagnostics: PM_RUN_PI_SESSIONS overrides ~/.pi/agent/sessions; log lookup is
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -78,7 +80,7 @@ SETUP_S = _env("SETUP_S", 2)  # let the pane's setup line finish before the agen
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
-HERDR = os.environ.get("PM_RUN_HERDR", str(Path.home() / ".herdr-pinned" / "v0.9.3" / "herdr.exe"))
+HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
 # A used-up allowance, not per-minute throttling ("rate limit" passes after a nudge). On a pane line it counts only
@@ -116,8 +118,8 @@ def herdr(*args, plain=False):
         )
     except subprocess.TimeoutExpired:
         return {"error": {"code": "timeout", "message": f"Herdr call timed out after {HERDR_TIMEOUT:g} s"}}
-    except OSError as exc:
-        return {"error": {"message": str(exc)}}
+    except OSError as exc:  # not installed, or PM_RUN_HERDR names a file that is not there
+        return {"error": {"message": f"cannot start {HERDR_CMD[0]} ({exc}); install Herdr or set PM_RUN_HERDR"}}
     if plain and result.returncode == 0:
         return result.stdout
     for text in (result.stdout, result.stderr):

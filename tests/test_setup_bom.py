@@ -111,7 +111,7 @@ class CheckAll(unittest.TestCase):
             {"name": "D", "kind": "project-file", "path": ".pm"},
         ]
         found = {"a": ("/bin/a", True, "1.1"), "b": (None, False, None), "c": ("/bin/c", False, None)}
-        rows = bom.check_all(items, lambda check: found[check[0]])
+        rows = bom.check_all(items, lambda check, **_: found[check[0]])
         self.assertEqual(
             rows,
             [
@@ -220,6 +220,10 @@ class Load(unittest.TestCase):
         self.assert_rejected(GOOD + 'upgrade.windows = ""\n', "upgrade takes upgrade.<os>")
         self.assert_rejected(GOOD + 'install = "winget install git"\n', "install takes install.<os>")
 
+    def test_package_belongs_to_a_command_item(self):
+        self.assertEqual(self.load_text(GOOD + 'package = "npm:git"\n')[0]["package"], "npm:git")
+        self.assert_rejected(GOOD + "package = 1\n", "package is the name")
+
 
 def item(item_id, layer="core", **extra):
     return {"id": item_id, "name": item_id.title(), "kind": "command", "layer": layer, "check": [item_id], **extra}
@@ -283,6 +287,60 @@ class Plan(unittest.TestCase):
         items = [item("likec4", layer="map", install={"all": "npm i -g likec4"})]
         self.assertEqual(bom.plan(items, [row("Likec4", bom.MISSING)], layers=("core",), system="linux"), ([], []))
 
+    def test_swarm_is_opted_into(self):
+        items = [item("pi", layer="swarm", install={"all": "npm i -g pi"}, note="Needs Node.js first.")]
+        rows = [row("Pi", bom.MISSING)]
+        self.assertEqual(bom.plan(items, rows, system="linux"), ([], []))  # not in the default layers
+        steps, _ = bom.plan(items, rows, layers=bom.LAYERS, system="linux")
+        self.assertEqual((steps[0]["command"], steps[0]["note"]), ("npm i -g pi", "Needs Node.js first."))
+        self.assertEqual(bom.chosen(items, rows, bom.DEFAULT_LAYERS), [])
+        self.assertEqual(bom.chosen(items, rows, bom.LAYERS), rows)
+
+    def test_installer_step_gets_the_layer_flags(self):
+        flags = {layers: bom.init_step(Path("p"), layers, ["x"])["shell"][3:] for layers in [("core",), bom.LAYERS]}
+        self.assertEqual(flags[("core",)], ["--keep-existing"])
+        self.assertEqual(flags[bom.LAYERS], ["--keep-existing", "--map", "--swarm"])
+
+
+class ListedVersion(unittest.TestCase):
+    """Pi extensions: `pi list` names what the settings ask for; the version is read from the package itself."""
+
+    def listing(self, folder):
+        return f"User packages:\n  npm:pi-web-access@0.35.0\n    {folder}\n  npm:pi-btw@0.7.1\n    /x/pi-btw\n"
+
+    def test_version_comes_from_the_installed_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "package.json").write_text('{"name": "pi-web-access", "version": "0.36.1"}', encoding="utf-8")
+            self.assertEqual(bom.listed_version(self.listing(tmp), "npm:pi-web-access"), (tmp, True, "0.36.1"))
+
+    def test_not_listed_is_missing(self):
+        self.assertEqual(bom.listed_version(self.listing("/x"), "npm:pi-mcp-adapter"), (None, False, None))
+
+    def test_listed_but_not_installed_is_never_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path, ran_ok, version = bom.listed_version(self.listing(Path(tmp) / "gone"), "npm:pi-web-access")
+            self.assertEqual((ran_ok, version), (True, None))
+            self.assertEqual(bom.status(path, ran_ok, version, "0.35.0", "0.35.0"), bom.UNREADABLE)
+
+    def test_no_folder_line_never_reads_the_current_folder(self):
+        self.assertEqual(bom.listed_version("  npm:pi-web-access@0.35.0", "npm:pi-web-access"), ("-", True, None))
+
+    def test_filtered_package_is_never_ready(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "package.json").write_text('{"version": "0.36.1"}', encoding="utf-8")
+            for source in ("npm:pi-web-access", "npm:pi-web-access@0.35.0"):
+                with self.subTest(source=source):
+                    found = bom.listed_version(f"  {source} (filtered)\n    {tmp}\n", "npm:pi-web-access")
+                    self.assertEqual(found, (tmp, True, None))
+
+    def test_package_without_its_folder_line_is_never_ready(self):
+        listing = "User packages:\n  npm:pi-web-access@0.35.0\n  npm:pi-btw@0.7.1\n    /x/pi-btw\n"
+        self.assertEqual(bom.listed_version(listing, "npm:pi-web-access"), ("-", True, None))
+
+    def test_unversioned_name_is_found(self):
+        self.assertIsNone(bom.listed_version("  npm:pi-web-access\n    /none\n", "npm:pi-web-access")[2])
+        self.assertIsNotNone(bom.listed_version("  npm:pi-web-access\n    /none\n", "npm:pi-web-access")[0])
+
 
 class Running(unittest.TestCase):
     def test_shell_per_os(self):
@@ -308,6 +366,7 @@ class Running(unittest.TestCase):
         self.assertEqual(bom.needs("npm i -g backlog.md@1.52.0", "linux"), "npm")
         self.assertEqual(bom.needs("irm https://claude.ai/install.ps1 | iex", "windows"), "powershell")
         self.assertEqual(bom.needs("curl -fsSL https://claude.ai/install.sh | bash", "linux"), "curl")
+        self.assertEqual(bom.needs("pi install npm:pi-web-access@0.35.0", "linux"), "pi")  # after the Pi step
 
     def test_path_refresh_keeps_this_process_first(self):
         before = os.environ["PATH"]
@@ -324,7 +383,7 @@ class Main(unittest.TestCase):
 
     def run_main(self, args, found):
         with patch("sys.stdout", new_callable=io.StringIO) as out:
-            code = bom.main(args, lambda check: found.get(check[0], ("/bin/x", True, "999.0")))
+            code = bom.main(args, lambda check, **_: found.get(check[0], ("/bin/x", True, "999.0")))
         return code, out.getvalue()
 
     def test_steps_left_exit_1_and_list_commands(self):
@@ -356,9 +415,18 @@ class Main(unittest.TestCase):
             with patch.object(bom.load, "__defaults__", (Path("no-such-folder/bom.toml"),)):
                 self.assertEqual(bom.main([]), 2)
 
+    def test_swarm_rows_and_after_step_only_when_chosen(self):
+        _, out = self.run_main(["--layers", "core"], {})
+        self.assertNotIn("Herdr", out)
+        self.assertNotIn("Then: ", out)
+        _, out = self.run_main(["--layers", "core,swarm"], {"herdr": (None, False, None)})
+        self.assertIn("1. Herdr (missing): ", out)
+        self.assertIn("checks its SHA-256", out)  # the item's note under its step
+        self.assertIn("Then: Before the first pm_run job: start herdr once", out)
+
     def test_bad_layer_exit_2(self):
         with patch("sys.stderr"):
-            self.assertEqual(bom.main(["--layers", "swarm"]), 2)
+            self.assertEqual(bom.main(["--layers", "galaxy"]), 2)
 
 
 class ShippedBom(unittest.TestCase):
@@ -459,7 +527,7 @@ class Project(unittest.TestCase):
 
     def test_main_with_project(self):
         with patch("sys.stdout", new_callable=io.StringIO) as out:
-            code = bom.main(["--project", str(self.project)], lambda check: ("/bin/x", True, "999.0"))
+            code = bom.main(["--project", str(self.project)], lambda check, **_: ("/bin/x", True, "999.0"))
         self.assertEqual(code, 1)
         self.assertIn(".pm and project files", out.getvalue())
         with patch("sys.stderr"):

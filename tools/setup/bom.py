@@ -4,7 +4,7 @@ Standard library only, so the tests and the plain-text output run without Textua
 anything: it runs each command item's version check with a timeout and works out which steps are left (plan());
 the TUI runs a step only after the user presses Enter on it.
 
-usage: python tools/setup/bom.py [--layers core,map] [--project FOLDER] [--json]
+usage: python tools/setup/bom.py [--layers core,map,swarm] [--project FOLDER] [--json]
        the check table and the To do list for this machine (and the project's files with --project);
        exit 0 when nothing is left, 1 when steps or notes are left
 """
@@ -24,7 +24,15 @@ import tomllib
 
 BOM = Path(__file__).with_name("bom.toml")
 KINDS = ("command", "project-file", "manual")
-LAYERS = ("core", "map")
+LAYERS = ("core", "map", "swarm")
+DEFAULT_LAYERS = ("core", "map")  # the swarm is opted into: it needs Pi, Herdr and a model login
+# What a layer still needs after every step is done, said on Done and in the plain output: nothing checks it.
+AFTER = {
+    "swarm": (
+        "Before the first pm_run job: start herdr once in a terminal and leave it running, "
+        "and sign in to a model in Pi (run pi, then /login)."
+    ),
+}
 SYSTEMS = ("windows", "linux", "macos", "all")  # the keys of install.<os> and upgrade.<os>
 TIMEOUT_S = 15
 COLUMNS = ("Item", "Installed", "Minimum", "Tested", "Status", "Path")
@@ -101,6 +109,8 @@ def load(path=BOM):
                 or not all(isinstance(line, str) and line.strip() for line in lines.values())
             ):
                 raise ValueError(f'{where}: {key} takes {key}.<os> = "command" with <os> one of {", ".join(SYSTEMS)}')
+        if "package" in item and (item["kind"] != "command" or not isinstance(item["package"], str)):
+            raise ValueError(f"{where}: package is the name a command item's check lists, such as npm:pi-web-access")
         if item["kind"] == "project-file" and not item.get("path"):
             raise ValueError(f"{where}: a project-file item needs a path")
         if not all(isinstance(name, str) for name in item.get("similar", [])):
@@ -143,11 +153,12 @@ def status(path, ran_ok, version, minimum, tested):
     return OK
 
 
-def probe(check, timeout=TIMEOUT_S):
+def probe(check, timeout=TIMEOUT_S, package=None):
     """(path, ran_ok, version) for a check command such as ["git", "--version"].
 
     path is the resolved executable, None if not found; "python" is the interpreter running this tool.
     A non-zero exit or a timeout gives ran_ok False and no version, even if the output shows one.
+    With package (bom.toml `package`), the check lists packages (`pi list`): see listed_version().
     """
     path = sys.executable if check[0] == "python" else shutil.which(check[0])  # which() finds .cmd shims too
     if path is None:
@@ -160,7 +171,37 @@ def probe(check, timeout=TIMEOUT_S):
         return path, False, None
     if done.returncode != 0:
         return path, False, None
+    if package is not None:
+        return listed_version(done.stdout, package)
     return path, True, parse_version(done.stdout + done.stderr)
+
+
+def listed_version(output, package):
+    """(path, ran_ok, version) for one package in `pi list` output, which names each one with the folder under it:
+
+        npm:pi-web-access@0.35.0
+          ~/.pi/agent/npm/node_modules/pi-web-access
+
+    The name line is only what the settings ask for, so the version is read from the folder's package.json. Not listed
+    means missing; listed without a readable package.json gives no version, so it is never counted as ready. Pi marks
+    a package whose settings pick only some of its resources "(filtered)": what it loads is unknown here, so it gets no
+    version either. With --no-approve Pi lists only the user's own packages, never a project's.
+    """
+    lines = [line.rstrip() for line in output.splitlines()]
+    names = [line.strip().removesuffix(" (filtered)") for line in lines]
+    named = (i for i, name in enumerate(names) if name == package or name.startswith(package + "@"))
+    at = next(named, None)
+    if at is None:
+        return None, False, None
+    under = lines[at + 1] if at + 1 < len(lines) else ""
+    folder = under.strip() if under.startswith("    ") else ""  # Pi prints the folder only for an installed package
+    if not folder or lines[at].endswith(" (filtered)"):  # never read a package.json from the current folder
+        return folder or "-", True, None
+    try:
+        version = json.loads((Path(folder) / "package.json").read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return folder or "-", True, None
+    return folder, True, parse_version(str(version))
 
 
 def project_status(item, project):
@@ -181,7 +222,7 @@ def check_one(item, run=probe, project=None):
         return item["name"], "-", minimum, tested, project_status(item, project), str(Path(project) / item["path"])
     if item["kind"] != "command":
         return item["name"], "-", minimum, tested, NOT_CHECKED, item.get("path", "-")
-    path, ran_ok, version = run(item["check"])
+    path, ran_ok, version = run(item["check"], package=item["package"]) if item.get("package") else run(item["check"])
     result = status(path, ran_ok, version, item["min"], item["tested"])
     return item["name"], version or "-", minimum, tested, result, path or "-"
 
@@ -191,12 +232,17 @@ def check_all(items, run=probe, project=None):
     return [check_one(item, run, project) for item in items]
 
 
+def chosen(items, rows, layers):
+    """The rows of the ticked layers: an optional layer nobody chose must not make the table look broken."""
+    return [row for item, row in zip(items, rows) if item["layer"] in layers]
+
+
 def this_os():
     """The key of install.<os> and upgrade.<os> in bom.toml for the machine we run on."""
     return {"win32": "windows", "darwin": "macos"}.get(sys.platform, "linux")
 
 
-def plan(items, rows, layers=LAYERS, system=None, project=None):
+def plan(items, rows, layers=DEFAULT_LAYERS, system=None, project=None):
     """(steps, notes) for the ticked layers on this OS, from the check rows (DESIGN.md, Steps).
 
     A step is a dict: id, name, why (the status), command (the text to run), needs (the program that runs it),
@@ -244,6 +290,7 @@ def plan(items, rows, layers=LAYERS, system=None, project=None):
                 "needs": needs(command, system),
                 "shell": shell_args(command, system),
                 "check": item["check"],
+                "note": item.get("note", ""),
             }
         )
     if absent and project is not None:
@@ -254,7 +301,7 @@ def plan(items, rows, layers=LAYERS, system=None, project=None):
 def init_step(project, layers, ids):
     """The step that runs pm_init into the project. --keep-existing because the user reads its plan first (preview):
     the project's own AGENTS.md, hooks or settings are kept and listed for /pm-setup, never overwritten."""
-    flags = ["--keep-existing", *(["--map"] if "map" in layers else [])]
+    flags = ["--keep-existing", *[f"--{layer}" for layer in ("map", "swarm") if layer in layers]]
     args = [sys.executable, str(PM_INIT), str(project), *flags]
     return {
         "id": "pm-init",
@@ -330,7 +377,7 @@ def user_scan(home=None):
     }
 
 
-def similar(items, scan, layers=LAYERS):
+def similar(items, scan, layers=DEFAULT_LAYERS):
     """One sentence per package item the user already has something like (bom.toml `similar`)."""
     lines = []
     for item in items:
@@ -486,7 +533,11 @@ def main(argv=None, run=probe):
     Exit 0: every program the layers need is ready; 1: steps or notes are left; 2: a bad bom.toml or argument.
     """
     parser = argparse.ArgumentParser(description="Check this machine against bom.toml and list what is left to do.")
-    parser.add_argument("--layers", default=",".join(LAYERS), help="comma-separated layers (default: %(default)s)")
+    parser.add_argument(
+        "--layers",
+        default=",".join(DEFAULT_LAYERS),
+        help=f"comma-separated, of {', '.join(LAYERS)} (default: %(default)s)",
+    )
     parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
     parser.add_argument("--project", help="the project folder: also check its project files")
     args = parser.parse_args(argv)
@@ -503,14 +554,17 @@ def main(argv=None, run=probe):
     project = Path(args.project).resolve() if args.project else None
     rows = check_all(items, run, project)
     steps, notes = plan(items, rows, layers, project=project)
+    after = [AFTER[layer] for layer in layers if layer in AFTER]
     alike = similar(items, user_scan(), layers)  # information only: never a reason to stop
     if args.json:
         keys = ("name", "installed", "minimum", "tested", "status", "path")
         table = [{"id": item["id"], "layer": item["layer"], **dict(zip(keys, row))} for item, row in zip(items, rows)]
         found = {"os": this_os(), "layers": layers, "items": table, "steps": steps, "notes": notes, "similar": alike}
         found["merge"] = merge_list(project) if project is not None else []  # for /pm-setup, never a reason to stop
+        found["after"] = after
         print(json.dumps(found, indent=1))
         return 1 if steps or notes else 0
+    rows = chosen(items, rows, layers)
     widths = [max(len(str(r[i])) for r in [COLUMNS, *rows]) for i in range(len(COLUMNS))]
     for row in [COLUMNS, *rows]:
         print("  ".join(str(cell).ljust(w) for cell, w in zip(row, widths)).rstrip())
@@ -523,6 +577,8 @@ def main(argv=None, run=probe):
         print(f"To do on {this_os()} ({', '.join(layers)}), one command at a time, then run this again:")
         for number, step in enumerate(steps, 1):
             print(f"{number}. {step['name']} ({step['why']}): {step['command']}")
+            if step.get("note"):
+                print(f"   {step['note']}")
     elif notes:
         print(f"To do on {this_os()} ({', '.join(layers)}): nothing can run automatically; see the notes.")
     else:
@@ -533,6 +589,8 @@ def main(argv=None, run=probe):
         print(f"Already on this machine: {line}")
     if project is not None and merge_list(project):
         print(f"For /pm-setup to merge with the user: {merge_names(merge_list(project))}.")
+    for line in after:
+        print(f"Then: {line}")
     if steps:
         print("Show the user each command and run it only after they say yes; then run this again until it exits 0.")
     return 1 if steps or notes else 0

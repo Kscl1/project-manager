@@ -52,7 +52,7 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 | Screen | What happens | Keys |
 |---|---|---|
 | Check | Shows each program and project file: installed, minimum and tested version. Nothing changes here. On a rerun with nothing left, `Enter` goes straight to Done. | `Enter` continues, `r` checks again, `c` copies a path, `l` changes the layers on a rerun |
-| Choose | Core is always on; tick Map if you want diagrams. Lists the steps this machine needs. | `Space` ticks, `Enter` continues, `Esc` goes back |
+| Choose | Core is always on; tick Map if you want diagrams, Swarm if you want visible worker agents. Lists the steps this machine needs. | `Space` ticks, `Enter` continues, `Esc` goes back |
 | Install | One step at a time. It shows the command first; the project step also shows the installer's plan. | `y` runs, `s` skips, `c` copies, `r` checks again |
 | Done | What is ready, what is left, and how to open your project. | `o` opens Claude Desktop (Windows), `c` copies the commands |
 
@@ -88,7 +88,14 @@ python template/.pm/tools/pm_init.py ../my-project
 
 [LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.59.4 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.59.4) teaches it the syntax; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
 
-The swarm layer (Pi, Herdr and parallel workers) comes in a later release. You do not need it to start. If you already use [Pi](https://github.com/earendil-works/pi), it finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
+## Swarm layer (optional)
+
+The swarm runs helper agents as workers you can watch: each one in its own [Herdr](https://herdr.dev) pane, started and checked by `.pm/swarm/pm_run.py`. You do not need it to start. Tick Swarm in the TUI (it starts unticked), or add `--swarm` to the installer command. It needs:
+
+- [Pi](https://github.com/earendil-works/pi), with the extensions `pi-mcp-adapter` (the project's MCP servers, such as Context7, for Pi workers) and `pi-web-access` (web search and pages). Pi finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
+- Herdr, from its own installer, which puts the newest release on your PATH and checks its SHA-256.
+
+Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
 
 ## After setup: /pm-setup
 
