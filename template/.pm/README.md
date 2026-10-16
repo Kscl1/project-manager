@@ -16,7 +16,7 @@ The project's work system, installed inside its own repository. Start at the roo
 
 | Kind | Files in an installed project | On upgrade |
 |---|---|---|
-| Package | `.pm/roles/`, `templates/`, `tools/`, `tests/`, `hooks/` | Replaced by the package version. Keep project-specific changes out of these directories. |
+| Package | `.pm/roles/`, `templates/`, `tools/`, `tests/`, `hooks/`, `swarm/` (with `--swarm`) | Replaced by the package version. Keep project-specific changes out of these directories. |
 | Version stamp | `.pm/VERSION`, `.pm/package-files.sha256` | Rewritten on every install and upgrade: the package commit, and each package file's hash as installed. `--upgrade --dry-run` uses the hashes to say which side changed a file. |
 | Seed | `.pm/README.md`, `board.md`, `principles.md`, `models.md` | Written once if missing; then owned by the project and kept on upgrade. |
 | Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md`, `specs/`, `backlog/`, `worklog/` | Never overwritten. |
@@ -46,6 +46,7 @@ python .pm/tools/pm_board.py --did      # the Did part of a worklog for a sessio
 backlog browser
 python .pm/tools/pm_check.py --stale
 python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
+python -m unittest discover -s .pm/swarm   # with --swarm: pm_run against a fake Herdr, about 80 s
 ```
 
 Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor (D-98).

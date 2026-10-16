@@ -1,4 +1,4 @@
-"""Scenario tests for tools/pm_run.py with a fake Herdr (no model, no terminal, no Herdr server).
+"""Scenario tests for .pm/swarm/pm_run.py with a fake Herdr (no model, no terminal, no Herdr server).
 
 The fake Herdr keeps its state in a JSON file and reads each worker's behaviour from the job's `model` field:
   ok        writes a finished artifact on the first prompt, then settles
@@ -12,6 +12,7 @@ The fake Herdr keeps its state in a JSON file and reads each worker's behaviour 
   lost      loses the first brief without working; the resent brief finishes
 """
 
+import importlib.util
 import json
 import os
 import shutil
@@ -23,10 +24,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tools import pm_run
-
-ROOT = Path(__file__).resolve().parent.parent
-PM_RUN = ROOT / "tools" / "pm_run.py"
+HERE = Path(__file__).resolve().parent
+PM_RUN = HERE / "pm_run.py"
+_PM_RUN_SPEC = importlib.util.spec_from_file_location("pm_run", PM_RUN)
+pm_run = importlib.util.module_from_spec(_PM_RUN_SPEC)
+_PM_RUN_SPEC.loader.exec_module(pm_run)
 
 FAKE_HERDR = r"""
 import json, os, re, sys, time
@@ -352,6 +354,18 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         first_prompt = next(i for i, c in enumerate(calls) if c[:2] == ["agent", "prompt"])
         self.assertEqual(calls[first_prompt - 1][:2], ["agent", "get"])
 
+    def test_lost_brief_behind_a_used_up_quota_is_not_resent(self):
+        screen = "> Read the brief file(s) brief.md\n  API Error: 429 usage limit reached for cx/gpt-6-astra\n"
+        empty = {"n": 0, "workspaces": [], "agents": {}, "gone": {}, "closed": []}
+        self.fake_state.write_text(json.dumps({**empty, "reads": [screen]}), encoding="utf-8")
+        self.jobs(self.job("a", "lost", harness="claude"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.receipts()["a"]["state"], "handed-over")
+        self.assertEqual(len(self.herdr_state()["agents"]["run-a-1"]["prompts"]), 1)
+        self.assertIn("HANDED-OVER a: provider quota or usage limit", result.stdout)
+        self.assertNotIn("brief resent", result.stdout)
+
     def test_retry_keeps_fresh_output_without_overwriting_a_kept_name(self):
         out = self.tmp / "out" / "a.md"
         out.parent.mkdir()
@@ -564,12 +578,13 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(out.read_text(encoding="utf-8"), "previous output")
         self.assertIn("could not keep previous output; no retry", run.log_path.read_text(encoding="utf-8"))
 
-    def settled_worker(self):
+    def settled_worker(self, error="500", screen="working"):
         """A Pi worker whose turn looks settled, with a session log that ends in a provider error."""
         self.fake_state.write_text(
             json.dumps(
                 {
                     "n": 0,
+                    "reads": [screen],
                     "agents": {
                         "worker": {"behaviour": "nothing", "prompts": ["brief"], "prompted": 0, "out": "out/a.md"}
                     },
@@ -582,7 +597,7 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         entries = [
             {"type": "session", "timestamp": "1970-01-01T00:00:05Z"},
             {"type": "session_info", "name": "worker"},
-            {"type": "message", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "500"}},
+            {"type": "message", "message": {"role": "assistant", "stopReason": "error", "errorMessage": error}},
         ]
         log.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
         os.utime(log, (1000, 1000))
@@ -615,6 +630,48 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(prompts), 2, "quiet for 100 s: Pi has stopped, so the same session is nudged")
         self.assertIn("previous turn ended", prompts[-1])
         self.assertEqual(attempt["nudges"], 1)
+
+    def test_used_up_quota_is_handed_over_without_a_nudge(self):
+        claude_pane = 'some earlier output\n  API Error: 429 {"error":{"message":"usage limit reached"}}\n\n'
+        for error, screen, sign in (
+            ("429 You have hit your usage limit", "working", "429 You have hit your usage limit"),
+            (None, claude_pane, 'API Error: 429 {"error":{"message":"usage limit reached"}}'),
+        ):
+            with self.subTest(error=error):
+                run, log, attempt, state = self.settled_worker(error, screen)
+                prompts = self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)
+                self.assertEqual(len(prompts), 1, "the brief is not resent into a used-up quota")
+                self.assertEqual(state["a"]["state"], "handed-over")
+                self.assertIn(sign, attempt["quota"])
+                self.assertIn("provider quota or usage limit", attempt["why"])
+                self.assertIn("rerun the job after it resets", run.log_path.read_text(encoding="utf-8"))
+                self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
+                run.log_path.unlink()
+
+    def test_bare_429_throttling_and_worker_prose_are_still_nudged(self):
+        outage = '429: {"type":"server_error","message":"Upstream request failed: Endpoint is unavailable."}'
+        throttled = "API Error: 429 rate_limit_error: this request would exceed your rate limit"
+        prose = "## Next\n\nDocument the quota handling; the usage limit test passed.\n"
+        for error, screen in ((outage, "working"), ("500", throttled), ("500", prose)):
+            with self.subTest(error=error, screen=screen):
+                run, log, attempt, state = self.settled_worker(error, screen)
+                self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 2)
+                self.assertEqual(state["a"]["state"], "started")
+                self.assertNotIn("quota", attempt)
+
+    def test_limit_banner_with_a_reset_time_is_a_used_up_quota(self):
+        run, log, attempt, state = self.settled_worker("500", "You've hit your limit · resets 3am (Europe/Istanbul)\n")
+        self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 1)
+        self.assertEqual(state["a"]["state"], "handed-over")
+
+    def test_an_earlier_turns_quota_error_is_not_reused_when_the_log_is_gone(self):
+        run, log, attempt, state = self.settled_worker()
+        attempt.update(stopReason="error", errorMessage="429 usage limit reached")  # cached from an earlier turn
+        log.unlink()
+        attempt.pop("session_log")
+        self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 2)
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertIsNone(attempt["errorMessage"])
 
     def test_nudges_that_bring_new_work_do_not_use_the_idle_budget(self):
         run, log, attempt, state = self.settled_worker()
@@ -827,7 +884,7 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
     def test_probe_only_at_warning_and_http_evidence(self):
         from urllib.error import HTTPError, URLError
 
-        url = "http://127.0.0.1:20128/v1/models"
+        url = "http://127.0.0.1:8080/v1/models"
         for code, expected in (
             (200, "no evidence yet"),
             (429, "quota or rate limit"),
@@ -935,8 +992,8 @@ class HerdrSafetyTest(unittest.TestCase):
 
     def test_stall_env_overrides_default(self):
         result = subprocess.run(
-            [sys.executable, "-c", "from tools.pm_run import STALL_S; print(STALL_S)"],
-            cwd=ROOT,
+            [sys.executable, "-c", "from pm_run import STALL_S; print(STALL_S)"],
+            cwd=HERE,
             env={**os.environ, "PM_RUN_STALL_S": "12"},
             capture_output=True,
             text=True,
@@ -955,9 +1012,9 @@ class HerdrSafetyTest(unittest.TestCase):
             [
                 sys.executable,
                 "-c",
-                "import json; from tools.pm_run import herdr; print(json.dumps(herdr('workspace', 'list')))",
+                "import json; from pm_run import herdr; print(json.dumps(herdr('workspace', 'list')))",
             ],
-            cwd=ROOT,
+            cwd=HERE,
             env=env,
             capture_output=True,
             text=True,

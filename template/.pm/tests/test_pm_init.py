@@ -304,6 +304,51 @@ class PmInitTest(unittest.TestCase):
         manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
         self.assertIn("  .agents/skills/pm-likec4-dsl/SKILL.md", manifest)
 
+    def test_swarm_comes_with_swarm_and_then_stays(self):
+        swarm, source = self.root / ".pm" / "swarm", PM_INIT.parent.parent / "swarm"
+        self.assertEqual(self.run_init().returncode, 0)
+        self.assertFalse(swarm.exists())
+
+        # A core-only project cannot be the source of a swarm install: it has no swarm folder to copy.
+        other = Path(tempfile.mkdtemp(prefix="pm_other_"))
+        self.addCleanup(shutil.rmtree, other, onerror=_remove_readonly)
+        installed = self.root / ".pm" / "tools" / "pm_init.py"
+        from_core = subprocess.run(
+            [sys.executable, str(installed), str(other), "--swarm"], capture_output=True, text=True, encoding="utf-8"
+        )
+        self.assertNotEqual(from_core.returncode, 0)
+        self.assertIn("no swarm/", from_core.stderr)
+        self.assertFalse((other / ".pm").exists())
+
+        planned = self.run_init(self.root, "--check", "--swarm").stdout
+        self.assertIn("copy    .pm/swarm", planned)
+        self.assertEqual(self.run_init(self.root, "--swarm").returncode, 0)  # swarm chosen later
+        self.assertEqual((swarm / "pm_run.py").read_bytes(), (source / "pm_run.py").read_bytes())
+        self.assertTrue((swarm / "test_pm_run.py").is_file())
+
+        (swarm / "pm_run.py").write_text("old\n", encoding="utf-8")
+        result = self.run_init(self.root, "--upgrade")  # an upgrade without --swarm keeps the swarm current
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((swarm / "pm_run.py").read_bytes(), (source / "pm_run.py").read_bytes())
+        manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
+        self.assertIn("  swarm/pm_run.py", manifest)
+
+        # A core-only source must not upgrade a project that has the swarm: it would drop it from the manifest.
+        self.assertEqual(self.run_init(other).returncode, 0)
+        core_only = other / ".pm" / "tools" / "pm_init.py"
+        for flags in (["--upgrade"], ["--check"], ["--upgrade", "--dry-run"]):
+            with self.subTest(flags=flags):
+                refused = subprocess.run(
+                    [sys.executable, str(core_only), str(self.root), *flags],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                self.assertNotEqual(refused.returncode, 0)
+                self.assertIn("no swarm/", refused.stderr)
+                self.assertEqual((self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8"), manifest)
+
     def test_map_later_lists_likec4_and_rewrites_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = (self.root / ".mcp.json").read_bytes()
