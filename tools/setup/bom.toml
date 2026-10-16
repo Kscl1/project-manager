@@ -11,6 +11,8 @@
 # note is text shown to the user. upgrade.<os> is used for an item below its minimum when install does not upgrade.
 # similar: names of skills, MCP servers or plugins the user may already have that do the same job (shown, never removed).
 # package: for a check that lists packages (`pi list`), the name it lists; the version comes from that package's folder.
+# folder: for an item that lives in a folder of its own outside the project (~ is the home folder), where `check`
+#         runs; no folder means missing.
 
 # Core: required for the first trial.
 
@@ -229,3 +231,22 @@ name = "pm_run (swarm runner)"
 kind = "project-file"
 layer = "swarm"
 path = ".pm/swarm/pm_run.py"
+
+# EVREN: optional, unticked until the user chooses it. evren-bridge from its own repo, with the user's own EVREN key.
+
+[[item]]
+id = "evren-bridge"
+name = "evren-bridge"
+kind = "command"
+layer = "evren"
+folder = "~/evren-bridge"  # where the install line clones it
+check = ["git", "describe", "--tags", "--abbrev=0"]  # the release tag the clone is on
+min = "1.1.0"
+tested = "1.1.0"
+# Windows: pip runs even when the clone is already there, so y can retry a failed dependency install. Linux: rich
+# first, so a clone never stands without it.
+install.windows = 'git clone https://github.com/Kscl1/evren-bridge "$HOME\evren-bridge"; python -m pip install -r "$HOME\evren-bridge\requirements.txt"'
+upgrade.windows = 'git -C "$HOME\evren-bridge" pull --ff-only; python -m pip install -r "$HOME\evren-bridge\requirements.txt"'
+install.linux = "sudo pacman -S --needed python-rich && git clone https://github.com/Kscl1/evren-bridge ~/evren-bridge"
+upgrade.linux = "sudo pacman -S --needed python-rich && git -C ~/evren-bridge pull --ff-only"
+note = "The steps of its README: clone, and its one dependency, rich (on Omarchy from pacman, because Arch's Python refuses pip installs). Start the bridge with the same python this step used. The check reads the clone's tag, not rich: if the bridge says No module named rich, run this step again. Setup never asks for your EVREN key: you put it in place yourself, as the README says. Without the EVREN layer nothing else changes; to remove it, delete ~/evren-bridge."

@@ -36,6 +36,7 @@ LAYER_TEXT = {
     "core": "Core: what every project needs",
     "map": "Map: architecture diagrams of your project (optional)",
     "swarm": "Swarm: worker agents in visible Herdr panes, run by pm_run (optional)",
+    "evren": "EVREN: evren-bridge to EVREN's models, with your own key (optional)",
 }
 # Install screen: what each step state shows, and its level for the colour (bom.outcome names the states).
 STATES = {
@@ -235,7 +236,8 @@ class SetupApp(App):
             text.append(f"\n{NO_PROJECT}", "dim")
         left_out = [layer for layer in bom.LAYERS if layer not in self.layers]
         if left_out:
-            text.append(f"\nNot chosen: {', '.join(left_out)}. Tick it on the next screen to set it up.", "dim")
+            which = "it" if len(left_out) == 1 else "one"
+            text.append(f"\nNot chosen: {', '.join(left_out)}. Tick {which} on the next screen to set it up.", "dim")
         for line in self.similar:
             text.append(f"\nAlready on this machine: {line}", "dim")
         merge = bom.merge_list(self.project) if self.project else []

@@ -24,10 +24,15 @@ import tomllib
 
 BOM = Path(__file__).with_name("bom.toml")
 KINDS = ("command", "project-file", "manual")
-LAYERS = ("core", "map", "swarm")
-DEFAULT_LAYERS = ("core", "map")  # the swarm is opted into: it needs Pi, Herdr and a model login
+LAYERS = ("core", "map", "swarm", "evren")
+DEFAULT_LAYERS = ("core", "map")  # swarm and evren are opted into: they need accounts of the user's own
 # What a layer still needs after every step is done, said on Done and in the plain output: nothing checks it.
 AFTER = {
+    "evren": (
+        "Put your own EVREN API key where the Quick start of the evren-bridge README says (setup never asks for it "
+        "or reads it), then in a terminal cd ~/evren-bridge, run python evren_bridge.py and leave it running, and "
+        "point your agent at http://127.0.0.1:8787/v1 (the same README shows how)."
+    ),
     "swarm": (
         "Before the first pm_run job: start herdr once in a terminal and leave it running, "
         "and sign in to a model in Pi (run pi, then /login)."
@@ -111,6 +116,8 @@ def load(path=BOM):
                 raise ValueError(f'{where}: {key} takes {key}.<os> = "command" with <os> one of {", ".join(SYSTEMS)}')
         if "package" in item and (item["kind"] != "command" or not isinstance(item["package"], str)):
             raise ValueError(f"{where}: package is the name a command item's check lists, such as npm:pi-web-access")
+        if "folder" in item and (item["kind"] != "command" or not isinstance(item["folder"], str)):
+            raise ValueError(f"{where}: folder is where a command item's check runs, such as ~/evren-bridge")
         if item["kind"] == "project-file" and not item.get("path"):
             raise ValueError(f"{where}: a project-file item needs a path")
         if not all(isinstance(name, str) for name in item.get("similar", [])):
@@ -153,27 +160,39 @@ def status(path, ran_ok, version, minimum, tested):
     return OK
 
 
-def probe(check, timeout=TIMEOUT_S, package=None):
+def probe(check, timeout=TIMEOUT_S, package=None, folder=None):
     """(path, ran_ok, version) for a check command such as ["git", "--version"].
 
     path is the resolved executable, None if not found; "python" is the interpreter running this tool.
     A non-zero exit or a timeout gives ran_ok False and no version, even if the output shows one.
     With package (bom.toml `package`), the check lists packages (`pi list`): see listed_version().
+    With folder (bom.toml `folder`, ~ is the home folder), the check runs inside it and path is the folder;
+    no folder means missing, so the check never runs somewhere else.
     """
+    where = Path(folder).expanduser() if folder is not None else None
+    if where is not None and not where.is_dir():
+        return None, False, None
     path = sys.executable if check[0] == "python" else shutil.which(check[0])  # which() finds .cmd shims too
     if path is None:
         return None, False, None
+    shown = str(where) if where is not None else path
     try:
         done = subprocess.run(
-            [path, *check[1:]], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout
+            [path, *check[1:]],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            cwd=where,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
-        return path, False, None
+        return shown, False, None
     if done.returncode != 0:
-        return path, False, None
+        return shown, False, None
     if package is not None:
         return listed_version(done.stdout, package)
-    return path, True, parse_version(done.stdout + done.stderr)
+    return shown, True, parse_version(done.stdout + done.stderr)
 
 
 def listed_version(output, package):
@@ -222,7 +241,8 @@ def check_one(item, run=probe, project=None):
         return item["name"], "-", minimum, tested, project_status(item, project), str(Path(project) / item["path"])
     if item["kind"] != "command":
         return item["name"], "-", minimum, tested, NOT_CHECKED, item.get("path", "-")
-    path, ran_ok, version = run(item["check"], package=item["package"]) if item.get("package") else run(item["check"])
+    extra = {key: item[key] for key in ("package", "folder") if item.get(key)}  # fake probes in tests take neither
+    path, ran_ok, version = run(item["check"], **extra)
     result = status(path, ran_ok, version, item["min"], item["tested"])
     return item["name"], version or "-", minimum, tested, result, path or "-"
 
@@ -268,7 +288,8 @@ def plan(items, rows, layers=DEFAULT_LAYERS, system=None, project=None):
         if result in (FAILED, UNREADABLE, CANNOT_COMPARE):
             notes.append(
                 f"{item['name']}: installed, but it could not be verified ({result}); run "
-                f"{' '.join(item['check'])} and read its output before reinstalling."
+                f"{' '.join(item['check'])}{' in ' + item['folder'] if item.get('folder') else ''} "
+                "and read its output before reinstalling."
             )
             continue
         install, upgrade = item.get("install", {}), item.get("upgrade", {})

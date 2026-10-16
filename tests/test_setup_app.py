@@ -139,7 +139,7 @@ class SwarmLayerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(setup.query_one(app.DataTable).row_count, 1)
             summary = str(setup.query_one("#summary").content)
             self.assertNotIn("Herdr", summary)
-            self.assertIn("Not chosen: swarm.", summary)
+            self.assertIn("Not chosen: swarm, evren. Tick one", summary)
             await pilot.press("enter")
             await pilot.pause()
             setup.screen.query_one(app.SelectionList).select("swarm")
@@ -163,6 +163,42 @@ class SwarmLayerTest(unittest.IsolatedAsyncioTestCase):
             done = str(setup.screen.query_one("#done").content)
             self.assertIn("Everything for core, map, swarm is ready.", done)
             self.assertIn("Then: Before the first pm_run job: start herdr once", done)
+
+
+@unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
+class EvrenLayerTest(unittest.IsolatedAsyncioTestCase):
+    """A friend without evren-bridge: Check, Choose and Done look as they would without the item."""
+
+    async def test_absent_bridge_is_neither_counted_nor_offered_until_ticked(self):
+        evren = next(item for item in app.bom.load() if item["id"] == "evren-bridge")
+
+        def probe(check, folder=None, **_):
+            return (None, False, None) if folder else ("/bin/a", True, "1.1")  # no ~/evren-bridge on this machine
+
+        setup = app.SetupApp([ITEMS[0], evren], probe, system="windows")
+        async with setup.run_test(size=(120, 35)) as pilot:
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            self.assertEqual(setup.query_one(app.DataTable).row_count, 1)
+            summary = str(setup.query_one("#summary").content)
+            self.assertIn("All programs are ready.", summary)
+            self.assertNotIn("evren-bridge", summary)
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertNotIn("git clone", str(setup.screen.query_one("#steps").content))
+            await pilot.press("enter")
+            await pilot.pause()
+            done = str(setup.screen.query_one("#done").content)
+            self.assertIn("Everything for core, map is ready.", done)
+            self.assertNotIn("EVREN", done)
+            await pilot.press("escape", "enter")  # back to Check, then Choose: ticking EVREN offers its clone
+            await setup.workers.wait_for_complete()
+            await pilot.pause()
+            setup.screen.query_one(app.SelectionList).select("evren")
+            await pilot.pause()
+            self.assertIn(
+                "git clone https://github.com/Kscl1/evren-bridge", str(setup.screen.query_one("#steps").content)
+            )
 
 
 @unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
