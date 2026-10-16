@@ -187,6 +187,51 @@ class DecisionFilesTest(RepoTestCase):
         self.assertIn("a superseded decision needs `replaced_by: D-n`", out)
         self.assertIn("D-05: replaced_by D-99 does not exist", out)
 
+    def test_a_path_into_a_sibling_repo_must_exist(self):
+        sibling = Path(tempfile.mkdtemp(prefix="pm_check_sibling_", dir=self.root.parent))
+        self.addCleanup(shutil.rmtree, sibling, False, _remove_readonly)
+        (sibling / "tools").mkdir()
+        (sibling / "tools" / "run.py").write_text("", encoding="utf-8")
+        here, gone = f"../{sibling.name}/tools/run.py", f"../{sibling.name}/tools/old.py"
+        path = self.decision(".pm/decisions/D-03.md", "D-03", "Applied next door", "accepted")
+        prose = f"\nApplied in `{here}` and `{gone}`; the rule names files as `../{sibling.name}/...`.\n"
+        path.write_text(path.read_text(encoding="utf-8") + prose, encoding="utf-8")
+        self.run_check("--write-index")
+
+        out = self.run_check().stdout
+
+        self.assertIn(f"{gone} does not exist", out)
+        self.assertNotIn(f"{here} does not exist", out)
+        self.assertNotIn("/... does not exist", out, "a placeholder is not a path")
+
+    def test_a_sibling_repo_that_is_not_here_is_skipped(self):
+        path = self.decision(".pm/decisions/D-03.md", "D-03", "Applied elsewhere", "accepted")
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\nApplied in `../no-such-repo-here/x.py`.\n", encoding="utf-8"
+        )
+        self.decision(".pm/decisions/archive/D-04.md", "D-04", "Old", "superseded", "replaced_by: D-03\n")
+        self.run_check("--write-index")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_odd_sibling_paths_neither_crash_nor_block(self):
+        sibling = Path(tempfile.mkdtemp(prefix="pm_check_sibling_", dir=self.root.parent))
+        self.addCleanup(shutil.rmtree, sibling, False, _remove_readonly)
+        (sibling / "run.py").write_text("", encoding="utf-8")
+        gone = f"`../{sibling.name}/gone.py`"
+        prose = f"\nSee `.././`, `../{sibling.name}/run.py:12` and\n\n```text\n{gone}\n```\n"
+        path = self.decision(".pm/decisions/D-03.md", "D-03", "Odd paths", "accepted")
+        path.write_text(path.read_text(encoding="utf-8") + prose, encoding="utf-8")
+        old = self.decision(".pm/decisions/archive/D-04.md", "D-04", "Old", "superseded", "replaced_by: D-03\n")
+        old.write_text(old.read_text(encoding="utf-8") + f"\nOnce in {gone}.\n", encoding="utf-8")
+        self.run_check("--write-index")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_same_id_in_force_and_archived(self):
         self.decision(".pm/decisions/D-02.md", "D-02", "Twin", "accepted")
         self.run_check("--write-index")

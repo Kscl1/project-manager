@@ -7,6 +7,7 @@ Usage: python .pm/tools/pm_check.py                check every doc
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
 an open task keeps its live Next and Evidence lines short, so the resume summary stays short.
+A decision in force that names a file in a repository next to this one (`../repo/file`) must name one that exists.
 
 A clean result means the docs are consistent, not that they are correct.
 """
@@ -64,6 +65,8 @@ SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", 
 DECISION = re.compile(r"^\s*-\s+(?:~~)?\*\*(D-\d+)\*\*")
 REPLACED_BY = re.compile(r"→\s*(D-\d+)")
 DECISION_FILE = re.compile(r"^D-\d+$")
+# A decision may name the files that apply it in a repository next to this one: `../<repo>/<path>`.
+SIBLING_PATH = re.compile(r"`(\.\./[^`\s<>*{}]+)`")
 # Records that carry frontmatter by type. A list key may say `kayıtta yok` / `not recorded`.
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 RECORD_KEYS = {
@@ -431,6 +434,8 @@ def check_file(path, decisions):
         problems.append(
             f"{name}: {len(lines)} lines, limit is {LINE_LIMIT}\n    → split by topic and keep this file as an index"
         )
+    if DECISION_DIR and path.parent == DECISION_DIR and DECISION_FILE.match(path.stem):
+        problems += check_sibling_paths(name, lines)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_done_task(name, lines)
     if name.startswith(TASK_DIRS):
@@ -477,6 +482,32 @@ def sections(lines):
         elif current:
             found[current].append(line)
     return found
+
+
+def check_sibling_paths(name, lines):
+    """A decision in force that names a file in a sibling repository (`../repo/file`) names one that exists.
+
+    Skipped for a repository that is not next to this one, as in CI or another clone, for placeholders (`...`)
+    and inside fenced code. A line suffix (`file.py:12`) is not part of the path.
+    """
+    problems = []
+    in_fence = False
+    for number, line in enumerate(lines, start=1):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        if in_fence:
+            continue
+        for target in SIBLING_PATH.findall(line):
+            target = re.sub(r"(:\d+)+$", "", target)
+            parts = Path(os.path.normpath(target)).parts
+            if "..." in target or len(parts) < 2 or parts[0] != ".." or parts[1] == "..":
+                continue
+            if (ROOT.parent / parts[1]).is_dir() and not exists_exact_case(ROOT, target):
+                problems.append(
+                    f"{name}:{number}: {target} does not exist (paths are case-sensitive)\n"
+                    f"    → the file moved or was renamed: fix the path, then read the decision against the file"
+                )
+    return problems
 
 
 def check_done_task(name, lines):
