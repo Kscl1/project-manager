@@ -7,7 +7,8 @@
 
 ## How it was tested
 <!-- Name the CI check that covers it; add only what CI does not show (command or scenario, and the result).
-     Say what you did not check. Never claim testing you did not run. -->
+     Say what you did not check. Never claim testing you did not run.
+     No test counts, lint results or review summaries: CI and the commits show them. -->
 
 ## Risks and follow-ups
 <!-- Concrete caveats, dependencies or follow-ups only. Delete this section if there are none. -->
