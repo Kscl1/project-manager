@@ -17,6 +17,9 @@ full brief again when no turn ran (no completion_seq advance and no observed wor
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
+A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit is handed over at once,
+without a nudge: a resent brief would hit the same limit until it resets. A bare 429 (an upstream outage answers
+with it too) is nudged as before.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes.
@@ -78,6 +81,12 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 HERDR = os.environ.get("PM_RUN_HERDR", str(Path.home() / ".herdr-pinned" / "v0.9.3" / "herdr.exe"))
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
+# A used-up allowance, not per-minute throttling ("rate limit" passes after a nudge). On a pane line it counts only
+# beside an error sign: an API error, a 429, or a limit banner with its reset time.
+QUOTA = re.compile(
+    r"usage limit|quota|limit reached|(?:hit|reached) your (?:usage )?limit|out of (?:extra )?usage", re.I
+)
+ERROR_LINE = re.compile(r"\berror\b|\b429\b|\bresets?\b", re.I)
 PROMPT = (
     "Read the brief file(s) {briefs} and do the task. Your output file is {out}. Create it early and fill it "
     "section by section. Only when it is complete, append the exact last line <!-- done -->. Write only that file{also}. "
@@ -167,6 +176,23 @@ def stall_cause(job, content):
     return cause + ("; probe inconclusive (check the probe URL)" if inconclusive else "")
 
 
+def quota_sign(attempt, screen):
+    """The provider's message that the quota or usage limit is used up, at a settled turn, or None.
+
+    Pi's error from this turn is in its session log (turn_end); Claude Code prints the API error in its pane, so an
+    error line among the last ten pane lines counts too. Worker prose that only mentions a quota does not, and neither
+    does a bare 429: it also comes from an upstream outage, which a nudge can outlast.
+    """
+    error = attempt.get("errorMessage") or ""
+    lines = (
+        [line for line in pane_content(screen).splitlines() if line.strip()][-10:] if isinstance(screen, str) else []
+    )
+    for line in [error] + [line for line in lines if ERROR_LINE.search(line)]:
+        if QUOTA.search(line):
+            return " ".join(line.split())[:160]
+    return None
+
+
 def check_artifact(path, started, min_words):
     """Evidence 1 and 2: the artifact, or None with the reason."""
     if not path.exists():
@@ -234,6 +260,7 @@ def turn_end(job, attempt, repo):
     """
     if job.get("harness", "pi") != "pi":
         return "session log not found (only Pi logs supported)"
+    attempt.update(stopReason=None, errorMessage=None)  # an earlier turn's error is no evidence for this one
     root = Path(os.environ.get("PM_RUN_PI_SESSIONS", Path.home() / ".pi" / "agent" / "sessions"))
     folder = root / ("--" + re.sub(r"[/\\:]", "-", str(repo).lstrip("/\\")) + "--")
     try:
@@ -507,6 +534,8 @@ class Run:
                     if not a.get("held"):
                         a["held"] = True
                         self.log(f"HOLD {job['id']}: turn looks settled but Pi wrote its log {quiet:.0f} s ago; {why}")
+                elif self.quota_hand_over(job, s, a, why):
+                    continue
                 elif not self.nudge(job, s, a, now, size, why):
                     continue
             elif now - a["started"] > HARD_S + a.get("overtime", 0):
@@ -588,6 +617,16 @@ class Run:
         else:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
         return True
+
+    def quota_hand_over(self, job, s, a, why):
+        """Hand over a settled worker whose provider says the quota or usage limit is used up; True when it did."""
+        sign = quota_sign(a, herdr("agent", "read", a["name"], "--source", "visible", plain=True))
+        if sign:
+            a["quota"] = sign
+            self.hand_over(
+                job, s, f'provider quota or usage limit: "{sign}"; not resent, rerun the job after it resets; {why}'
+            )
+        return bool(sign)
 
     def hand_over(self, job, s, why):
         """Stop watching a live worker without closing it: the lead reads its tab and decides."""
