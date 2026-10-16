@@ -101,6 +101,14 @@ class Probe(unittest.TestCase):
         self.assertEqual(Path(path).name.lower(), script.name.lower())
         self.assertEqual((ran_ok, version), (True, "1.2.3"))
 
+    def test_folder_runs_the_check_inside_it_and_absent_is_missing(self):
+        check = [PY, "-c", "print(open('tag').read())"]
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, {"HOME": home, "USERPROFILE": home}):
+            self.assertEqual(bom.probe(check, folder="~/bridge"), (None, False, None))  # never run elsewhere
+            (Path(home) / "bridge").mkdir()
+            (Path(home) / "bridge" / "tag").write_text("v1.1.0\n")
+            self.assertEqual(bom.probe(check, folder="~/bridge"), (str(Path(home) / "bridge"), True, "1.1.0"))
+
 
 class CheckAll(unittest.TestCase):
     def test_rows_and_summary(self):
@@ -223,6 +231,10 @@ class Load(unittest.TestCase):
     def test_package_belongs_to_a_command_item(self):
         self.assertEqual(self.load_text(GOOD + 'package = "npm:git"\n')[0]["package"], "npm:git")
         self.assert_rejected(GOOD + "package = 1\n", "package is the name")
+
+    def test_folder_belongs_to_a_command_item(self):
+        self.assertEqual(self.load_text(GOOD + 'folder = "~/x"\n')[0]["folder"], "~/x")
+        self.assert_rejected(GOOD + "folder = 1\n", "folder is where")
 
 
 def item(item_id, layer="core", **extra):
@@ -448,6 +460,54 @@ class ShippedBom(unittest.TestCase):
         shipped = {p.name for p in (bom.PM_INIT.parents[2] / ".agents" / "skills").glob("pm-*")}
         listed = {Path(item["path"]).name for item in bom.load() if "/skills/" in item.get("path", "")}
         self.assertEqual(listed, shipped)
+
+
+class EvrenLayer(unittest.TestCase):
+    """evren-bridge is opted into, from its own repo; a machine without it gets the same table, steps and installer."""
+
+    def setUp(self):
+        self.evren = next(item for item in bom.load() if item["id"] == "evren-bridge")
+
+    def test_own_layer_unticked_and_the_key_left_to_the_user(self):
+        self.assertEqual(self.evren["layer"], "evren")
+        self.assertNotIn("evren", bom.DEFAULT_LAYERS)
+        for line in self.evren["install"].values():
+            self.assertIn("git clone https://github.com/Kscl1/evren-bridge", line)
+            self.assertNotIn("key", line.lower())  # the key is the user's to put in place
+        self.assertIn("never asks for it", bom.AFTER["evren"])
+
+    def test_ticked_and_absent_is_one_clone_step(self):
+        row = bom.check_one(self.evren, lambda check, folder=None, **_: (None, False, None))
+        self.assertEqual(row[4], bom.MISSING)
+        steps, notes = bom.plan([self.evren], [row], layers=("core", "evren"), system="windows")
+        self.assertEqual(([s["id"] for s in steps], steps[0]["needs"], notes), (["evren-bridge"], "git", []))
+
+    def test_absent_bridge_changes_nothing_for_the_other_layers(self):
+        def fake(present):
+            def run(check, folder=None, **_):
+                if folder:  # only the evren-bridge check runs in a folder of its own
+                    return ("/home/u/evren-bridge", True, "1.1.0") if present else (None, False, None)
+                return (None, False, None) if check[0] == "node" else ("/bin/x", True, "999.0")
+
+            return run
+
+        with tempfile.TemporaryDirectory() as project:
+            for layers in ("core", "core,map", "core,map,swarm"):
+                seen = []
+                for present in (True, False):
+                    for extra in (["--json"], []):
+                        with patch("sys.stdout", new_callable=io.StringIO) as out:
+                            code = bom.main(["--layers", layers, "--project", project, *extra], fake(present))
+                        text = out.getvalue()
+                        if extra:
+                            data = json.loads(text)
+                            data["items"] = [i for i in data["items"] if i["id"] != "evren-bridge"]
+                            text = json.dumps(data)
+                        seen.append((code, text))
+                self.assertEqual(seen[:2], seen[2:], layers)
+                self.assertIn("pm_init.py", seen[0][1])  # the installer step is planned the same way
+                for word in ("Kscl1/evren-bridge", "EVREN API key", "\nevren-bridge "):  # no step, Then: line or row
+                    self.assertNotIn(word, seen[1][1])
 
 
 PROJECT_ITEMS = [
