@@ -13,6 +13,7 @@ The fake Herdr keeps its state in a JSON file and reads each worker's behaviour 
 """
 
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -636,6 +637,12 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
             run.tick([self.job("a", "nothing")], state, {})
         return self.herdr_state()["agents"]["worker"]["prompts"]
+
+    def test_log_line_with_claude_marks_survives_a_cp1252_console(self):
+        console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+        with patch.object(sys, "stdout", console):
+            pm_run.Run(self.run_dir).log("HANDED-OVER a: ● Login expired ⎿")
+        self.assertIn("● Login expired ⎿", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
 
     def test_settled_turn_inside_pis_retry_wait_is_held_not_nudged(self):
         run, _, attempt, state = self.settled_worker()

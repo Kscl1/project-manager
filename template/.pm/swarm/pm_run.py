@@ -347,7 +347,9 @@ class Run:
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
-        print(line, flush=True)
+        # A cp1252 console cannot print Claude Code's marks (●, ⎿); the console gets '?', the log file keeps them.
+        enc = sys.stdout.encoding or "utf-8"
+        print(line.encode(enc, "replace").decode(enc), flush=True)
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
