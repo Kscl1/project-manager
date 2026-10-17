@@ -216,6 +216,22 @@ class DecisionFilesTest(RepoTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_a_sibling_path_inside_a_command_must_exist_and_repo_paths_are_not_read(self):
+        sibling = Path(tempfile.mkdtemp(prefix="pm_check_sibling_", dir=self.root.parent))
+        self.addCleanup(shutil.rmtree, sibling, False, _remove_readonly)
+        (sibling / "run.py").write_text("", encoding="utf-8")
+        here, gone = f"../{sibling.name}/run.py", f"../{sibling.name}/tools/old.py"
+        prose = f"\nRun `python {gone} --flag` or `python {here}`; it once lived in `tools/gone.py`.\n"
+        path = self.decision(".pm/decisions/D-03.md", "D-03", "A command", "accepted")
+        path.write_text(path.read_text(encoding="utf-8") + prose, encoding="utf-8")
+        self.run_check("--write-index")
+
+        out = self.run_check().stdout
+
+        self.assertIn(f"{gone} does not exist", out)
+        self.assertNotIn(f"{here} does not exist", out)
+        self.assertNotIn("tools/gone.py", out, "a decision is a dated record for paths in this repo")
+
     def test_odd_sibling_paths_neither_crash_nor_block(self):
         sibling = Path(tempfile.mkdtemp(prefix="pm_check_sibling_", dir=self.root.parent))
         self.addCleanup(shutil.rmtree, sibling, False, _remove_readonly)
@@ -237,6 +253,103 @@ class DecisionFilesTest(RepoTestCase):
         self.run_check("--write-index")
 
         self.assertIn("D-02 is defined twice", self.run_check().stdout)
+
+
+class RepoPathTest(RepoTestCase):
+    """A living doc's file paths in backticks exist; dated records are not read; a named deleting commit passes."""
+
+    LIVING = '---\ntype: living_doc\ntitle: "Roadmap"\n---\n\n# Roadmap\n\n'
+
+    def setUp(self):
+        super().setUp()
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("docs/guide.md", "# Guide\n")
+
+    def test_a_missing_path_fails_and_real_paths_pass(self):
+        self.write(
+            "docs/roadmap.md",
+            self.LIVING + "- The export ran from `tools/export_public.py`; its README was `public/README.md`.\n"
+            "- Read `docs/guide.md`, `guide.md:3` and run `python .pm/tools/pm_check.py --staged`.\n"
+            "- Not paths: `docs/research/`, `feat/x`, `docs/...`, `.pm/local/runs/x.md`, `*.md`, `v1.2`.\n"
+            "\n```text\ntools/fenced.py\n```\n",
+        )
+
+        out = self.run_check().stdout
+
+        self.assertIn("docs/roadmap.md:8: tools/export_public.py does not exist", out)
+        self.assertIn("docs/roadmap.md:8: public/README.md does not exist", out)
+        self.assertEqual(out.count("does not exist"), 2, out)
+
+    def test_dated_records_are_not_read(self):
+        line = "The export ran from `tools/export_public.py`.\n"
+        self.write("docs/research/r1.md", "# R1\n\n" + line)
+        self.write("docs/archive/old.md", "# Old\n\n" + line)
+        self.write(
+            ".pm/worklog/2026-10-17-1200-x.md",
+            '---\ntype: worklog\ntitle: "X"\ndate: 2026-10-17\ntask: [REQ-1]\nmodels: [M]\n---\n\n' + line,
+        )
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_bare_file_name_is_matched_against_the_repo(self):
+        self.write(".pm/local/only_here.py", "")
+        self.write(
+            "docs/roadmap.md",
+            self.LIVING + "Run `pm_check.py`, not `export_public.py` or `only_here.py`; see `codex-led`.\n",
+        )
+
+        out = self.run_check().stdout
+
+        self.assertIn("docs/roadmap.md:8: export_public.py does not exist", out)
+        self.assertIn("docs/roadmap.md:8: only_here.py does not exist", out, "git-ignored .pm/local/ is not the repo")
+        self.assertNotIn("pm_check.py does not exist", out)
+        self.assertNotIn("codex-led", out, "a word without a known file extension is not a file name")
+
+    def test_a_deleted_file_passes_when_its_deleting_commit_is_named(self):
+        self.git_init()
+        self.write("tools/export_public.py", "")
+        self.git("add", "-A")
+        self.commit("add the export", "2026-10-01T12:00:00")
+        added = self.git("rev-parse", "--short", "HEAD").stdout.strip()
+        (self.root / "tools" / "export_public.py").unlink()
+        self.git("add", "-A")
+        self.commit("retire the export", "2026-10-02T12:00:00")
+        deleted = self.git("rev-parse", "--short", "HEAD").stdout.strip()
+        self.write(
+            "docs/roadmap.md",
+            self.LIVING + f"- `tools/export_public.py` retired in {deleted}.\n"
+            f"- `export_public.py` is gone ({deleted}).\n"
+            f"- `tools/export_public.py` was added in {added}.\n",
+        )
+
+        out = self.run_check().stdout
+
+        self.assertNotIn("roadmap.md:8:", out)
+        self.assertNotIn("roadmap.md:9:", out)
+        self.assertIn("roadmap.md:10: tools/export_public.py does not exist", out, "only the deleting commit counts")
+
+    def test_a_sibling_file_passes_when_the_sibling_commit_that_deleted_it_is_named(self):
+        sibling = Path(tempfile.mkdtemp(prefix="pm_check_sibling_", dir=self.root.parent))
+        self.addCleanup(shutil.rmtree, sibling, False, _remove_readonly)
+        for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "T"]):
+            subprocess.run(["git", *args], cwd=sibling, check=True)
+        (sibling / "old.py").write_text("", encoding="utf-8")
+        subprocess.run(["git", "add", "-A"], cwd=sibling, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "add"], cwd=sibling, check=True)
+        subprocess.run(["git", "rm", "-q", "old.py"], cwd=sibling, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "remove"], cwd=sibling, check=True)
+        deleted = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=sibling, capture_output=True, text=True, check=True
+        ).stdout.strip()
+        gone = f"../{sibling.name}/old.py"
+        self.write("docs/roadmap.md", self.LIVING + f"- `python {gone}` retired in {deleted}.\n- Not `{gone}`.\n")
+
+        out = self.run_check().stdout
+
+        self.assertNotIn("roadmap.md:8:", out)
+        self.assertIn(f"roadmap.md:9: {gone} does not exist", out)
 
 
 class WorklogFrontmatterTest(RepoTestCase):

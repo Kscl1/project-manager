@@ -7,11 +7,13 @@ Usage: python .pm/tools/pm_check.py                check every doc
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
 an open task keeps its live Next and Evidence lines short, so the resume summary stays short.
-A decision in force that names a file in a repository next to this one (`../repo/file`) must name one that exists.
+A file path written in backticks must exist: in a living doc any repo path, in a decision in force a path into
+a repository next to this one (`../repo/file`). A deleted file passes when its deleting commit is named beside it.
 
 A clean result means the docs are consistent, not that they are correct.
 """
 
+import functools
 import os
 import re
 import subprocess
@@ -65,8 +67,11 @@ SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", 
 DECISION = re.compile(r"^\s*-\s+(?:~~)?\*\*(D-\d+)\*\*")
 REPLACED_BY = re.compile(r"→\s*(D-\d+)")
 DECISION_FILE = re.compile(r"^D-\d+$")
-# A decision may name the files that apply it in a repository next to this one: `../<repo>/<path>`.
-SIBLING_PATH = re.compile(r"`(\.\./[^`\s<>*{}]+)`")
+# A file path in backticks, alone or inside a command: `docs/x.md`, `python ../repo/tool.py`, `pm_check.py`.
+# A bare file name (no folder) counts only with one of these extensions; a commit is 7 to 40 hex digits.
+PATH_WORD = re.compile(r"[\w.-]+(/[\w.-]+)*")
+BARE_NAME_TYPES = (".md", ".py", ".yml", ".yaml", ".toml", ".json", ".txt", ".sh", ".ps1", ".c4")
+COMMIT = re.compile(r"\b[0-9a-f]{7,40}\b")
 # Records that carry frontmatter by type. A list key may say `kayıtta yok` / `not recorded`.
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 RECORD_KEYS = {
@@ -435,7 +440,9 @@ def check_file(path, decisions):
             f"{name}: {len(lines)} lines, limit is {LINE_LIMIT}\n    → split by topic and keep this file as an index"
         )
     if DECISION_DIR and path.parent == DECISION_DIR and DECISION_FILE.match(path.stem):
-        problems += check_sibling_paths(name, lines)
+        problems += check_repo_paths(name, path, lines, siblings_only=True)
+    elif [value for _, value in read_frontmatter(lines).get("type", [])] == ["living_doc"]:
+        problems += check_repo_paths(name, path, lines)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_done_task(name, lines)
     if name.startswith(TASK_DIRS):
@@ -484,11 +491,14 @@ def sections(lines):
     return found
 
 
-def check_sibling_paths(name, lines):
-    """A decision in force that names a file in a sibling repository (`../repo/file`) names one that exists.
+def check_repo_paths(name, path, lines, siblings_only=False):
+    """Every file path a doc writes in backticks exists, alone or inside a command (`python ../repo/x.py`).
 
-    Skipped for a repository that is not next to this one, as in CI or another clone, for placeholders (`...`)
-    and inside fenced code. A line suffix (`file.py:12`) is not part of the path.
+    A living doc: paths in this repo, from the root or from the doc's folder; a bare file name (`pm_check.py`)
+    must be the name of some file in the repo. A decision in force: only paths into a sibling repository
+    (`../repo/file`). A sibling repository that is not next to this one, as in CI or another clone, is skipped.
+    A missing file passes when the commit that deleted it is named on the same line. Placeholders (`...`),
+    `.pm/local/` and fenced code are skipped; a line suffix (`file.py:12`) is not part of the path.
     """
     problems = []
     in_fence = False
@@ -497,17 +507,62 @@ def check_sibling_paths(name, lines):
             in_fence = not in_fence
         if in_fence:
             continue
-        for target in SIBLING_PATH.findall(line):
-            target = re.sub(r"(:\d+)+$", "", target)
-            parts = Path(os.path.normpath(target)).parts
-            if "..." in target or len(parts) < 2 or parts[0] != ".." or parts[1] == "..":
+        for word in path_words(line):
+            if word.startswith("../"):
+                parts = Path(os.path.normpath(word)).parts
+                if len(parts) < 2 or parts[1] == ".." or not (ROOT.parent / parts[1]).is_dir():
+                    continue
+                repo, target, found = ROOT.parent / parts[1], "/".join(parts[2:]), exists_exact_case(ROOT, word)
+            elif siblings_only or word.startswith(".pm/local/"):
                 continue
-            if (ROOT.parent / parts[1]).is_dir() and not exists_exact_case(ROOT, target):
+            elif "/" in word:
+                repo, target = ROOT, word
+                found = exists_exact_case(ROOT, word) or exists_exact_case(path.parent, word)
+            else:
+                repo, target, found = ROOT, word, word in repo_file_names()
+            if not found and not deleted_on_line(repo, target, line):
                 problems.append(
-                    f"{name}:{number}: {target} does not exist (paths are case-sensitive)\n"
-                    f"    → the file moved or was renamed: fix the path, then read the decision against the file"
+                    f"{name}:{number}: {word} does not exist (paths are case-sensitive)\n"
+                    f"    → fix the path and reread the text against the file, "
+                    f"or name the commit that deleted it on the same line"
                 )
     return problems
+
+
+def path_words(line):
+    """The words inside backticks that look like a file path; quotes, commas and a line suffix are dropped."""
+    for span in INLINE_CODE.findall(line):
+        for word in span.strip("`").split():
+            word = re.sub(r"(:\d+)+$", "", word.strip("\"'(),;"))
+            if not PATH_WORD.fullmatch(word) or "..." in word:
+                continue
+            last = word.rsplit("/", 1)[-1]
+            if word.startswith("../") or ("/" in word and re.search(r".\.\w+$", last)):
+                yield word
+            elif "/" not in word and last.endswith(BARE_NAME_TYPES) and last not in BARE_NAME_TYPES:
+                yield word
+
+
+@functools.cache
+def repo_file_names():
+    """The name of every file in the repo, for matching a bare file name; skipped folders are not the repo."""
+    names = set()
+    for folder, dirs, files in os.walk(ROOT):
+        here = Path(folder).relative_to(ROOT).parts
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not any((*here, d)[: len(p)] == p for p in SKIP_PREFIXES)]
+        names.update(files)
+    return names
+
+
+def deleted_on_line(repo, target, line):
+    """True when a commit named on the line deleted the target (a rename counts as a delete) in that repo."""
+    for commit in COMMIT.findall(line):
+        show = ["git", "-C", str(repo), "-c", "core.quotePath=false", "show", "--no-renames", "--diff-filter=D"]
+        result = subprocess.run([*show, "--name-only", "--format=", commit], capture_output=True, encoding="utf-8")
+        gone = result.stdout.splitlines() if result.returncode == 0 else []
+        if any(p == target or p.endswith("/" + target) for p in gone):
+            return True
+    return False
 
 
 def check_done_task(name, lines):
