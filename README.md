@@ -78,7 +78,7 @@ flowchart TB
 | Layer           | Default              | Contents                                                                                                            |
 | --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
-| **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.59.4 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
+| **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
 | **Swarm** | Opt-in (`--swarm`) | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
 
 ## Install

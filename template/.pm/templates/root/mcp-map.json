@@ -2,7 +2,7 @@
   "mcpServers": {
     "likec4": {
       "command": "npx",
-      "args": ["-y", "@likec4/mcp@1.59.4"]
+      "args": ["-y", "@likec4/mcp@1.60.0"]
     }
   }
 }

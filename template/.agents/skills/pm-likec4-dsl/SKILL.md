@@ -2,7 +2,7 @@
 name: pm-likec4-dsl
 description: Use when working with `.c4`/`.likec4` files or LikeC4 CLI/config questions where exact DSL/CLI syntax is required, especially for strict command/snippet-first answers, validate/export flags, predicates `*`/`_`/`**`, deployment snippets, dynamic views, or relationship extension matching.
 ---
-<!-- Source: https://github.com/likec4/likec4/tree/33dbc2d34c399a99daf96e92fc28fe5d280a7fd5/skills/likec4-dsl (LikeC4 v1.59.4, skill `likec4-dsl`, MIT, see LICENSE in this folder). Changed here: the name has the pm- prefix; the evals folder is left out. -->
+<!-- Source: https://github.com/likec4/likec4/tree/0375d146f8de2eb919033bd3b43b3701194f518b/skills/likec4-dsl (LikeC4 v1.60.0, skill `likec4-dsl`, MIT, see LICENSE in this folder). Changed here: the name has the pm- prefix; the evals folder is left out. -->
 
 # LikeC4 DSL Skill
 
@@ -275,7 +275,7 @@ Full syntax, extend patterns, property table, and worked example → `references
 
 ## Style
 
-Style properties control visual appearance: `color`, `shape`, `border`, `opacity`, `size`, `padding`, `textSize`, `icon`, `iconColor`, `iconSize`, `iconPosition`, `multiple`. Relationship style extends this with `line`, `head`, and `tail` arrow shapes.
+Style properties control visual appearance: `color`, `shape`, `border`, `opacity`, `size`, `padding`, `textSize`, `sizing`, `icon`, `iconColor`, `iconSize`, `iconPosition`, `multiple`. `sizing fixed` draws all elements of the same `size` with identical width/height (content shrinks to fit); default `auto` treats `size` as a minimum. Relationship style extends this with `line`, `head`, and `tail` arrow shapes.
 
 Full color token table, all shape values, border/opacity/size tokens, icon pack prefixes (`aws:`, `azure:`, `gcp:`, `tech:`, `bootstrap:`), and correct usage patterns → `references/style-tokens-colors.md`
 
@@ -349,7 +349,7 @@ Styling?
 
 ```text
 Multi-file project?
-├─ Import elements → import { backend } from './shared.c4'
+├─ Import from another project → import { backend } from 'shared-project' (project name, not a file path)
 ├─ Cross-file lookup → short names do not inherit lexical/container scope across files; use full FQN
 ├─ Extend element → extend cloud.backend { service newSvc "New" }
 ├─ Extend relationship → extend cloud -> amazon { metadata { ... } }
