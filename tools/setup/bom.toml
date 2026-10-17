@@ -73,9 +73,9 @@ kind = "command"
 layer = "core"
 check = ["backlog", "--version"]
 min = "1.52.0"
-tested = "1.52.0"
-install.windows = "npm i -g backlog.md@1.52.0"
-install.linux = "npm i -g backlog.md@1.52.0"
+tested = "1.54.0"
+install.windows = "npm i -g backlog.md@1.54.0"
+install.linux = "npm i -g backlog.md@1.54.0"
 note = "Needs Node.js first. If npm says EACCES on Linux, follow https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally rather than sudo."
 
 [[item]]
@@ -152,8 +152,8 @@ name = "LikeC4 CLI"
 kind = "manual"
 layer = "map"
 min = "1.59.4"
-tested = "1.59.4"
-install.all = "npx likec4@1.59.4 start"
+tested = "1.60.0"
+install.all = "npx likec4@1.60.0 start"
 note = "Runs through npx with a pinned version; the scan does not start it, because npx may download."
 
 [[item]]
@@ -171,7 +171,7 @@ name = "Skill pm-likec4-dsl"
 kind = "project-file"
 layer = "map"
 path = ".agents/skills/pm-likec4-dsl"
-ref = "likec4/likec4@v1.59.4 (likec4-dsl)"
+ref = "likec4/likec4@v1.60.0 (likec4-dsl)"
 similar = ["likec4-dsl"]
 
 # Swarm: optional, unticked until the user chooses it. Workers run in visible Herdr panes, driven by pm_run.
@@ -183,9 +183,9 @@ kind = "command"
 layer = "swarm"
 check = ["pi", "--version"]
 min = "1.0.3"
-tested = "1.0.3"
-install.windows = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
-install.linux = "npm i -g @earendil-works/pi-coding-agent@1.0.3"
+tested = "1.3.0"
+install.windows = "npm i -g @earendil-works/pi-coding-agent@1.3.0"
+install.linux = "npm i -g @earendil-works/pi-coding-agent@1.3.0"
 note = "Needs Node.js first. Pi workers reach a model through the account you sign in with in Pi (/login); a ChatGPT plan works through OpenAI, Sign in with ChatGPT."
 
 [[item]]
@@ -208,9 +208,9 @@ layer = "swarm"
 check = ["pi", "list", "--no-approve"]  # the user's own Pi packages; --no-approve skips any project's, and its trust question
 package = "npm:pi-mcp-adapter"
 min = "2.36.0"
-tested = "2.36.0"
-install.windows = "pi install npm:pi-mcp-adapter@2.36.0"
-install.linux = "pi install npm:pi-mcp-adapter@2.36.0"
+tested = "5.3.2"
+install.windows = "pi install npm:pi-mcp-adapter@5.3.2"
+install.linux = "pi install npm:pi-mcp-adapter@5.3.2"
 note = "Gives Pi workers the project's MCP servers from .mcp.json, such as Context7. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
 
 [[item]]
@@ -221,9 +221,9 @@ layer = "swarm"
 check = ["pi", "list", "--no-approve"]
 package = "npm:pi-web-access"
 min = "0.35.0"
-tested = "0.35.0"
-install.windows = "pi install npm:pi-web-access@0.35.0"
-install.linux = "pi install npm:pi-web-access@0.35.0"
+tested = "0.42.0"
+install.windows = "pi install npm:pi-web-access@0.42.0"
+install.linux = "pi install npm:pi-web-access@0.42.0"
 note = "Web search and page reading for Pi workers. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
 
 [[item]]
