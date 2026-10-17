@@ -1,8 +1,7 @@
 """Independent acceptance tests for ``python .pm/tools/pm_resume.py``.
 
-TASK-1.2.2 - written black-box against
-``.pm/specs/status-handoff/requirements.md`` and
-``.pm/templates/live-block.md`` without reading the implementation.
+Written black-box against ``.pm/templates/live-block.md`` without reading
+the implementation.
 
 Every test builds a throwaway repository in a temporary directory: a real
 git repo with commits, Backlog-style task files under
@@ -10,8 +9,8 @@ git repo with commits, Backlog-style task files under
 script under test is copied from this worktree's ``.pm/tools/pm_resume.py``
 into the fixture and executed with ``subprocess`` from the fixture root.
 
-Standard library only. Tests skip while the implementation script is not
-integrated in ``.pm/tools/`` yet.
+Standard library only. Tests skip when the script is missing from
+``.pm/tools/``.
 """
 
 import shutil
@@ -97,7 +96,7 @@ def write_task(root, task_id, title, status, notes=None):
 class ResumeSummaryTest(unittest.TestCase):
     def setUp(self):
         if not SCRIPT_SOURCE.exists():
-            self.skipTest("pm_resume.py is not integrated in .pm/tools yet")
+            self.skipTest("pm_resume.py is missing from .pm/tools")
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)

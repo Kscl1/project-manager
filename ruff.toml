@@ -2,7 +2,6 @@
 line-length = 120
 target-version = "py38"  # the package tools support Python 3.8+
 include = ["*.py"]  # ruff 0.16 would also reformat code blocks in our Markdown docs
-extend-exclude = ["docs/research"]  # dated records are never rewritten
 
 [lint]
 # Explicit list: ruff's defaults change between versions. E4/E7/E9/F are the classic error rules,

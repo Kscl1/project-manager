@@ -102,7 +102,7 @@ class ReadTaskMetadataTest(PmBoardTestCase):
 
 class SampleOutputTest(PmBoardTestCase):
     def test_sample_output_reproduced_exactly(self):
-        """AC #1: Sample output above is reproduced exactly for the same three tasks."""
+        """Sample output above is reproduced exactly for the same three tasks."""
         self.write_task(
             "task-1.md",
             ("---\nid: TASK-1\ntitle: Test suite\nstatus: Done\nlabels: []\n---\n\nBody of task 1.\n"),
@@ -146,7 +146,7 @@ class SampleOutputTest(PmBoardTestCase):
 
 class StatusMappingAndSectionsTest(PmBoardTestCase):
     def test_status_mapping_to_sections(self):
-        """AC #2: 'Active' -> Active, 'Ready' -> Ready, 'Done' -> Done."""
+        """'Active' -> Active, 'Ready' -> Ready, 'Done' -> Done."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Alpha\nstatus: Active\nlabels: []\n---\n",
@@ -169,7 +169,7 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         self.assertNotIn("## Other", result.stdout)
 
     def test_empty_sections_show_none(self):
-        """AC #2: Sections are always present; empty section shows '- (none)'."""
+        """Sections are always present; empty section shows '- (none)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Only Done\nstatus: Done\nlabels: []\n---\n",
@@ -184,7 +184,7 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         self.assertNotIn("## Other", result.stdout)
 
     def test_other_section_appears_only_when_other_status_exists(self):
-        """AC #2: Any other status maps to Other, which only appears when such tasks exist."""
+        """Any other status maps to Other, which only appears when such tasks exist."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Blocked task\nstatus: Blocked\nlabels: []\n---\n",
@@ -207,7 +207,7 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
         )
 
     def test_expedite_lane_and_urgent_label(self):
-        """AC #2: an `acil` label routes the task to the Urgent count and appends ' (urgent)'."""
+        """An `acil` label routes the task to the Urgent count and appends ' (urgent)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Normal progress\nstatus: Active\nlabels: []\n---\n",
@@ -235,7 +235,7 @@ class StatusMappingAndSectionsTest(PmBoardTestCase):
 
 class WarningsTest(PmBoardTestCase):
     def test_warnings_not_shown_at_or_below_limit(self):
-        """AC #3: No warnings when WIP <= 7 and Urgent <= 1."""
+        """No warnings when WIP <= 7 and Urgent <= 1."""
         for i in range(1, 4):
             self.write_task(
                 f"task-{i}.md",
@@ -257,7 +257,7 @@ class WarningsTest(PmBoardTestCase):
         self.assertNotIn("Urgent lane full", result.stdout)
 
     def test_wip_warning_when_active_over_limit(self):
-        """AC #3: '⚠️ WIP limit exceeded: N/7' when WIP > 7."""
+        """'⚠️ WIP limit exceeded: N/7' when WIP > 7."""
         for i in range(1, 9):
             self.write_task(
                 f"task-{i}.md",
@@ -275,7 +275,7 @@ class WarningsTest(PmBoardTestCase):
         self.assertNotIn("Urgent lane full", result.stdout)
 
     def test_urgent_warning_when_urgent_over_limit(self):
-        """AC #3: '⚠️ Urgent lane full: N/1' when Urgent > 1."""
+        """'⚠️ Urgent lane full: N/1' when Urgent > 1."""
         for i in range(1, 3):
             self.write_task(
                 f"task-{i}.md",
@@ -293,7 +293,7 @@ class WarningsTest(PmBoardTestCase):
         self.assertNotIn("WIP limit exceeded", result.stdout)
 
     def test_both_warnings_appear_in_stated_order(self):
-        """AC #3: Warnings appear right after counts and before the Ready line, in order: WIP then Urgent."""
+        """Warnings appear right after counts and before the Ready line, in order: WIP then Urgent."""
         for i in range(1, 9):
             self.write_task(
                 f"task-act-{i}.md",
@@ -319,7 +319,7 @@ class WarningsTest(PmBoardTestCase):
         self.assertTrue(pos_counts < pos_wip < pos_urgent < pos_ready)
 
     def test_three_wip_lanes_three_total_no_warning(self):
-        """CHANGES #4: one non-urgent task in Active, In review and Owner check is WIP 3/3, no warning."""
+        """One non-urgent task in Active, In review and Owner check is WIP 3/3, no warning."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Active one\nstatus: Active\nlabels: []\n---\n",
@@ -394,13 +394,13 @@ class WarningsTest(PmBoardTestCase):
 
 class ReadyLineTest(PmBoardTestCase):
     def test_ready_line_shown_when_ready_is_0(self):
-        """AC #4: 'Ready: N (< 2) → time to plan' appears when the Ready count == 0."""
+        """'Ready: N (< 2) → time to plan' appears when the Ready count == 0."""
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
         self.assertEqual(result.returncode, 0)
         self.assertIn("Ready: 0 (< 2) → time to plan", result.stdout)
 
     def test_ready_line_shown_when_ready_is_1(self):
-        """AC #4: 'Ready: N (< 2) → time to plan' appears when the Ready count == 1."""
+        """'Ready: N (< 2) → time to plan' appears when the Ready count == 1."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: One todo\nstatus: Ready\nlabels: []\n---\n",
@@ -410,7 +410,7 @@ class ReadyLineTest(PmBoardTestCase):
         self.assertIn("Ready: 1 (< 2) → time to plan", result.stdout)
 
     def test_ready_line_not_shown_when_ready_is_2(self):
-        """AC #4: the Ready line does not appear when the Ready count == 2."""
+        """The Ready line does not appear when the Ready count == 2."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Todo 1\nstatus: Ready\nlabels: []\n---\n",
@@ -425,7 +425,7 @@ class ReadyLineTest(PmBoardTestCase):
         self.assertNotIn("(< 2)", result.stdout)
 
     def test_ready_line_not_shown_when_ready_greater_than_2(self):
-        """AC #4: the Ready line does not appear when the Ready count > 2."""
+        """The Ready line does not appear when the Ready count > 2."""
         for i in range(1, 4):
             self.write_task(
                 f"task-{i}.md",
@@ -438,7 +438,7 @@ class ReadyLineTest(PmBoardTestCase):
 
 class SortingTest(PmBoardTestCase):
     def test_sorting_by_id_number_not_text(self):
-        """AC #5: Tasks inside each section are sorted by the number in their id (TASK-2 before TASK-10)."""
+        """Tasks inside each section are sorted by the number in their id (TASK-2 before TASK-10)."""
         self.write_task(
             "task-10.md",
             "---\nid: TASK-10\ntitle: Tenth\nstatus: Ready\nlabels: []\n---\n",
@@ -469,7 +469,7 @@ class SortingTest(PmBoardTestCase):
 
 class LabelsParsingTest(PmBoardTestCase):
     def test_inline_labels_format_and_unknown_fields(self):
-        """AC #6: Inline list format labels: [a, b] is read, unknown fields are ignored."""
+        """Inline list format labels: [a, b] is read, unknown fields are ignored."""
         self.write_task(
             "task-1.md",
             (
@@ -499,7 +499,7 @@ class LabelsParsingTest(PmBoardTestCase):
         self.assertIn("- TASK-2 · Inline Empty", result.stdout)
 
     def test_block_labels_format(self):
-        """AC #6: Block list format labels: followed by lines '  - item' is read."""
+        """Block list format labels: followed by lines '  - item' is read."""
         self.write_task(
             "task-1.md",
             ("---\nid: TASK-1\ntitle: Block Urgent\nstatus: Active\nlabels:\n  - pilot\n  - acil\n---\n"),
@@ -520,7 +520,7 @@ class LabelsParsingTest(PmBoardTestCase):
         self.assertIn("- TASK-2 · Block Non-Urgent", result.stdout)
 
     def test_both_urgent_and_acil_labels_count(self):
-        """CHANGES #3: the 'urgent' label counts the same as `acil`; the title suffix is ' (urgent)'."""
+        """The 'urgent' label counts the same as `acil`; the title suffix is ' (urgent)'."""
         self.write_task(
             "task-1.md",
             "---\nid: TASK-1\ntitle: Urgent label\nstatus: Active\nlabels: [urgent]\n---\n",
@@ -544,7 +544,7 @@ class LabelsParsingTest(PmBoardTestCase):
 
 class FrontmatterAndExitCodeTest(PmBoardTestCase):
     def test_files_without_frontmatter_skipped_silently_and_exits_0(self):
-        """AC #7: Files without frontmatter are skipped silently; exit code is 0."""
+        """Files without frontmatter are skipped silently; exit code is 0."""
         self.write_task(
             "valid.md",
             "---\nid: TASK-1\ntitle: Valid\nstatus: Done\nlabels: []\n---\n",
@@ -605,7 +605,7 @@ class CommandLineInterfaceTest(PmBoardTestCase):
         )
 
     def test_default_tasks_dir_reads_pm_backlog(self):
-        """CHANGES #2: without --tasks, pm_board reads <root>/.pm/backlog/tasks."""
+        """Without --tasks, pm_board reads <root>/.pm/backlog/tasks."""
         pm_tools = self.temp_dir / ".pm" / "tools"
         pm_tasks = self.temp_dir / ".pm" / "backlog" / "tasks"
         pm_tools.mkdir(parents=True)
@@ -632,7 +632,7 @@ class CommandLineInterfaceTest(PmBoardTestCase):
         self.assertIn("- TASK-1 · New layout task", result.stdout)
 
     def test_unclosed_frontmatter_is_skipped(self):
-        """Review finding: a file that opens --- but never closes it has no frontmatter."""
+        """A file that opens --- but never closes it has no frontmatter."""
         self.write_task("task-1.md", "---\nid: TASK-1\ntitle: Real\nstatus: Ready\nlabels: []\n---\n")
         self.write_task("broken.md", "---\nid: TASK-9\ntitle: Broken\nstatus: Ready\n")
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
@@ -641,7 +641,7 @@ class CommandLineInterfaceTest(PmBoardTestCase):
         self.assertNotIn("TASK-9", result.stdout)
 
     def test_exact_output_with_both_warnings(self):
-        """Review finding: pin the full layout when both warnings are present."""
+        """Pin the full layout when both warnings are present."""
         for i in range(1, 9):
             self.write_task(f"task-{i}.md", f"---\nid: TASK-{i}\ntitle: A{i}\nstatus: Active\nlabels: []\n---\n")
         for i in (9, 10):

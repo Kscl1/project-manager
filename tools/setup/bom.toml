@@ -14,7 +14,7 @@
 # folder: for an item that lives in a folder of its own outside the project (~ is the home folder), where `check`
 #         runs; no folder means missing.
 
-# Core: required for the first trial.
+# Core: required.
 
 [[item]]
 id = "python"
@@ -144,7 +144,7 @@ layer = "core"
 path = ".agents/skills/pm-setup"
 note = "Run /pm-setup in your coding agent after this setup: it fits .pm to your project with you."
 
-# Map: optional in the first trial.
+# Map: optional.
 
 [[item]]
 id = "likec4"

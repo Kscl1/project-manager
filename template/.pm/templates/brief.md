@@ -15,6 +15,6 @@ REPORT      <Use templates/report.md, including STATUS, changed paths, exact che
 TOOLS       The "Lead only" tool table in root AGENTS.md does not apply to you; use only what this brief allows.
 ```
 
-Before dispatch, answer three questions: **What exact shape is the output? What should the worker do if a check repeats or stalls? Where should the result be written?** Ambiguity here made pilot workers differ on T2; one repeated commands for 63 turns. A missing acceptance example is a scoping problem, not a worker's invitation to guess. Model identity is taken from the run record, not a name the worker puts in the report.
+Before dispatch, answer three questions: **What exact shape is the output? What should the worker do if a check repeats or stalls? Where should the result be written?** Ambiguity here makes workers give different shapes for the same task; one worker repeated a command for 63 turns. A missing acceptance example is a scoping problem, not a worker's invitation to guess. Model identity is taken from the run record, not a name the worker puts in the report.
 
 For a tiny change, shorten the prose, not the goal/scope/check/report contract.

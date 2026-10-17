@@ -47,7 +47,7 @@ CATALOGUE_BEGIN, CATALOGUE_END = "<!-- record-catalogue:begin -->", "<!-- record
 ARCHIVED = "archived"  # an archived decision that names no replacement
 # Decision files carry `id`, `title`, `status`, `date` and, when replaced, `replaced_by` in their frontmatter.
 STATUSES = {"accepted": False, "superseded": True, "elsewhere": True}  # status -> lives in archive/
-# Research standard v1 (docs/research/research-standard/README.md): only entries that declare `terms:` are checked.
+# Research study entries (docs/research/<topic>/README.md): only entries that declare `terms:` are checked.
 STUDY_ENTRY = re.compile(r"^docs/research/[^/]+/README\.md$")
 STUDY_FIELDS = ("title", "date", "task", "question", "validity", "decisions", "models", "terms")
 STUDY_SECTIONS = (
@@ -455,7 +455,7 @@ def check_file(path, decisions):
 
 
 def check_study(path, name, lines):
-    """A study entry that declares `terms:` follows research standard v1: its fields, seven sections, a tidy root."""
+    """A study entry that declares `terms:` carries its fields, seven sections and a tidy root."""
     fields = read_frontmatter(lines)
     if "terms" not in fields:
         return []  # older studies predate the standard

@@ -167,7 +167,7 @@ class SwarmLayerTest(unittest.IsolatedAsyncioTestCase):
 
 @unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
 class EvrenLayerTest(unittest.IsolatedAsyncioTestCase):
-    """A friend without evren-bridge: Check, Choose and Done look as they would without the item."""
+    """A user without evren-bridge: Check, Choose and Done look as they would without the item."""
 
     async def test_absent_bridge_is_neither_counted_nor_offered_until_ticked(self):
         evren = next(item for item in app.bom.load() if item["id"] == "evren-bridge")
