@@ -107,7 +107,7 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 
 - **Stage:** Alpha; expect breaking changes. New alpha releases will come quickly.
 - **Platforms:** Tested end to end on Windows; Linux not tested yet.
-- **Licence and support:** [MIT](LICENSE). Experimental, best-effort support with no promised response time.
+- **Licence and support:** [MIT](LICENSE). Experimental, best-effort support with no promised response time. Issues and pull requests: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Credits
 

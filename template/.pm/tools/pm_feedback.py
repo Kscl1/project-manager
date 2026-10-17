@@ -180,10 +180,7 @@ def send(root, report, yes, repo):
     print(text)
     if not yes:
         try:
-            print(
-                f"It becomes an issue in the package's home repo (github.com/{repo}); anyone with access can read it,"
-            )
-            print("and it becomes public when the repo does.")
+            print(f"It becomes a public issue in the package's home repo (github.com/{repo}); anyone can read it.")
             answer = input("Send it? [y/N] ")
         except EOFError:
             answer = ""
