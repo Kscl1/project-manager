@@ -8,6 +8,7 @@ import io
 import json
 import os
 import platform
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -455,6 +456,23 @@ class ShippedBom(unittest.TestCase):
                 if "/skills/" in item.get("path", ""):
                     self.assertTrue(item["id"].startswith("pm-"))
                     self.assertTrue(Path(item["path"]).name.startswith("pm-"))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows PowerShell line")
+    def test_claude_code_windows_line_adds_local_bin_to_path_once(self):
+        """The part after the installer, run on this process's PATH instead of the user's, and without the download."""
+        line = next(item for item in bom.load() if item["id"] == "claude-code")["install"]["windows"]
+        add = line.split("| iex; ", 1)[1].replace('"User"', '"Process"') + "; $env:Path"
+        bin_dir = str(Path.home() / ".local" / "bin")
+        for start, expected in (("C:\\a", f"C:\\a;{bin_dir}"), (f"C:\\a;{bin_dir}", f"C:\\a;{bin_dir}")):
+            with self.subTest(start=start):
+                done = subprocess.run(
+                    bom.shell_args(add, "windows"),
+                    capture_output=True,
+                    text=True,
+                    env={**os.environ, "PATH": start},
+                    timeout=60,
+                )
+                self.assertEqual(done.stdout.strip(), expected, done.stderr)
 
     def test_every_shipped_skill_is_checked(self):
         shipped = {p.name for p in (bom.PM_INIT.parents[2] / ".agents" / "skills").glob("pm-*")}
