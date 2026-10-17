@@ -34,7 +34,7 @@ Then two short sections:
 - Never paste large files into the report. Quote the line that matters.
 - Read cheaply: headers first, then a targeted search and the few lines you need. Whole-file reads are the expensive default, not the smart one.
 - Mark anything you inferred as inferred, even when it looks obvious.
-- The project's own research notes are secondary sources. Verify a claim at its original source before you repeat it; a note may carry a *(Düzeltme / Correction: …)* marker that overrides its text (L-16).
+- The project's own research notes are secondary sources. Verify a claim at its original source before you repeat it; a note may carry a *(Düzeltme / Correction: …)* marker that overrides its text.
 - Stay inside the brief's scope. A find outside it goes in the report, not into new digging.
 - When the timebox is reached, write the report with what you have and stop.
 

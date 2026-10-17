@@ -14,7 +14,7 @@ Which model fills which role in this project. This file names roles and what eac
 | reviewer | Always a different family from the author. |
 | test-writer | Works in parallel with the coder; no family rule. |
 
-Which data may go to which provider is a separate project decision; record it in `decisions.md`.
+Which data may go to which provider is a separate project decision; record it as a decision in `.pm/decisions/` (index: `.pm/decisions.md`).
 
 ## Measured models (evidence, not a default)
 

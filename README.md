@@ -6,7 +6,7 @@ It is not a framework or a harness. It is a folder of conventions (`.pm/`), one 
 
 ## What you get
 
-- **`.pm/`** — role cards (lead, worker, test-writer, reviewer), a one-table model map, brief and report formats, five working principles, and a decision log with stable IDs.
+- **`.pm/`** — role cards (lead, worker, test-writer, reviewer, researcher), a model map (roles and measured models), brief and report formats, five working principles, and a decision log with stable IDs.
 - **`.pm/tools/pm_check.py`** — fails when a doc depends on a superseded decision, links to a missing file, or grows past a size limit. `--stale` lists docs whose described code changed since they were last reviewed, without blocking anything.
 - **A pre-commit hook** that runs the consistency check, and the package's own tests in `.pm/tests/` (`python -m unittest discover -s .pm/tests`). The CI workflow in this repo runs them here; an installed project gets no workflow.
 

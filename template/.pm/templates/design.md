@@ -13,4 +13,4 @@ Optional: write `.pm/specs/<epic>/design.md` only when the Epic has a consequent
 
 ## Decision and verification
 
-<Chosen option and why, or owner decision needed. Name the smallest test that could disprove it. If the choice is recorded in `.pm/decisions.md`, cite its ID instead of restating it.>
+<Chosen option and why, or owner decision needed. Name the smallest test that could disprove it. If the choice is recorded as a decision in `.pm/decisions/`, cite its ID instead of restating it.>

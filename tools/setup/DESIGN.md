@@ -39,7 +39,7 @@ bom.toml --load--> items --probe--> path, exit, output --parse--> version --comp
 ```
 
 - `bom.py` (standard library only, tested): `load()`; `probe()` resolves the executable (`shutil.which`, which also finds npm's `.cmd` shims on Windows; for Python the interpreter running the TUI, `sys.executable`), runs the check with a 15-second timeout and keeps the path; `parse_version()`; `status()`.
-- `app.py` (Textual, thin): one screen, one `DataTable`. The checks run in a thread worker so the screen opens at once; the worker hands the rows back with `call_from_thread`, because Textual is not thread-safe. While a scan runs, `r` does nothing. `q` quits. Under the table: the counts, one next-step sentence (`next_step()`, from the worst status) and a legend. Each status has a symbol as well as the theme's colour, so it reads without colour; not-checked rows are dimmed. The Path column shows from 100 columns up, so 80 columns fit without scrolling.
+- `app.py` (Textual, thin): four screens (Check, Choose, Install, Done; see Screens); Check is one `DataTable`. The checks run in a thread worker so the screen opens at once; the worker hands the rows back with `call_from_thread`, because Textual is not thread-safe. While a scan runs, `r` does nothing. `q` quits. Under the table: the counts, one next-step sentence (`next_step()`, from the worst status) and a legend. Each status has a symbol as well as the theme's colour, so it reads without colour; not-checked rows are dimmed. The Path column shows from 100 columns up, so 80 columns fit without scrolling.
 - `python tools/setup/bom.py` prints the same table and next step as plain text, without Textual.
 
 ## Status rules
@@ -71,7 +71,7 @@ The subtitle names where the user is (`Check · Choose · Install · Done`), the
 
 ## Steps: what Choose and Install run
 
-`bom.plan(items, rows, layers, os)` is a pure function in `bom.py`: from the check rows it returns one step per command item in a ticked layer whose status is **missing** or **below minimum**. A step holds the item, why it is needed, the command text for this OS, the program that runs it (`needs`: `winget`, `npm`, `pacman` after `sudo`, or the shell for a PowerShell line) and the argument list that runs it. The command is `upgrade.<os>` for an item below its minimum when the entry has one, else `install.<os>`, else `install.all`. Current winget may upgrade on `install` too, but an explicit `upgrade` line says what happens. An item without a command for this OS becomes a note ("no install command for windows" plus its `note`). An item that is installed but could not be verified (**check failed**, **version unreadable**, **cannot compare**) is a note too: reinstalling over it could hide the cause, and it is never counted as ready. Project files that are **not in project** become one last step, `pm_init` into the project (`init_step`), with `--keep-existing` and, when Map is ticked, `--map`. Before `y` the Install panel shows the installer's own plan (`pm_init --check`, read-only, in a worker with a 30-second limit), in a few lines: its changes counted ("copy 10 package folders, write 16 files, ...",
+`bom.plan(items, rows, layers, os)` is a pure function in `bom.py`: from the check rows it returns one step per command item in a ticked layer whose status is **missing** or **below minimum**. A step holds the item, why it is needed, the command text for this OS, the program that runs it (`needs`: `winget`, `npm`, `pacman` after `sudo`, or the shell for a PowerShell line) and the argument list that runs it. The command is `upgrade.<os>` for an item below its minimum when the entry has one, else `install.<os>`, else `install.all`. Current winget may upgrade on `install` too, but an explicit `upgrade` line says what happens. An item without a command for this OS becomes a note ("no install command for windows" plus its `note`). An item that is installed but could not be verified (**check failed**, **version unreadable**, **cannot compare**) is a note too: reinstalling over it could hide the cause, and it is never counted as ready. Project files that are **not in project** become one last step, `pm_init` into the project (`init_step`), with `--keep-existing` and `--map` or `--swarm` for each of those layers that is ticked. Before `y` the Install panel shows the installer's own plan (`pm_init --check`, read-only, in a worker with a 30-second limit), in a few lines: its changes counted ("copy 10 package folders, write 16 files, ...",
 all inside the project folder) and, by name, every file of the user's that it keeps; `--check` on the copied command
 lists every file. `y` runs the step only once that plan has arrived; without one it says so and `c` copies the command. `--keep-existing` is safe here because the user has read that plan; run by hand, `pm_init` stops on such files instead. A file of the user's that lacks our part (**merge by hand**) goes to the same step until the installer has listed it in `.pm/local/merge-by-hand.md`; from then on it is `/pm-setup`'s work, neither a step nor a note, and Check and Done name it on one line. The installer never rewrites such a file. After the step the project items are checked again: all there and nothing listed is done; anything listed is "done, merge the rest".
 
@@ -111,7 +111,7 @@ The user may give up and ask their coding agent instead; the agent should not ha
 
 ## Running it
 
-A supported Python (3.11 or newer, for `tomllib`) must already exist; the TUI cannot install the Python it runs on. Without one, install it by hand first: Windows `winget install --id Python.Python.3.11 --exact --source winget`, Arch `sudo pacman -S --needed python`.
+A supported Python (3.11 or newer, for `tomllib`) must already exist; the TUI cannot install the Python it runs on. Without one, install it by hand first: Windows `winget install --id Python.PythonInstallManager --exact --source winget`, then `py install 3.13` (the older `Python.Python.3.x` installers can be stopped by Smart App Control; see `docs/getting-started.md`), Arch `sudo pacman -S --needed python`.
 
 ```
 python -m venv tools/setup/.venv
@@ -141,5 +141,5 @@ asked for, written or shown: `AFTER` names it as the step left to the user. Noth
 
 ## Left for later, on purpose
 
-- A one-line bootstrap that makes the virtual environment for the user, and a run on a clean machine.
+- A one-line bootstrap that makes the virtual environment for the user, and a clean-machine run on Linux (Windows was rehearsed in Windows Sandbox in October 2026).
 - Renovate watching `bom.toml`.
