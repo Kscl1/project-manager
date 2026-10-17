@@ -320,7 +320,13 @@ class ResumeSummaryTest(unittest.TestCase):
         done("TASK-1", "Oldest", "2025-06-01 09:00", "Oldest summary.")
         done("TASK-2", "Middle", "2025-06-02 09:00", "Middle summary.\nEvidence: 9 tests OK\nNext: none.")
         done("TASK-3", "Moved", "2025-06-03 09:00", "Completed summary.", folder="completed")
-        done("TASK-4", "Newest", "2025-06-04 09:00", "Newest summary.\nSam said: ship it.\nFound: one gap.")
+        done(
+            "TASK-4",
+            "Newest",
+            "2025-06-04 09:00",
+            "Newest summary.\nSam said: ship it.\nFound: one gap.",
+            folder="archive/tasks",
+        )
         done("TASK-5", "No summary", "2025-06-05 09:00", None)
         write_task(self.root, "TASK-6", "Still open", "Ready", notes="Next: later")
 

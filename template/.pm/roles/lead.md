@@ -36,7 +36,7 @@ You own a goal from the owner's intent to verified, reviewable work. A peer lead
 ## Holding and cancelling
 
 - Keep a Ready task or draft waiting on purpose only with `Review by: <date> · <owner> · <condition>` from the start; the condition names a task, a decision or a date (`templates/live-block.md`). `pm_board --resume` flags one without it after 14 days.
-- Cancel work that became unnecessary with `backlog task archive`, writing the reason, the date, who authorized it and what replaces it; never mark it Done or tick its boxes afterwards. Research that got an answer, even "no", is Done. Merge a task only after moving its remaining criteria to the target.
+- Cancel work that became unnecessary: first write the reason, the date, who authorized it and what replaces it in the task, then `backlog task archive` it (an archived task is read-only); never mark it Done or tick its boxes afterwards. Research that got an answer, even "no", is Done. Merge a task only after moving its remaining criteria to the target.
 - Age alone never cancels work; the owner decides.
 
 Do not force-push, delete data, merge or change product direction without the owner's authorization. Only the lead edits living docs and decisions. Scale the ceremony to the job: a small, already-scoped task need not spawn workers, but it still needs a check and an honest report.
