@@ -6,7 +6,6 @@ user presses y on it.
 usage: python tools/setup/app.py [project folder]    (in the TUI's own virtual environment, see DESIGN.md)
 """
 
-import os
 import shutil
 import subprocess
 import sys
@@ -142,6 +141,20 @@ def next_lines(project):
 def desktop_link(project):
     """Claude Desktop's documented link that opens a new Code session in a folder."""
     return "claude://code/new?folder=" + quote(str(project), safe="")
+
+
+def open_detached(link):
+    """Open a link with its Windows handler, through explorer.exe and detached from this console.
+
+    Started straight from here, Claude Desktop writes its own log into the TUI's console window.
+    """
+    subprocess.Popen(
+        ["explorer.exe", link],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "DETACHED_PROCESS", 0),
+    )
 
 
 class SetupApp(App):
@@ -661,7 +674,9 @@ class DoneScreen(Screen):
             )
             if app.system == "windows":
                 text.append(
-                    "\n\nOr press o: Claude Desktop opens a new Code session in the project; type /pm-setup there.", ""
+                    "\n\nOr press o: Claude Desktop opens a new Code session in the project; type /pm-setup there."
+                    " If Desktop first asks you to sign in, sign in, then press o again.",
+                    "",
                 )
             nxt.update(text)
         keys = "o opens Claude Desktop, " if self.can_open() else ""
@@ -679,8 +694,11 @@ class DoneScreen(Screen):
 
     def action_open_desktop(self):
         try:
-            os.startfile(desktop_link(self.app.project))  # Windows only: the link opens Claude Desktop
-            self.app.notify("Opening Claude Desktop. If nothing opens, use the terminal commands instead.")
+            open_detached(desktop_link(self.app.project))  # Windows only: the link opens Claude Desktop
+            self.app.notify(
+                "Opening Claude Desktop. If it asks you to sign in first, sign in, then press o again. "
+                "If nothing opens, use the terminal commands instead."
+            )
         except OSError as error:
             self.app.notify(f"Claude Desktop did not open ({error}); use the terminal commands.", severity="warning")
 

@@ -514,6 +514,15 @@ class ProjectTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("  AGENTS.md  (the project has its own agent instructions)", summary)
         self.assertEqual(app.plan_summary("python: can't open file"), "python: can't open file")
 
+    def test_desktop_opens_detached_from_the_console(self):
+        with patch.object(app.subprocess, "Popen") as popen:
+            app.open_detached("claude://code/new?folder=C%3A%5Cdemo")
+        args, kwargs = popen.call_args
+        self.assertEqual(args[0], ["explorer.exe", "claude://code/new?folder=C%3A%5Cdemo"])
+        self.assertEqual(kwargs["creationflags"], getattr(app.subprocess, "DETACHED_PROCESS", 0))
+        for stream in ("stdin", "stdout", "stderr"):
+            self.assertEqual(kwargs[stream], app.subprocess.DEVNULL)
+
     def test_desktop_link_encodes_the_folder(self):
         self.assertEqual(
             app.desktop_link(Path("C:/My Projects/demo")).split("folder=")[1],
