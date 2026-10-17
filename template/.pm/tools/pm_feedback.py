@@ -11,8 +11,10 @@ The second form shows the report again and opens an issue in the package's home 
 Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
 
 Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
-task and decision titles, project and user names, paths outside the package's own files, e-mail addresses, known
-secret shapes, values of secret-looking environment variables, and quoted text of four or more words (prompts).
+task and decision titles of two or more words, project and user names, paths outside the package's own files, e-mail
+addresses, known secret shapes, values of secret-looking environment variables, and quoted text of four or more words
+(prompts). A one-word title such as /pm-setup's "Charter" is an ordinary word and stays; so do a/b pairs that are not
+paths, such as "1/7" or "and/or".
 """
 
 import argparse
@@ -83,7 +85,7 @@ def private_strings(root):
     for folder in (root / ".pm" / "backlog", root / ".pm" / "decisions"):
         for path in folder.rglob("*.md") if folder.is_dir() else []:
             title = front_title(path)
-            if title and len(title) >= 4:
+            if title and len(title.split()) >= 2:  # one word ("Charter", "Models") says nothing about the project
                 found[title] = "<title>"
     config = root / "backlog.config.yml"
     if config.exists():
@@ -104,6 +106,15 @@ def private_strings(root):
     return sorted(found.items(), key=lambda pair: -len(pair[0]))
 
 
+def looks_like_path(text):
+    """A REL_PATH match is a path when it has a letter and a file extension or two separators: src/app.py, a/b/c.
+
+    So a count such as 1/7 and a word pair such as and/or stay as they are.
+    """
+    parts = re.split(r"[\\/]", text)
+    return any(c.isalpha() for c in text) and (len(parts) > 2 or "." in parts[-1].strip("."))
+
+
 def redact(text, root, private):
     """Replace everything in `text` that could identify the project, its owner or a secret."""
     for shape in SECRET_SHAPES:
@@ -120,7 +131,7 @@ def redact(text, root, private):
         text = re.sub(re.escape(form) + "([\\\\/]" + PATH_CHARS + "*)?", in_project, text, flags=re.I)
     text = ABS_PATH.sub("<path>", text)
     text = BACKLOG_FILE.sub("<task file>", text)
-    text = REL_PATH.sub("<file>", text)
+    text = REL_PATH.sub(lambda m: "<file>" if looks_like_path(m.group(0)) else m.group(0), text)
     text = EMAIL.sub("<email>", text)
     text = QUOTED.sub(lambda m: "<text>" if len(m.group(0).split()) >= 4 else m.group(0), text)
     for value, mark in private:

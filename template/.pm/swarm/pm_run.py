@@ -354,10 +354,13 @@ class Run:
             f.write(line + "\n")
 
     def load(self, name, default):
-        """A missing file gives the default; a file that is not valid JSON stops the run with the parse error."""
+        """A missing file gives the default; a file that is not valid JSON stops the run with the parse error.
+
+        utf-8-sig also reads a file that starts with a byte order mark, as Windows PowerShell 5.1 writes it.
+        """
         path = self.root / name
         try:
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text(encoding="utf-8-sig")
         except FileNotFoundError:
             return default
         try:

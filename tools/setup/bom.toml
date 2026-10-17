@@ -23,10 +23,10 @@ kind = "command"
 layer = "core"
 check = ["python", "--version"]  # "python" means the interpreter running the TUI
 min = "3.11"
-tested = "3.11.9"
-install.windows = "winget install --id Python.Python.3.11 --exact --source winget"
+tested = "3.13.16"
+install.windows = "winget install --id Python.PythonInstallManager --exact --source winget"
 install.linux = "sudo pacman -S --needed python"
-note = "Preinstalled on Omarchy, where it is 3.14 and not tested yet."
+note = "The TUI cannot install the Python it runs on. On Windows, after the Install Manager, open a new terminal and run py install 3.13; the older Python.Python.3.x installers can be stopped by Smart App Control (Bad Image). Preinstalled on Omarchy, where it is 3.14 and not tested yet."
 
 [[item]]
 id = "git"
@@ -61,9 +61,10 @@ layer = "core"
 check = ["claude", "--version"]
 min = "2.1.296"
 tested = "2.1.296"
-install.windows = "irm https://claude.ai/install.ps1 | iex"
+# Windows: the installer puts claude in ~\.local\bin but leaves that folder off PATH, so the line adds it to the user PATH.
+install.windows = 'irm https://claude.ai/install.ps1 | iex; $bin = "$HOME\.local\bin"; $user = [Environment]::GetEnvironmentVariable("Path", "User"); if (($user -split ";") -notcontains $bin) { [Environment]::SetEnvironmentVariable("Path", "$user;$bin".TrimStart(";"), "User") }'
 install.linux = "curl -fsSL https://claude.ai/install.sh | bash"
-note = "Updates itself, so it often shows as not tested yet. On Linux the installer puts claude in ~/.local/bin; if it is not found afterwards, add that folder to PATH as the installer says."
+note = "Updates itself, so it often shows as not tested yet. On Windows this step also adds %USERPROFILE%\\.local\\bin to your user PATH, which the installer asks you to do by hand; open a new terminal before you run claude yourself. On Linux the installer puts claude in ~/.local/bin; if it is not found afterwards, add that folder to PATH as the installer says."
 
 [[item]]
 id = "backlog"

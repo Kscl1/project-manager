@@ -306,6 +306,11 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(state["b"]["state"], "blocked")
         self.assertEqual(self.herdr_state()["agents"], {}, "the worker's pane is still closed")
 
+    def test_jobs_file_with_a_byte_order_mark_is_read(self):
+        (self.run_dir / "jobs.json").write_text(json.dumps([self.job("a", "ok")]), encoding="utf-8-sig")
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
     def test_invalid_jobs_file_stops_with_the_parse_error(self):
         (self.run_dir / "jobs.json").write_text('[{"id": "a",]', encoding="utf-8")
         result = self.run_pm(timeout=30)

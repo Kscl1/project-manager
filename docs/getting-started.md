@@ -8,12 +8,15 @@ There are two ways in: the **setup TUI** (recommended), a guided screen in your 
 
 You need an internet connection, **Python 3.11 or newer** and **Git**. The TUI cannot install the Python it runs on.
 
-**Windows 11:** in PowerShell, install [Python](https://www.python.org/downloads/windows/) and [Git for Windows](https://git-scm.com/install/windows) with [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/), then open a new terminal:
+**Windows 11:** in PowerShell, install the [Python Install Manager](https://docs.python.org/3/using/windows.html) and [Git for Windows](https://git-scm.com/install/windows) with [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/), then open a new terminal and install Python itself with `py`:
 
 ```powershell
-winget install --id Python.Python.3.11 --exact --source winget
+winget install --id Python.PythonInstallManager --exact --source winget
 winget install --id Git.Git --exact --source winget
+py install 3.13
 ```
+
+The older installers (`Python.Python.3.11` and so on) can be stopped by Smart App Control with a "Bad Image" error (`0xc0e90002`); the Install Manager is not.
 
 **Omarchy and other Arch-based systems:** both are usually there already; check with `python --version` and `git --version`. If not, use [pacman](https://man.archlinux.org/man/pacman.8.en):
 
@@ -70,7 +73,7 @@ What every project needs. By hand, work down the table.
 |---|---|
 | [Node.js](https://nodejs.org/en/download) | Runs the JavaScript tools below. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
 | [Backlog.md](https://github.com/MrLesk/Backlog.md) | Your tasks, as Markdown files in the project. `npm i -g backlog.md@1.52.0`. If npm says `EACCES`, follow [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally); do not add `sudo`. |
-| [Claude Code](https://code.claude.com/docs/en/setup) | Your coding agent. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. Sign in when you first run `claude`. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | Your coding agent. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. Both put `claude` in `.local\bin` (`~/.local/bin`) in your home folder; on Windows that folder is not added to PATH, so the TUI's step adds it to your user PATH for you (by hand: add `%USERPROFILE%\.local\bin`, then open a new terminal). Sign in when you first run `claude`. |
 | The `.pm` package | Rules, decisions, checks and the `pm-` skills (`pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
 | Session hooks | Show your agent where work stopped when a session starts and after its memory is compacted. |
 | [Context7](https://github.com/upstash/context7) | Gives your agent current library docs. No account needed; a free key only raises its rate limit. |
@@ -93,9 +96,13 @@ python template/.pm/tools/pm_init.py ../my-project
 The swarm runs helper agents as workers you can watch: each one in its own [Herdr](https://herdr.dev) pane, started and checked by `.pm/swarm/pm_run.py`. You do not need it to start. Tick Swarm in the TUI (it starts unticked), or add `--swarm` to the installer command. It needs:
 
 - [Pi](https://github.com/earendil-works/pi), with the extensions `pi-mcp-adapter` (the project's MCP servers, such as Context7, for Pi workers) and `pi-web-access` (web search and pages). Pi finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
+  While the extensions install, npm may report "high severity vulnerabilities" and install-script warnings from their own dependencies; setup goes on.
+  With `pi-mcp-adapter` installed, Pi says it does not load its built-in `mcp` extension and recommends using only one. That is expected: the adapter reads the project's `.mcp.json`, the file Claude Code reads too, while Pi's built-in MCP reads only `.pi/mcp.json`.
 - Herdr, from its own installer, which puts the newest release on your PATH and checks its SHA-256.
 
 Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
+
+On its first start Herdr shows a welcome, then an "agent integrations" screen that offers to install integrations for the agents it finds; pm_run does not need them, and `Esc` skips it. After Sign in with ChatGPT, Pi 1.0.3 may pick a model a ChatGPT plan cannot use (`gpt-5.5`, error 400): type `/model`, choose `openai/gpt-6.1-sol` and press `Ctrl+S` to keep it for new sessions. pm_run workers are not affected, because each job names its model.
 
 A worker in Claude Code starts without Claude Code's bundled skills (such as `/code-review`, which starts its own hidden helper); your own Claude Code setup is not changed. Which commands it may run without asking follows your Claude Code settings: read-only ones such as `git status` never ask. When a worker asks, pm_run writes `WAITING` and the Herdr tab to answer in.
 
@@ -109,7 +116,7 @@ Setup never asks for your EVREN API key, and never reads it. Put it in place you
 
 Open your project, not the project-manager folder, in Claude Code:
 
-- **Windows:** press `o` on the Done screen, or open [Claude Desktop](https://code.claude.com/docs/en/desktop-quickstart), choose Code and select the project folder. Desktop is a separate install and its Code tab needs a paid Claude plan; the terminal works too.
+- **Windows:** press `o` on the Done screen, or open [Claude Desktop](https://code.claude.com/docs/en/desktop-quickstart), choose Code and select the project folder. Desktop is a separate install and its Code tab needs a paid Claude plan; the terminal works too. If Desktop asks you to sign in first, it forgets the project: sign in, then press `o` again.
 - **Linux:** `cd ~/projects/my-project`, then `claude`.
 
 Type `/pm-setup` and press Enter. Your agent opens a setup Epic in Backlog (a parent task with one child per question) and asks about one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes.
@@ -119,3 +126,5 @@ At the end it asks how you want the tools explained: **short hints** (the defaul
 ## When something breaks
 
 For a problem with the `.pm` package itself, run `/pm-feedback` in your project. It writes a diagnosis-only report and shows it to you; it opens an issue only on your yes, which needs GitHub's `gh` CLI signed in. If setup fails before the skills are installed, use the TUI's `a` key instead.
+
+**Windows, Smart App Control.** Seen so far only in Windows Sandbox, not yet on a real PC: with Smart App Control on, `git` fails with a "Bad Image" error (`0xc0e90002`), because it blocks Git for Windows' unsigned DLLs. The Git installer still reports success but leaves Git without a credential helper, so `git clone` asks for a GitHub user name in the terminal instead of opening the sign-in window. Check with `git config --system credential.helper` (it should print `manager`). If it prints nothing, reinstall Git once Git runs again: `winget install --id Git.Git --exact --source winget --force`. Smart App Control is a Windows security setting (Windows Security, App & browser control); decide yourself whether to turn it off.

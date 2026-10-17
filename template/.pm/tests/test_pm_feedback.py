@@ -170,6 +170,13 @@ class FeedbackTest(unittest.TestCase):
         self.assertIn("Nothing was sent", out)
         self.assertEqual(self.gh.calls, [])
 
+    def test_ordinary_words_and_counts_stay(self):
+        tasks = self.root / ".pm" / "backlog" / "tasks"
+        (tasks / "task-1.7 - Charter.md").write_text("---\nid: TASK-1.7\ntitle: Charter\n---\n", encoding="utf-8")
+        line = "the charter says WIP 1/7 and/or 10/16; see src/app.py, docs/research/notes and my/folder.v2"
+        text = pm_feedback.redact(line, self.root, pm_feedback.private_strings(self.root))
+        self.assertEqual(text, "the charter says WIP 1/7 and/or 10/16; see <file>, <file> and <file>")
+
     def test_error_excerpt_is_short(self):
         self.error_file.write_text("\n".join(f"line {n}" for n in range(100)), encoding="utf-8")
         report, _ = self.write_report()
