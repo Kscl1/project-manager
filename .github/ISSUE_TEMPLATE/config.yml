@@ -1,0 +1,6 @@
+# The issue chooser: the Package problem form, a blank issue for everything else, and the private security route.
+blank_issues_enabled: true
+contact_links:
+  - name: Security problem
+    url: https://github.com/Kscl1/project-manager/security/advisories/new
+    about: Report it privately; never in a public issue (see SECURITY.md).

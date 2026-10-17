@@ -2,6 +2,7 @@
 name: Package problem
 description: A .pm tool, hook, rule or template failed. Versions, the failed command and a short error excerpt only.
 title: "[feedback] "
+labels: ["feedback"]
 body:
   - type: markdown
     attributes:

@@ -22,7 +22,7 @@ Sends the package's maintainers what they need to find a bug, and nothing about 
 
 ## Preview
 
-Show the owner the whole report exactly as written, then ask one question: send it as an issue in the package's home repo (`github.com/Kscl1/project-manager`)? Say that anyone with access can read it, and it becomes public when the repo does, and that redaction is a best effort, so they should check for anything private. If they want something removed, edit the report file, show it again and ask again.
+Show the owner the whole report exactly as written, then ask one question: send it as an issue in the package's home repo (`github.com/Kscl1/project-manager`)? Say that the issue is public, so anyone can read it, and that redaction is a best effort, so they should check for anything private. If they want something removed, edit the report file, show it again and ask again.
 
 ## Send
 
