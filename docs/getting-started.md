@@ -124,6 +124,8 @@ Open your project, not the project-manager folder, in Claude Code:
 
 Type `/pm-setup` and press Enter. Your agent opens a setup Epic in Backlog (a parent task with one child per question) and asks about one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes.
 
+Already have MCP servers, plugins, skills or apps? See [Make your own tools useful](own-tools.md). `/pm-setup` checks one at a time, keeps your existing setup and, with approval, adds a short “which tool when” rule plus a real smoke check.
+
 At the end it asks how you want the tools explained: **short hints** (the default), **try together**, or **off**. Change it any time in chat ("stop teaching", "I already know Backlog").
 
 ## When something breaks
