@@ -12,6 +12,7 @@ The fake Herdr keeps its state in a JSON file and reads each worker's behaviour 
   lost      loses the first brief without working; the resent brief finishes
 """
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -793,7 +794,28 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(state["a"]["state"], "failed")
         self.assertEqual(len(state["a"]["attempts"]), 1)
         self.assertEqual(out.read_text(encoding="utf-8"), "previous output")
-        self.assertIn("could not keep previous output; no retry", run.log_path.read_text(encoding="utf-8"))
+        self.assertIn("KEPT-FAILED a: could not keep the previous output", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_briefly_locked_output_is_kept_after_a_retry(self):
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        (self.tmp / "a.md").write_text("previous output", encoding="utf-8")
+        state = {"a": {"state": "pending", "attempts": []}}
+        copy = shutil.copy2
+        calls = []
+
+        def locked_once(src, dst):
+            calls.append(src)
+            if len(calls) == 1:
+                raise PermissionError("held by a scanner")
+            return copy(src, dst)
+
+        with patch.object(pm_run.shutil, "copy2", side_effect=locked_once), patch.object(
+            pm_run.time, "sleep"
+        ), patch.object(run, "launch", side_effect=lambda job, attempt, state: attempt.update(pane="p1") or True):
+            run.tick([self.job("a", "nothing", out="a.md")], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual((self.tmp / "a.kept.md").read_text(encoding="utf-8"), "previous output")
 
     def settled_worker(self, error="500", screen="working"):
         """A Pi worker whose turn looks settled, with a session log that ends in a provider error."""
@@ -833,7 +855,9 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
             patch.object(pm_run.time, "time", return_value=now),
             patch.object(run, "status_of", return_value="done"),
         ]
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             run.tick([self.job("a", "nothing")], state, {})
         return self.herdr_state()["agents"]["worker"]["prompts"]
 
@@ -893,6 +917,21 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(state["a"]["state"], "started")
         self.assertIn("QUOTA-WAIT a", run.log_path.read_text(encoding="utf-8"))
         self.assertIn("RESUME a", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_quota_is_waited_out_once_per_attempt_and_never_past_the_hard_limit(self):
+        run, log, attempt, state = self.settled_worker("429 usage limit reached (reset after 2m 0s)")
+        self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)
+        self.assertTrue(attempt["quota_waited"])
+        entry = {"type": "message", "message": {"role": "assistant", "stopReason": "error", "errorMessage": ""}}
+        entry["message"]["errorMessage"] = "429 usage limit reached (reset after 3m 0s)"  # a countdown that restarted
+        log.write_text(log.read_text(encoding="utf-8") + json.dumps(entry) + "\n", encoding="utf-8")
+        os.utime(log, (1200, 1200))
+        self.tick_at(run, state, 1300, QUIET_S=0, MAX_NUDGES=3)
+        self.assertEqual(state["a"]["state"], "handed-over", "a second wait in one attempt is not allowed")
+
+        run, log, attempt, state = self.settled_worker("429 usage limit reached (reset after 20m 0s)")
+        self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3, HARD_S=1500)
+        self.assertEqual(state["a"]["state"], "handed-over", "the wait would end after the hard limit")
 
     def test_a_quota_that_resets_late_or_never_says_is_still_handed_over(self):
         for error in ("429 usage limit reached, resets in 5h", '429 {"message":"Go usage limit exceeded"}'):

@@ -21,8 +21,10 @@ in a row the job is **handed-over**: pm_run stops watching, leaves the session o
 A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
 out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
-is nudged as before. A quota message that names a reset within PM_RUN_QUOTA_WAIT_S (1800 s), such as "reset after
-15m 19s", is waited out instead (QUOTA-WAIT): one nudge in the same session after the reset, then the usual budget.
+is nudged as before. A quota message that names a reset within PM_RUN_QUOTA_WAIT_S (1800 s) plus 30 s of slack,
+written as "reset after 15m 19s" or "resets in 2h" (h, m, s units; other wordings are handed over as before), is
+waited out instead (QUOTA-WAIT): once per attempt and only if the wait ends before the hard limit; then one nudge in
+the same session and the usual budget.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes. An output
@@ -70,6 +72,7 @@ Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts i
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check),
 PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it ready).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
+PM_RUN_QUOTA_WAIT_S (1800),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
 Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
@@ -118,7 +121,7 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
-FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT"}
+FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED"}
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -596,7 +599,6 @@ class Run:
             settings.write_text(json.dumps(CLAUDE_SETTINGS) + "\n", encoding="utf-8")
             agent_args += ["--settings", str(settings)]
         attempt["model"] = job["model"]  # the model asked for; the session log shows what actually ran
-        attempt["briefs_sha"] = brief_digest(job, self.repo)
         start = herdr("agent", "start", attempt["name"], *agent_args, *job.get("args", []))
         if "error" in start:
             attempt["launch_error"] = start["error"].get("message", "")
@@ -607,6 +609,7 @@ class Run:
         attempt["seq0"] = attempt.get("completion_seq")
         sent = herdr("agent", "prompt", attempt["name"], launch_prompt(job))
         attempt["prompted"] = time.time()
+        attempt["briefs_sha"] = brief_digest(job, self.repo)  # the text the worker was just pointed at
         self.reset_observation(attempt)
         return "error" not in sent
 
@@ -809,14 +812,14 @@ class Run:
             out = self.repo / job["out"]
             try:
                 if n > 1 and out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
-                    kept = keep_output(out, f"{out.stem}.attempt{n - 1}", move=True)
+                    kept = held(lambda: keep_output(out, f"{out.stem}.attempt{n - 1}", move=True))
                     self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
                 elif n == 1 and out.exists():
-                    kept = keep_output(out, f"{out.stem}.kept", move=False)
+                    kept = held(lambda: keep_output(out, f"{out.stem}.kept", move=False))
                     self.log(f"KEPT {job['id']}: {out.name} existed before this run; a copy is at {kept.name}")
             except OSError as exc:
                 s["state"] = "failed"
-                self.log(f"FAILED {job['id']}: could not keep previous output; no retry: {exc}")
+                self.log(f"KEPT-FAILED {job['id']}: could not keep the previous output, so no worker starts: {exc}")
                 continue
             a = {"name": agent_name(job["id"], n, self.root), "started": time.time()}
             s["attempts"].append(a)
@@ -900,8 +903,10 @@ class Run:
         kind, text = sign
         a[kind] = text
         wait = reset_seconds(text) if kind == "quota" else None
-        if wait is not None and wait <= QUOTA_WAIT_S:
-            a.update(waited_for=text, wait_until=now + wait + 30)
+        ends = now + wait + 30 if wait is not None else 0
+        limit = a["started"] + HARD_S + a.get("overtime", 0)
+        if wait is not None and wait <= QUOTA_WAIT_S and not a.get("quota_waited") and ends <= limit:
+            a.update(waited_for=text, wait_until=ends, quota_waited=True)  # once per attempt, inside the time limit
             self.log(
                 f'QUOTA-WAIT {job["id"]}: "{text}"; the limit resets in {wait / 60:.0f} min, so the same session '
                 f"gets a nudge after it instead of a hand-over"
@@ -945,7 +950,7 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "wait_until", "verify_rc", "why")
                 if a.get(k) is not None
             )
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
