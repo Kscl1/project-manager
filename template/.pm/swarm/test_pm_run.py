@@ -349,6 +349,33 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("pm_run start", result.stdout)
         self.assertFalse(self.fake_state.exists(), "no worker may start")
 
+    def test_a_bad_tick_and_a_half_saved_jobs_file_do_not_stop_the_loop(self):
+        log = self.run_dir / "pm_run.log"
+
+        def wait_for(text):
+            deadline = time.time() + 30
+            while not (log.exists() and text in log.read_text(encoding="utf-8")):
+                self.assertLess(time.time(), deadline, f"no {text} in pm_run.log")
+                time.sleep(0.1)
+
+        broken = self.job("b", "ok", after=5)  # not a list: the tick raises TypeError
+        self.jobs(self.job("a", "ok"), broken)
+        proc = subprocess.Popen(
+            [sys.executable, str(PM_RUN), str(self.run_dir)],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(proc.kill)
+        wait_for("TICK-ERROR TypeError")
+        (self.run_dir / "jobs.json").write_text('[{"id": "a",', encoding="utf-8")
+        wait_for("SKIPPED jobs.json")
+        self.jobs(self.job("a", "ok"))
+        self.assertEqual(proc.wait(timeout=30), 0)
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        self.assertIn("Traceback", log.read_text(encoding="utf-8"))
+        self.assertEqual(log.read_text(encoding="utf-8").count("SKIPPED jobs.json"), 1, "logged once per error")
+
     def test_old_artifact_from_before_the_attempt_does_not_count(self):
         out = self.tmp / "out" / "a.md"
         out.parent.mkdir(parents=True)
@@ -1071,6 +1098,53 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
                 run.tick([job], state, {})
         self.assertEqual(len(self.herdr_state()["calls"]), before)
         self.assertIn("STALLED", log)
+
+
+class LockedFileTest(unittest.TestCase):
+    """On Windows a rename or a read fails while another process (a --status call, a watcher) holds the file."""
+
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp(prefix="pm_run_lock_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.run = pm_run.Run(tmp)
+        self.addCleanup(patch.stopall)
+        patch.object(pm_run.time, "sleep").start()
+        patch("sys.stdout", io.StringIO()).start()
+
+    def test_save_waits_for_a_held_receipts_file(self):
+        real, calls = os.replace, []
+
+        def held_twice(src, dst):
+            calls.append(dst)
+            if len(calls) <= 2:
+                raise PermissionError(13, "denied")
+            real(src, dst)
+
+        with patch.object(pm_run.os, "replace", held_twice):
+            self.run.save({"a": {"state": "started"}})
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(self.run.load("receipts.json", {}), {"a": {"state": "started"}})
+
+    def test_save_that_stays_held_is_logged_and_kept_for_the_next_tick(self):
+        with patch.object(pm_run.os, "replace", side_effect=PermissionError(13, "denied")):
+            self.run.save({"a": {"state": "started"}})  # must not raise: the loop would die with it
+        self.assertIn("SAVE-FAILED", self.run.log_path.read_text(encoding="utf-8"))
+        self.run.save({"a": {"state": "verified"}})
+        self.assertEqual(self.run.load("receipts.json", {}), {"a": {"state": "verified"}})
+
+    def test_load_waits_for_a_file_being_replaced(self):
+        (self.run.root / "receipts.json").write_text('{"a": 1}', encoding="utf-8")
+        real, calls = Path.read_text, []
+
+        def held_once(path, *args, **kwargs):
+            calls.append(path)
+            if len(calls) == 1:
+                raise PermissionError(13, "the file is being replaced")
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "read_text", held_once):
+            self.assertEqual(self.run.load("receipts.json", {}), {"a": 1})
+        self.assertEqual(len(calls), 2)
 
 
 class HerdrSafetyTest(unittest.TestCase):
