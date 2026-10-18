@@ -1,4 +1,7 @@
-# Upgrade and roll back
+---
+title: Upgrade and roll back
+description: Upgrade an installed project one layer at a time, and roll back package files without losing tasks or decisions.
+---
 
 A project has several independent layers. Updating the project-manager checkout does **not** update an installed project, your global tools or your own plugins. Update one layer at a time, keep the previous version, then check it before moving on.
 
@@ -49,7 +52,7 @@ If you installed swarm, also run `python -m unittest discover -s .pm/swarm`. Ins
 
 ## 3. Upgrade tools separately
 
-The release's [bill of materials](../tools/setup/bom.toml) is the command source. `min` is a support floor, `tested` is evidence from human-run checks, and `install.*` contains the actual pin where the installer supports one. They need not be equal. An installed version above `tested` is **not tested yet**, not automatically broken.
+The release's [bill of materials](https://github.com/Kscl1/project-manager/blob/main/tools/setup/bom.toml) is the command source. `min` is a support floor, `tested` is evidence from human-run checks, and `install.*` contains the actual pin where the installer supports one. They need not be equal. An installed version above `tested` is **not tested yet**, not automatically broken.
 
 Use the setup TUI or its read-only inventory after switching releases:
 
@@ -78,7 +81,7 @@ For maintainers reviewing an upstream candidate:
 
 1. Compare the old source commit to the proposed commit, including referenced files and the licence.
 2. Copy the intended changes, reapply the documented local changes, retain the licence and update the source note and BOM `ref` to describe the files actually shipped. Candidate fields alone are not provenance.
-3. Run the [skill-selection checks](../tests/selection/README.md), plus the relevant syntax/CLI checks for a changed skill. Review the results before releasing.
+3. Run the [skill-selection checks](https://github.com/Kscl1/project-manager/blob/main/tests/selection/README.md), plus the relevant syntax/CLI checks for a changed skill. Review the results before releasing.
 
 For a user's **own** third-party skill, use its upstream installer/version pin and keep its previous copy. It is not managed by `.pm`; see [your own tools](own-tools.md).
 
@@ -102,16 +105,16 @@ For a user's **own** third-party skill, use its upstream installer/version pin a
 
 ### What was rehearsed
 
-On 2026-10-18, GPT-6.1 Sol (high), via 9router, rehearsed a local install from `v0.1.0-alpha.1`, upgrade to main at `185f9ca`, and rollback to the tag with Map and Swarm enabled. The rehearsal checked managed files, a deliberately edited package tool and preservation of project records including a task added after the upgrade. This is a developer rehearsal, not a friend's acceptance test or evidence that global tools have been upgraded. No release or tool compatibility is certified by it.
+A developer rehearsal on 2026-10-18 covered a local install from `v0.1.0-alpha.1`, upgrade to main at `185f9ca`, and rollback to the tag with Map and Swarm enabled. The rehearsal checked managed files, a deliberately edited package tool and preservation of project records including a task added after the upgrade. This is a developer rehearsal, not an independent user's acceptance test or evidence that global tools have been upgraded. No release or tool compatibility is certified by it.
 
 ## Renovate: discovery, then human review
 
-[renovate.json](../renovate.json) does nothing by itself. It stays inert until a maintainer installs/enables the Renovate app (or explicitly runs Renovate elsewhere). Automerge is off. Only the regex managers for the BOM are enabled:
+[renovate.json](https://github.com/Kscl1/project-manager/blob/main/renovate.json) does nothing by itself. It stays inert until a maintainer installs/enables the Renovate app (or explicitly runs Renovate elsewhere). Automerge is off. Only the regex managers for the BOM are enabled:
 
 - Actual npm pins in setup commands: Backlog.md, Pi, LikeC4 and Pi extensions.
 - Herdr's `upstream_version` candidate, from its public latest-release manifest. This is not an install pin and cannot move `tested` or `min`.
 - `upstream_commit` candidates for vendored skills' upstream branches. These notify of source changes; they do not replace skill files, source notes or the actual BOM `ref`.
 
-A proposed update **discovers changes; it does not certify them**. Review the real upstream diff, synchronize relevant docs/runtime pins, run relevant smoke/selection checks and then consciously promote compatibility evidence and publish a release. The minimum/tested fields are outside the regex matches. Other dependencies, unpinned servers and user-owned tools are not watched by this scoped configuration.
+A proposed update **discovers changes; it does not certify them**. Review the real upstream diff, synchronize relevant docs/runtime pins, run relevant smoke/selection checks and then consciously promote compatibility evidence and publish a release. The minimum/tested fields are outside the regex matches. Other dependencies, unpinned servers and user-owned tools are not watched by this scoped configuration. The LikeC4 version written outside the BOM is not watched either: the MCP server args in `template/.pm/templates/root/mcp-map.json` (`@likec4/mcp@1.60.0`), the `npx likec4@1.60.0 validate` line in the `pm-setup` skill, and the `npx likec4@1.60.0 start` examples in the README and the getting-started guide. When a Renovate update changes the LikeC4 pin in `tools/setup/bom.toml`, change these by hand in the same pull request.
 
-Validate config changes with `npx --yes --package renovate -- renovate-config-validator`. The [regex boundary tests](../tests/test_renovate.py) additionally protect compatibility/provenance fields. See Renovate's [regex manager](https://docs.renovatebot.com/modules/manager/regex/) and [custom datasource](https://docs.renovatebot.com/modules/datasource/custom/) docs.
+Validate config changes with `npx --yes --package renovate -- renovate-config-validator`. The [regex boundary tests](https://github.com/Kscl1/project-manager/blob/main/tests/test_renovate.py) additionally protect compatibility/provenance fields. See Renovate's [regex manager](https://docs.renovatebot.com/modules/manager/regex/) and [custom datasource](https://docs.renovatebot.com/modules/datasource/custom/) docs.
