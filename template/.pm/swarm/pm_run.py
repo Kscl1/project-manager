@@ -45,13 +45,15 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
+                       "helpers": ["model", ...],  (lets the worker start helpers as its own pm_run jobs, in a run
+                                                    dir inside `writes`, on these models only; default: none)
                        "stop": true}]          (set by --stop; delete it to let the job run again)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
                         (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
-                        it is visible too, and a worker that wants one writes "Helper needed" in its output for the lead;
+                        it is visible too; a worker without "helpers" writes "Helper needed" in its output for the lead;
                         agy has no switch for its sub-agents, so there only the brief forbids them.
                         A first-run screen that only the owner can pass (agy: colour scheme, then its terms) is handed
                         over before the brief is sent: finish it once in that Herdr tab, then rerun the job)
@@ -131,9 +133,19 @@ LOGIN_LINE = re.compile(
 PROMPT = (
     "Read the brief file(s) {briefs} and do the task. Your output file is {out}. Create it early and fill it "
     "section by section. Only when it is complete, append the exact last line <!-- done -->. Write only that file{also}. "
-    "Do not ask questions: if something blocks you, write the blocker into the output file and finish. "
+    "Do not ask questions: if something blocks you, write the blocker into the output file and finish. {helpers}"
+)
+NO_HELPER = (
     "Do not start a helper (a sub-agent, a background task, a skill that runs its own agent): if one would help, write "
     "'Helper needed: <what and why>' into the output file and go on with what you can; the lead decides."
+)
+# A job with "helpers" lets its worker run helpers the way the lead does: as pm_run jobs, each in its own Herdr tab.
+HELPERS = (
+    "You may start helpers, but only as jobs of your own pm_run run (python .pm/swarm/pm_run.py <run-dir>; the jobs.json "
+    "format is at the top of that file), and only on these models: {models}. Name the run directory {job}-helpers, "
+    "inside the paths you may write: Herdr shares workspace names between runs. Start the run, wait until it has "
+    "ended (--status), then read and check each helper's output before you use it. Never start an in-process "
+    "sub-agent, a background task or a skill that runs its own agent."
 )
 # Every helper runs in its own Herdr pane through pm_run, where the owner can watch it, so an agent started here
 # gets no in-process sub-agent tools. Applies to this run only; the owner's own Pi and Claude Code setup is unchanged.
@@ -323,7 +335,8 @@ def agent_name(job_id, n, root):
 
 def launch_prompt(job):
     also = f" and the paths {', '.join(job['writes'])}" if job.get("writes") else ""
-    return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also)
+    helpers = HELPERS.format(models=", ".join(job["helpers"]), job=job["id"]) if job.get("helpers") else NO_HELPER
+    return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also, helpers=helpers)
 
 
 def turn_end(job, attempt, repo):
