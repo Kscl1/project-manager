@@ -700,6 +700,20 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
             run.tick([self.job("a", "nothing")], state, {})
         return self.herdr_state()["agents"]["worker"]["prompts"]
 
+    def test_without_a_session_log_the_pane_must_stay_unchanged_before_a_nudge(self):
+        run, log, attempt, state = self.settled_worker()
+        log.unlink()
+        del attempt["session_log"]  # another harness, or a Pi folder the setup line moved
+        herdr = self.herdr_state()
+        self.fake_state.write_text(json.dumps({**herdr, "reads": ["thinking A", "thinking A B"]}), encoding="utf-8")
+        for now, prompts in ((1100, 1), (1150, 1), (1200, 1), (1239, 1), (1241, 2)):
+            with self.subTest(now=now):
+                self.assertEqual(len(self.tick_at(run, state, now, QUIET_S=90, MAX_NUDGES=3)), prompts)
+        log_text = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("HOLD a: turn looks settled but its pane last changed 0 s ago", log_text)
+        self.assertIn("RESUME a", log_text)
+        self.assertIsNone(attempt["settled_hash"], "a nudge starts a fresh quiet window")
+
     def test_log_line_with_claude_marks_survives_a_cp1252_console(self):
         console = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
         with patch.object(sys, "stdout", console):
@@ -880,7 +894,9 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 run.repo = self.tmp
                 with patch.dict(os.environ, {**self.env, "FAKE_NO_SEQ": "1" if no_seq else ""}), patch.object(
                     pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
-                ), patch.object(pm_run.time, "time", return_value=100), patch.object(pm_run, "MAX_NUDGES", 1):
+                ), patch.object(pm_run.time, "time", return_value=100), patch.object(
+                    pm_run, "MAX_NUDGES", 1
+                ), patch.object(pm_run, "QUIET_S", 0):
                     run.tick([self.job("a", "nothing")], state, {})
                     prompts = self.herdr_state()["agents"]["worker"]["prompts"]
                     self.assertEqual(len(prompts), 2)

@@ -11,8 +11,9 @@ because a rerun costs a whole job and the fault is often the check itself; fix t
 Herdr's own `done` badge proves nothing on its own: an aborted turn also ends as `done`.
 Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json, at most 60 s between tries), and
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
-quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry; when the log is not found (another harness, a
-lookup gap) it nudges at once. A nudge goes to the same session: RESUME, or the
+quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry. When the log is not found (another harness, a Pi
+folder moved by the setup line) the pane stands in for it: the nudge waits until the pane's content has stayed the
+same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. A nudge goes to the same session: RESUME, or the
 full brief again when no turn ran (no completion_seq advance and no observed working state).
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
@@ -566,6 +567,19 @@ class Run:
 
     def reset_observation(self, attempt):
         attempt.update(seen_hash=None, seen_at=attempt["prompted"], stall=False, loop=False, loop_line=None)
+        attempt.update(settled_hash=None, settled_at=None)
+
+    def pane_quiet(self, attempt, now):
+        """Seconds the pane's content has stayed the same while the turn looks settled; None when it cannot be read.
+        Herdr showed live turns as settled on 18 Oct (Claude Code mid-turn, Pi with its own agent folder), and
+        without a session log nothing else tells such a turn from a finished one."""
+        text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
+        if not isinstance(text, str):
+            return None
+        digest = sha256(pane_content(text).encode("utf-8")).hexdigest()
+        if digest != attempt.get("settled_hash"):
+            attempt.update(settled_hash=digest, settled_at=now)
+        return now - attempt["settled_at"]
 
     def warn_pane(self, job, attempt, now):
         # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
@@ -660,10 +674,13 @@ class Run:
                     self.fail_or_retry(job, s, f"worker is gone and {why}")
                     continue
                 size, quiet = session_log(a, now)
+                source = "Pi wrote its log"
+                if quiet is None:
+                    quiet, source = self.pane_quiet(a, now), "its pane last changed"
                 if quiet is not None and quiet < QUIET_S:
                     if not a.get("held"):
                         a["held"] = True
-                        self.log(f"HOLD {job['id']}: turn looks settled but Pi wrote its log {quiet:.0f} s ago; {why}")
+                        self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}")
                 elif self.stop_hand_over(job, s, a, why):
                     continue
                 elif not self.nudge(job, s, a, now, size, why):
