@@ -88,7 +88,7 @@ Write the result in three parts, in this order:
 2. **Exceptions:** anything the project owner accepted against those rules, such as a borderline call read as neutral or a skipped rerun. For each one write what it was, why it was accepted, who accepted it and the date. A call the owner does not count stays named in the table.
 3. **Release acceptance:** whether the owner accepted the run for a release, and which tag.
 
-A run with an exception is never called a clean pass: write, for example, "FAIL strictly; accepted for v0.1.0-alpha.1 with two exceptions". For a run that gates a release, add a short summary in this shape to `results.md`: the package commit and tag, harness and version, model and thinking level, permission mode, then the three parts. Leave out transcripts, local paths and people's names.
+A run with an exception is never called a clean pass: write, for example, "FAIL strictly; accepted for v0.1.0-alpha.1 with two exceptions". For a run that gates a release, add a short summary in this shape to `results.md`: the same header as `results-template.md` (package commit and tag, harness and version, model and thinking level, permission mode, how user-level context was turned off, who scored), then the three parts. Leave out transcripts, local paths and people's names.
 
 ## What it does not cover
 
