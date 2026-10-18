@@ -167,12 +167,20 @@ sys.exit(2)
 """
 
 
+def repo_for_in_process_runs(test, repo):
+    """A Run made inside the test process writes its failure log under PM_RUN_REPO, never into the checkout."""
+    patcher = patch.dict(os.environ, {"PM_RUN_REPO": str(repo)})
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class PmRunFixture:
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_test_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.run_dir = self.tmp / "run"
         self.run_dir.mkdir()
+        repo_for_in_process_runs(self, self.tmp)
         fake = self.tmp / "fake_herdr.py"
         fake.write_text(FAKE_HERDR, encoding="utf-8")
         self.fake_state = self.tmp / "herdr.json"
@@ -1275,6 +1283,11 @@ class LockedFileTest(unittest.TestCase):
 
 
 class HerdrSafetyTest(unittest.TestCase):
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp(prefix="pm_run_safety_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        repo_for_in_process_runs(self, tmp)
+
     def test_only_agent_not_found_means_gone(self):
         run = pm_run.Run(".")
         for code, expected in (("agent_not_found", None), ("server_timeout", "unknown"), ("other", "unknown")):
