@@ -128,6 +128,10 @@ Already have MCP servers, plugins, skills or apps? See [Make your own tools usef
 
 At the end it asks how you want the tools explained: **short hints** (the default), **try together**, or **off**. Change it any time in chat ("stop teaching", "I already know Backlog").
 
+## Updating later
+
+See [Upgrade and roll back](upgrading.md) for release-tag upgrades, separate tool/skill updates and keeping project records through a rollback.
+
 ## When something breaks
 
 For a problem with the `.pm` package itself, run `/pm-feedback` in your project. It writes a diagnosis-only report and shows it to you; it opens an issue only on your yes, which needs GitHub's `gh` CLI signed in. If setup fails before the skills are installed, use the TUI's `a` key instead.

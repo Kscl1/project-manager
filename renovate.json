@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabledManagers": ["custom.regex"],
+  "automerge": false,
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 3,
+  "prBodyNotes": [
+    "Discovery only: this update does not certify compatibility. Minimum and tested versions must remain human-reviewed evidence.",
+    "Review the upstream diff and all matching setup/docs/runtime pins before release. Skill candidates do not replace vendored files; reapply local changes and run the selection checks.",
+    "A Herdr candidate does not change what its latest-release installer downloads. Promote its tested version only after successful visible-worker smoke runs with both Pi and Claude Code."
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Actual npm install pins, not minimum or tested versions",
+      "managerFilePatterns": ["/^tools/setup/bom\\.toml$/"],
+      "matchStrings": [
+        "(?:npm i -g |npx |pi install npm:)(?<depName>@?[a-zA-Z0-9_.-]+(?:/[a-zA-Z0-9_.-]+)?)@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)"
+      ],
+      "datasourceTemplate": "npm",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Herdr upstream candidate only; never rewrite tested",
+      "managerFilePatterns": ["/^tools/setup/bom\\.toml$/"],
+      "matchStrings": [
+        "# renovate-herdr:[^\\r\\n]*\\r?\\nupstream_version = \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "depNameTemplate": "herdr",
+      "datasourceTemplate": "custom.herdr",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "Upstream skill commit candidates; vendored provenance remains unchanged",
+      "managerFilePatterns": ["/^tools/setup/bom\\.toml$/"],
+      "matchStrings": [
+        "# renovate-skill: depName=(?<depName>[^ \\r\\n]+) branch=(?<currentValue>[^ \\r\\n]+)\\r?\\nupstream_commit = \"(?<currentDigest>[a-f0-9]{40})\""
+      ],
+      "datasourceTemplate": "github-digest",
+      "versioningTemplate": "exact"
+    }
+  ],
+  "customDatasources": {
+    "herdr": {
+      "defaultRegistryUrlTemplate": "https://herdr.dev/latest.json",
+      "format": "json",
+      "transformTemplates": ["{\"releases\":[{\"version\": version}],\"homepage\":\"https://herdr.dev\"}"]
+    }
+  }
+}
