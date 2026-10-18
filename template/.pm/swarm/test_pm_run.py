@@ -196,6 +196,11 @@ class PmRunFixture:
             "PM_RUN_PI_SESSIONS": str(self.tmp / "sessions"),
         }
 
+    @property
+    def a1(self):
+        """The Herdr agent name of job a's first attempt in this test's run."""
+        return pm_run.agent_name("a", 1, self.run_dir.resolve())
+
     def jobs(self, *jobs):
         (self.run_dir / "jobs.json").write_text(json.dumps(list(jobs)), encoding="utf-8")
 
@@ -221,6 +226,23 @@ class PmRunFixture:
         )
         return result
 
+    def start_pm(self):
+        """Start a loop in the background, for scenarios that change the run while it is live."""
+        proc = subprocess.Popen(
+            [sys.executable, str(PM_RUN), str(self.run_dir)],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        self.addCleanup(proc.kill)
+        return proc
+
+    def wait_for_log(self, text):
+        log, deadline = self.run_dir / "pm_run.log", time.time() + 30
+        while not (log.exists() and text in log.read_text(encoding="utf-8")):
+            self.assertLess(time.time(), deadline, f"no {text} in pm_run.log")
+            time.sleep(0.1)
+
     def receipts(self):
         return json.loads((self.run_dir / "receipts.json").read_text(encoding="utf-8"))
 
@@ -243,7 +265,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertFalse(attempt["loop"])
         herdr = self.herdr_state()
         self.assertEqual(herdr["agents"], {}, "the worker's pane must be closed")
-        started = herdr["gone"]["run-a-1"]
+        started = herdr["gone"][self.a1]
         self.assertIn("--kind", started["argv"])
         self.assertEqual(started["argv"][started["argv"].index("--thinking") + 1], "medium")
         self.assertIn("brief.md", started["prompts"][0])
@@ -254,7 +276,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.run_pm()
         self.assertEqual(self.receipts()["a"]["state"], "verified")
         herdr = self.herdr_state()
-        argv = herdr["gone"]["run-a-1"]["argv"]
+        argv = herdr["gone"][self.a1]["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "claude")
         settings = argv[argv.index("--settings") + 1]
         self.assertEqual(
@@ -268,18 +290,18 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             json.loads(Path(settings).read_text(encoding="utf-8")),
             {"enableAllProjectMcpServers": True, "disableBundledSkills": True},
         )
-        self.assertEqual(herdr["ran"], [[herdr["gone"]["run-a-1"]["pane"], "$env:X=1"]])
+        self.assertEqual(herdr["ran"], [[herdr["gone"][self.a1]["pane"], "$env:X=1"]])
 
     def test_pi_is_the_default_harness_and_runs_no_setup(self):
         self.jobs(self.job("a", "ok"))
         self.run_pm()
         herdr = self.herdr_state()
-        argv = herdr["gone"]["run-a-1"]["argv"]
+        argv = herdr["gone"][self.a1]["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "pi")
         self.assertEqual(argv[argv.index("--exclude-tools") + 1], "Agent,SubagentWorkflow")
         self.assertEqual(self.receipts()["a"]["attempts"][0]["model"], "ok")
         self.assertNotIn("ran", herdr)
-        self.assertIn("Write only that file. ", herdr["gone"]["run-a-1"]["prompts"][0])
+        self.assertIn("Write only that file. ", herdr["gone"][self.a1]["prompts"][0])
 
     def seed_reads(self, *screens):
         empty = {"n": 0, "workspaces": [], "agents": {}, "gone": {}, "closed": []}
@@ -314,7 +336,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_writes_lets_the_worker_write_more_than_its_output(self):
         self.jobs(self.job("a", "ok", writes=["site/", "notes/x.md"]))
         self.run_pm()
-        prompt = self.herdr_state()["gone"]["run-a-1"]["prompts"][0]
+        prompt = self.herdr_state()["gone"][self.a1]["prompts"][0]
         self.assertIn("Write only that file and the paths site/, notes/x.md. ", prompt)
 
     def test_failing_check_keeps_the_report_and_never_relaunches(self):
@@ -351,30 +373,53 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
 
     def test_a_bad_tick_and_a_half_saved_jobs_file_do_not_stop_the_loop(self):
         log = self.run_dir / "pm_run.log"
-
-        def wait_for(text):
-            deadline = time.time() + 30
-            while not (log.exists() and text in log.read_text(encoding="utf-8")):
-                self.assertLess(time.time(), deadline, f"no {text} in pm_run.log")
-                time.sleep(0.1)
-
         broken = self.job("b", "ok", after=5)  # not a list: the tick raises TypeError
         self.jobs(self.job("a", "ok"), broken)
-        proc = subprocess.Popen(
-            [sys.executable, str(PM_RUN), str(self.run_dir)],
-            env=self.env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        self.addCleanup(proc.kill)
-        wait_for("TICK-ERROR TypeError")
+        proc = self.start_pm()
+        self.wait_for_log("TICK-ERROR TypeError")
         (self.run_dir / "jobs.json").write_text('[{"id": "a",', encoding="utf-8")
-        wait_for("SKIPPED jobs.json")
+        self.wait_for_log("SKIPPED jobs.json")
         self.jobs(self.job("a", "ok"))
         self.assertEqual(proc.wait(timeout=30), 0)
         self.assertEqual(self.receipts()["a"]["state"], "verified")
         self.assertIn("Traceback", log.read_text(encoding="utf-8"))
         self.assertEqual(log.read_text(encoding="utf-8").count("SKIPPED jobs.json"), 1, "logged once per error")
+
+    def test_stop_closes_one_live_worker_and_blocks_its_successor(self):
+        self.jobs(self.job("a", "hang"), self.job("b", "ok", after=["a"]), self.job("c", "ok"))
+        proc = self.start_pm()
+        self.wait_for_log("LAUNCH a")
+        result = self.run_pm("--stop", "a")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(proc.wait(timeout=30), 0)
+        state = self.receipts()
+        self.assertEqual([state[j]["state"] for j in "abc"], ["stopped", "blocked", "verified"])
+        self.assertTrue(state["a"]["attempts"][0]["stopped_confirmed"])
+        self.assertEqual(len(state["a"]["attempts"]), 1, "a stopped job is not retried")
+        self.assertEqual(self.herdr_state()["agents"], {}, "the stopped worker's pane is closed")
+        self.assertNotEqual(self.run_pm("--stop", "nope").returncode, 0)
+
+    def test_a_job_deleted_while_it_runs_is_reported_once_and_its_pane_left_open(self):
+        self.jobs(self.job("a", "hang"))
+        proc = self.start_pm()
+        self.wait_for_log("LAUNCH a")
+        self.jobs(self.job("c", "ok"))
+        self.assertEqual(proc.wait(timeout=30), 0)
+        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
+        self.assertEqual(log.count("REMOVED a"), 1)
+        self.assertEqual(self.receipts()["a"]["state"], "removed")
+        herdr = self.herdr_state()
+        self.assertIn(self.a1, herdr["agents"], "nobody stopped it, so its pane stays")
+        self.assertTrue(herdr["workspaces"], "closing the workspace would kill the unwatched worker")
+        self.assertIn("a               removed (not in jobs.json)", self.run_pm("--status").stdout)
+
+    def test_agent_names_differ_between_runs_and_keep_the_attempt_number(self):
+        one, two = pm_run.agent_name("a", 1, Path("runs/one")), pm_run.agent_name("a", 1, Path("runs/two"))
+        self.assertNotEqual(one, two, "Herdr agent names are global; two runs must not share one")
+        long = pm_run.agent_name("A very_long job id that goes on and on", 12, Path("runs/one"))
+        self.assertLessEqual(len(long), 32)
+        self.assertRegex(long, r"^[a-z][a-z0-9_-]{0,31}$")
+        self.assertRegex(long, r"-12-[0-9a-f]{4}$")
 
     def test_old_artifact_from_before_the_attempt_does_not_count(self):
         out = self.tmp / "out" / "a.md"
@@ -398,7 +443,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(state["a"]["state"], "verified")
         self.assertEqual(len(state["a"]["attempts"]), 1)
         self.assertEqual(state["a"]["attempts"][0]["nudges"], 1)
-        prompts = self.herdr_state()["gone"]["run-a-1"]["prompts"]
+        prompts = self.herdr_state()["gone"][self.a1]["prompts"]
         self.assertEqual(len(prompts), 2)
         self.assertIn("previous turn ended", prompts[1])
         self.assertIn("brief file(s) brief.md", prompts[1])
@@ -411,7 +456,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.receipts()["a"]["state"], "verified")
         self.assertEqual(attempt["seq0"], 0)
         self.assertEqual(attempt["nudges"], 1)
-        prompts = self.herdr_state()["gone"]["run-a-1"]["prompts"]
+        prompts = self.herdr_state()["gone"][self.a1]["prompts"]
         self.assertEqual(prompts[0], prompts[1])
         self.assertIn("Read the brief file(s) brief.md", prompts[1])
         self.assertIn("and the paths code/", prompts[1])
@@ -429,7 +474,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         result = self.run_pm()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.receipts()["a"]["state"], "handed-over")
-        self.assertEqual(len(self.herdr_state()["agents"]["run-a-1"]["prompts"]), 1)
+        self.assertEqual(len(self.herdr_state()["agents"][self.a1]["prompts"]), 1)
         self.assertIn("HANDED-OVER a: provider quota or usage limit", result.stdout)
         self.assertNotIn("brief resent", result.stdout)
 
@@ -494,7 +539,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(state["a"]["attempts"][0]["why"], "still working after the hard limit and the extra time")
         self.assertIn("OVERTIME a:", result.stdout)
         self.assertLess(result.stdout.index("OVERTIME a:"), result.stdout.index("HANDED-OVER a:"))
-        self.assertIn("run-a-1", self.herdr_state()["agents"], "the session stays open for the lead")
+        self.assertIn(self.a1, self.herdr_state()["agents"], "the session stays open for the lead")
         self.assertEqual(self.herdr_state()["closed"], [], "the workspace stays open too")
         self.assertEqual(state["b"]["state"], "blocked")
 
@@ -584,7 +629,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         state = self.receipts()
         self.assertEqual(state["a"]["state"], "started")
         self.assertIn("asked", state["a"]["attempts"][0])
-        self.assertIn("run-a-1", self.herdr_state()["agents"])
+        self.assertIn(self.a1, self.herdr_state()["agents"])
         self.assertIn("WAITING a", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
 
     def test_brief_tells_the_worker_to_ask_the_lead_for_a_helper(self):
