@@ -23,8 +23,8 @@ out ("Login expired", "Please run /login", a 401), is handed over at once, witho
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
 is nudged as before. A quota message that names a reset within PM_RUN_QUOTA_WAIT_S (1800 s) plus 30 s of slack,
 written as "reset after 15m 19s" or "resets in 2h" (h, m, s units; other wordings are handed over as before), is
-waited out instead (QUOTA-WAIT): once per attempt and only if the wait ends before the hard limit; then one nudge in
-the same session and the usual budget.
+waited out instead (QUOTA-WAIT): once per attempt and only if the wait ends within the time limit (overtime already
+granted included); then one nudge in the same session, or a hand-over if the limit is still shown.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes. An output
@@ -950,9 +950,11 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "wait_until", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
+            if a.get("wait_until", 0) > time.time():  # a running quota wait, as a clock time
+                detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
