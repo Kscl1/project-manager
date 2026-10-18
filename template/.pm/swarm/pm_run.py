@@ -391,7 +391,9 @@ class Run:
         """
         path = self.root / name
         try:
-            return json.loads(held(lambda: path.read_text(encoding="utf-8-sig")))
+            data = json.loads(held(lambda: path.read_text(encoding="utf-8-sig")))
+            self.bad.pop(name, None)  # a later error, even the same one, is logged again
+            return data
         except FileNotFoundError:
             return default
         except (ValueError, PermissionError) as exc:
@@ -407,12 +409,13 @@ class Run:
         """Write the receipts; True when they reached the file. If another process keeps it locked, the caller keeps
         the state in memory as the truth and saves again next tick."""
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
         try:
+            held(lambda: tmp.write_text(json.dumps(state, indent=1), encoding="utf-8"))
             held(lambda: os.replace(tmp, self.state_path))
             return True
         except PermissionError as exc:
-            self.log(f"SAVE-FAILED receipts.json is held by another process ({exc}); saved again next tick")
+            held_file = Path(exc.filename).name if exc.filename else "receipts.json"
+            self.log(f"SAVE-FAILED {held_file} is held by another process ({exc}); saved again next tick")
             return False
 
     def cycle(self, jobs, caps, state, saved):
@@ -424,9 +427,12 @@ class Run:
                 state = self.load("receipts.json", state, live=True)
             self.tick(jobs, state, caps)
         except Exception as exc:  # noqa: BLE001 - one bad tick must not leave the workers unwatched
-            self.log(f"TICK-ERROR {type(exc).__name__}: {exc}; the loop goes on (traceback in pm_run.log)")
-            with self.log_path.open("a", encoding="utf-8") as f:
-                f.write(traceback.format_exc())
+            error = f"{type(exc).__name__}: {exc}"
+            if error != self.bad.get("tick"):  # once per distinct error, not every tick
+                self.log(f"TICK-ERROR {error}; the loop goes on (traceback in pm_run.log)")
+                with self.log_path.open("a", encoding="utf-8") as f:
+                    f.write(traceback.format_exc())
+            self.bad["tick"] = error
         return jobs, caps, state, self.save(state)
 
     # ---- lease: one scheduler per run directory -------------------------------------------------

@@ -1133,6 +1133,27 @@ class LockedFileTest(unittest.TestCase):
         self.run.save({"a": {"state": "verified"}})
         self.assertEqual(self.run.load("receipts.json", {}), {"a": {"state": "verified"}})
 
+    def test_a_held_temporary_file_does_not_end_the_loop(self):
+        tmp = self.run.root / "receipts.tmp"
+        real = Path.write_text
+
+        def held_tmp(path, *args, **kwargs):
+            if path == tmp:
+                raise PermissionError(13, "Permission denied", str(tmp))
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "write_text", held_tmp), patch.object(self.run, "tick"):
+            *_, saved = self.run.cycle([], {}, {"a": {"state": "started"}}, True)  # must not raise
+        self.assertFalse(saved)
+        self.assertIn("SAVE-FAILED receipts.tmp is held", self.run.log_path.read_text(encoding="utf-8"))
+
+    def test_the_same_error_again_after_a_good_read_is_logged_again(self):
+        jobs = self.run.root / "jobs.json"
+        for text in ('[{"id": "a",', "[]", '[{"id": "a",'):
+            jobs.write_text(text, encoding="utf-8")
+            self.run.load("jobs.json", [], live=True)
+        self.assertEqual(self.run.log_path.read_text(encoding="utf-8").count("SKIPPED jobs.json"), 2)
+
     def test_load_waits_for_a_file_being_replaced(self):
         (self.run.root / "receipts.json").write_text('{"a": 1}', encoding="utf-8")
         real, calls = Path.read_text, []
