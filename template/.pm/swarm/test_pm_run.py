@@ -313,7 +313,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.jobs(self.job("a", "ok", harness="agy", thinking="high", args=["--mode", "accept-edits"]))
         self.run_pm()
         self.assertEqual(self.receipts()["a"]["state"], "verified")
-        started = self.herdr_state()["gone"]["run-a-1"]
+        started = self.herdr_state()["gone"][self.a1]
         argv = started["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "agy")
         self.assertEqual(argv[argv.index("--") + 1 :], ["--model", "ok", "--mode", "accept-edits"])
@@ -330,7 +330,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("first-run screen", state["a"]["attempts"][0]["why"])
         self.assertEqual(state["b"]["state"], "blocked")
         herdr = self.herdr_state()
-        self.assertEqual(herdr["agents"]["run-a-1"]["prompts"], [], "the brief must not land in the menu")
+        self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the menu")
         self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
 
     def test_writes_lets_the_worker_write_more_than_its_output(self):
@@ -398,6 +398,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(state["a"]["attempts"]), 1, "a stopped job is not retried")
         self.assertEqual(self.herdr_state()["agents"], {}, "the stopped worker's pane is closed")
         self.assertNotEqual(self.run_pm("--stop", "nope").returncode, 0)
+        self.assertIn("already ended (verified)", self.run_pm("--stop", "c").stdout)
 
     def test_a_job_deleted_while_it_runs_is_reported_once_and_its_pane_left_open(self):
         self.jobs(self.job("a", "hang"))

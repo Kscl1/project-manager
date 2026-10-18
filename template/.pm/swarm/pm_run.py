@@ -35,14 +35,16 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
-                                                            jobs.json: its worker would run on unwatched)
+                                                            jobs.json: its worker would run on unwatched); delete the
+                                                            job's "stop" from jobs.json to let it run again
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
-                       "writes": ["site/"]}]   (paths the worker may write besides `out`, e.g. code it builds)
+                       "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
+                       "stop": true}]          (set by --stop; delete it to let the job run again)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
                         (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
@@ -843,16 +845,25 @@ class Run:
             if not jid.startswith("_") and jid not in ids:
                 print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}")
 
-    def request_stop(self, jobs, job_id):
+    def request_stop(self, jobs, state, job_id):
         """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""
         job = next((j for j in jobs if j["id"] == job_id), None)
         if not job:
             sys.exit(f"no job {job_id}")
         job["stop"] = True
         tmp = self.root / "jobs.json.tmp"
-        tmp.write_text(json.dumps(jobs, indent=1) + "\n", encoding="utf-8")
-        held(lambda: os.replace(tmp, self.root / "jobs.json"))
-        print(f"{job_id}: marked stop in jobs.json; the running loop closes its pane within one tick")
+        try:
+            held(lambda: tmp.write_text(json.dumps(jobs, indent=1) + "\n", encoding="utf-8"))
+            held(lambda: os.replace(tmp, self.root / "jobs.json"))
+        except PermissionError as exc:
+            sys.exit(f"pm_run: could not mark {job_id} stopped, a file is held by another process: {exc}; try again")
+        ended = state.get(job_id, {}).get("state")
+        if ended in ENDED:
+            print(f"{job_id}: marked stop in jobs.json; it has already ended ({ended}), so there is no pane to close")
+        else:
+            print(
+                f"{job_id}: marked stop in jobs.json; if it is still running, the loop closes its pane within one tick"
+            )
 
     def check(self, jobs, state, job_id):
         """Evidence 1, 2 and 4 for one job, without Herdr; a person or the lead uses it by hand."""
@@ -882,7 +893,7 @@ def main():
     if "--check" in sys.argv:
         sys.exit(0 if run.check(jobs, state, sys.argv[sys.argv.index("--check") + 1]) else 1)
     if "--stop" in sys.argv:
-        run.request_stop(jobs, sys.argv[sys.argv.index("--stop") + 1])
+        run.request_stop(jobs, state, sys.argv[sys.argv.index("--stop") + 1])
         return
     caps = run.load("caps.json", {})
     run.take_lease()
