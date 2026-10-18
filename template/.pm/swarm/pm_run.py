@@ -399,9 +399,12 @@ class Run:
             f.write(line + "\n")
         if text.split(" ", 1)[0] in FAILURES:
             failures = self.repo / ".pm" / "local" / "failures.log"
-            failures.parent.mkdir(parents=True, exist_ok=True)
-            with failures.open("a", encoding="utf-8") as f:
-                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.root.name} {' '.join(text.split())[:400]}\n")
+            try:  # best effort: a held or unwritable shared log must never stop the loop that logs
+                failures.parent.mkdir(parents=True, exist_ok=True)
+                with failures.open("a", encoding="utf-8") as f:
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.root.name} {' '.join(text.split())[:400]}\n")
+            except OSError as exc:
+                print(f"pm_run: could not append to {failures}: {exc}", flush=True)
 
     def load(self, name, default, live=False):
         """A missing file gives the default; a file that is not valid JSON stops the run with the parse error.

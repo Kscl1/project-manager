@@ -358,6 +358,20 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
         self.assertRegex(lines[1], r" run ARTIFACT b ")
 
+    def test_a_held_failure_log_never_stops_the_logging_loop(self):
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        real = Path.open
+
+        def held(path, *args, **kwargs):
+            if path.name == "failures.log":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "open", held), patch("sys.stdout", io.StringIO()):
+            run.log("TICK-ERROR KeyError: 'x'; the loop goes on")  # must not raise
+        self.assertIn("TICK-ERROR", run.log_path.read_text(encoding="utf-8"))
+
     def test_failing_check_keeps_the_report_and_never_relaunches(self):
         self.jobs(
             self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(1)"'),
