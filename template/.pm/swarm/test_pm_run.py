@@ -674,6 +674,16 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("Do not start a helper", prompt)
         self.assertIn("Helper needed:", prompt)
 
+    def test_a_job_with_helper_models_may_start_them_as_pm_run_jobs(self):
+        prompt = pm_run.launch_prompt(self.job("a", "ok", writes=["sub/"], helpers=["cheap-a", "cheap-b"]))
+        self.assertNotIn("Do not start a helper", prompt)
+        self.assertIn("only as jobs of your own pm_run run", prompt)
+        self.assertIn("on these models: cheap-a, cheap-b.", prompt)
+        self.assertIn("a skill that runs its own agent", prompt, "the ban is as wide as without helpers")
+        self.assertIn("Name the run directory a-helpers", prompt)
+        self.assertIn("wait until it has ended", prompt)
+        self.assertIn("Your output file is out/a.md. Create", prompt, "the output sentence is unchanged")
+
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
         (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
