@@ -13,6 +13,7 @@ Standard library only. Tests skip when the script is missing from
 ``.pm/tools/``.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -416,6 +417,92 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("## Drafts\n- DRAFT-1 · Private idea", out)
         self.assertLess(out.index("## Drafts"), out.index("## Warnings"))
 
+    def run_with(self, *args, path_first=None):
+        env = dict(os.environ)
+        if path_first:
+            env["PATH"] = str(path_first) + os.pathsep + env.get("PATH", "")
+        return subprocess.run(
+            [sys.executable, str(self.root / ".pm" / "tools" / "pm_resume.py"), *args],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+    def fake_gh(self, stdout, exit_code=0):
+        """A `gh` on PATH that prints `stdout` and records its arguments in gh-args.txt."""
+        bin_dir = self.root / "fake-bin"
+        bin_dir.mkdir(exist_ok=True)
+        script = bin_dir / "fake_gh.py"
+        script.write_text(
+            "import sys\n"
+            f"open({str(bin_dir / 'gh-args.txt')!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            f"sys.stdout.write({stdout!r})\n"
+            f"sys.exit({exit_code})\n",
+            encoding="utf-8",
+        )
+        if os.name == "nt":
+            (bin_dir / "gh.bat").write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        else:
+            wrapper = bin_dir / "gh"
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+            wrapper.chmod(0o755)
+        return bin_dir
+
+    def test_ready_tasks_listed_by_name(self):
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-1", "Write the guide", "Ready")
+        write_task(self.root, "TASK-2", "Ship it", "Active", notes="Next: build")
+
+        out = self.run_resume().stdout
+
+        section = out.split("## Ready\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("- TASK-1 · Write the guide", section)
+        self.assertNotIn("TASK-2", section)
+        self.assertNotIn("## Open pull requests", out, "no GitHub remote and no pr-repos.txt: nothing to ask")
+
+    def test_brief_keeps_next_steps_and_owner_asks_only(self):
+        self.commit_subjects(["setup"])
+        self.make_worktree("b1-resume")
+        write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes=LIVE_BLOCK)
+        write_task(self.root, "TASK-3", "Pick a name", "Active", notes="Next: wait\nNeeds owner: pick A or B")
+        write_task(self.root, "TASK-4", "Write the guide", "Ready")
+
+        out = self.run_with("--brief").stdout
+
+        self.assertTrue(out.startswith("# Briefing\n"))
+        headings = [line for line in out.splitlines() if line.startswith("## ")]
+        self.assertEqual(headings, ["## Git", "## Open tasks", "## Waiting on the owner", "## Ready", "## Warnings"])
+        self.assertIn("- TASK-1.2 · Package B: resume summary [Active]\n  Next: Run tests\n", out)
+        self.assertIn("  Needs owner: pick A or B", out)
+        for detail in ("Evidence:", "Worker:", "Blocker:", "Needs owner: nothing"):
+            self.assertNotIn(detail, out)
+        self.assertIn("python .pm/tools/pm_board.py --resume", out.splitlines()[-1])
+
+    def test_open_pull_requests_of_listed_repos(self):
+        self.commit_subjects(["setup"])
+        (self.root / ".pm" / "pr-repos.txt").write_text("# product\nacme/widgets\n", encoding="utf-8")
+        pulls = '[{"number": 7, "title": "Fix the thing", "isDraft": false}, {"number": 9, "title": "Try", "isDraft": true}]'
+        bin_dir = self.fake_gh(pulls)
+
+        out = self.run_with(path_first=bin_dir).stdout
+
+        section = out.split("## Open pull requests\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("- acme/widgets#7 · Fix the thing", section)
+        self.assertIn("- acme/widgets#9 · Try (draft)", section)
+        self.assertIn("--repo acme/widgets", (bin_dir / "gh-args.txt").read_text(encoding="utf-8"))
+
+    def test_failed_pull_request_listing_says_so(self):
+        self.commit_subjects(["setup"])
+        (self.root / ".pm" / "pr-repos.txt").write_text("acme/widgets\n", encoding="utf-8")
+        bin_dir = self.fake_gh("", exit_code=1)
+
+        section = self.run_with(path_first=bin_dir).stdout.split("## Open pull requests\n", 1)[1]
+
+        self.assertTrue(section.startswith("- ⚠️ Could not list the open pull requests of acme/widgets"))
+
     def test_weekly_audit_warning_until_a_recent_weekly_run(self):
         self.commit_subjects(["setup"])
         audits = self.root / ".pm" / "local" / "audits"
@@ -438,7 +525,7 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertNotIn("Weekly doc audit", self.run_resume().stdout)
 
     def held_section(self, out):
-        return out.split("## Waiting and ageing work", 1)[1].split("## Warnings", 1)[0]
+        return out.split("## Waiting and ageing work", 1)[1].split("\n## ", 1)[0]
 
     def test_held_section_lists_stale_ready_tasks_and_passed_review_dates(self):
         self.commit_subjects(["setup"])

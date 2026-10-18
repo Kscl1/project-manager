@@ -1,6 +1,6 @@
 """Status board in English for the Backlog.md task files. Standard library only.
 
-Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD] [--tree | --resume | --did [DAY] | --commits TASK]
+Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD] [--tree | --resume [--brief] | --did [DAY] | --commits TASK]
 """
 
 import argparse
@@ -193,6 +193,7 @@ def main():
     parser.add_argument("--today", default=date.today().isoformat())
     parser.add_argument("--tree", action="store_true", help="print only the Epic tree")
     parser.add_argument("--resume", action="store_true", help="print the session resume summary")
+    parser.add_argument("--brief", action="store_true", help="a short resume briefing for the owner")
     parser.add_argument(
         "--did",
         nargs="?",
@@ -203,14 +204,14 @@ def main():
     parser.add_argument("--commits", metavar="TASK", help="print one task's commits and models")
     args = parser.parse_args()
 
-    if args.resume or args.did or args.commits:
+    if args.resume or args.brief or args.did or args.commits:
         import pm_resume  # a sibling script: the tools folder is on sys.path when run directly
 
         if args.did:
             return pm_resume.did_main(args.did)
         if args.commits:
             return pm_resume.commits_main(args.commits)
-        return pm_resume.main()
+        return pm_resume.main(brief=args.brief)
 
     tasks_dir = args.tasks if args.tasks else default_tasks_dir()
     tasks = [t for t in (read_task(p) for p in sorted(Path(tasks_dir).glob("*.md"))) if t]
