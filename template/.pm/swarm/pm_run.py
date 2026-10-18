@@ -25,7 +25,8 @@ is nudged as before.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes.
-A dependency that failed, was blocked, handed-over, check-failed or is only artifact-present blocks its successors.
+A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
+successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
 Each question pm_run sees is logged as WAITING, a later one in the same session too, even when the answer to the one
 before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
@@ -33,13 +34,18 @@ before fell between two ticks (Herdr's state counter shows it); questions asked 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
        python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table and exit
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
+       python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
+                                                            blocks its successors (never delete a live job from
+                                                            jobs.json: its worker would run on unwatched); delete the
+                                                            job's "stop" from jobs.json to let it run again
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
-                       "writes": ["site/"]}]   (paths the worker may write besides `out`, e.g. code it builds)
+                       "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
+                       "stop": true}]          (set by --stop; delete it to let the job run again)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
                         (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
@@ -82,7 +88,7 @@ from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
 # pm_run stops when every job is here
-ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked")
+ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
 
 
 def _env(name, default):
@@ -308,8 +314,11 @@ def session_log(attempt, now):
         return None, None
 
 
-def agent_name(job_id, n):
-    return re.sub(r"[^a-z0-9-]", "-", f"run-{job_id}-{n}".lower())[:32]
+def agent_name(job_id, n, root):
+    """Herdr agent names are global to the server: a tag from the run directory keeps two runs with the same job id
+    apart. Herdr allows 32 characters, so the job id is cut, never the attempt number or the tag."""
+    suffix = f"-{n}-{sha256(str(root).encode('utf-8')).hexdigest()[:4]}"
+    return re.sub(r"[^a-z0-9-]", "-", f"run-{job_id}".lower())[: 32 - len(suffix)] + suffix
 
 
 def launch_prompt(job):
@@ -618,8 +627,12 @@ class Run:
     def tick(self, jobs, state, caps):
         now = time.time()
         busy = {}
+        self.forget_removed(jobs, state)
         for job in jobs:
             s = state.setdefault(job["id"], {"state": "pending", "attempts": []})
+            if job.get("stop") and s["state"] not in ENDED:
+                self.stop_on_request(job, s)
+                continue
             if s["state"] != "started":
                 continue
             a = s["attempts"][-1]
@@ -722,7 +735,7 @@ class Run:
                     s["state"] = "failed"
                     self.log(f"FAILED {job['id']}: could not keep previous output; no retry: {exc}")
                     continue
-            a = {"name": agent_name(job["id"], n), "started": time.time()}
+            a = {"name": agent_name(job["id"], n, self.root), "started": time.time()}
             s["attempts"].append(a)
             if self.launch(job, a, state):
                 s["state"] = "started"
@@ -738,6 +751,29 @@ class Run:
             else:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
         return state
+
+    def stop_on_request(self, job, s):
+        """`--stop <job>` set "stop" in jobs.json: close a live worker's pane; a pending job never starts."""
+        how = "it never started"
+        if s["state"] == "started":
+            a = s["attempts"][-1]
+            a.update(stopped_confirmed=self.stop(a), ended=time.time(), why="stopped on request")
+            how = f"Herdr pane {a.get('pane')} closed" if a["stopped_confirmed"] else "its pane could not be closed"
+        s["state"] = "stopped"
+        self.log(f"STOPPED {job['id']}: on request, {how}; its successors are blocked")
+
+    def forget_removed(self, jobs, state):
+        """A started job deleted from jobs.json is no longer watched: say so once, and leave its pane alone."""
+        ids = {job["id"] for job in jobs}
+        for jid, s in state.items():
+            if jid.startswith("_") or jid in ids or s.get("state") != "started":
+                continue
+            s["state"] = "removed"
+            pane = s["attempts"][-1].get("pane") if s["attempts"] else None
+            self.log(
+                f"REMOVED {jid}: deleted from jobs.json while its worker runs in Herdr pane {pane}; no longer "
+                f"watched and the pane is left open (to stop a job, use --stop {jid})"
+            )
 
     def nudge(self, job, s, a, now, size, why):
         """Prompt a settled worker again in its own session; False when the job was handed over instead."""
@@ -821,6 +857,30 @@ class Run:
                 if a.get(k) is not None
             )
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
+        ids = {job["id"] for job in jobs}
+        for jid, s in state.items():
+            if not jid.startswith("_") and jid not in ids:
+                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}")
+
+    def request_stop(self, jobs, state, job_id):
+        """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""
+        job = next((j for j in jobs if j["id"] == job_id), None)
+        if not job:
+            sys.exit(f"no job {job_id}")
+        job["stop"] = True
+        tmp = self.root / "jobs.json.tmp"
+        try:
+            held(lambda: tmp.write_text(json.dumps(jobs, indent=1) + "\n", encoding="utf-8"))
+            held(lambda: os.replace(tmp, self.root / "jobs.json"))
+        except PermissionError as exc:
+            sys.exit(f"pm_run: could not mark {job_id} stopped, a file is held by another process: {exc}; try again")
+        ended = state.get(job_id, {}).get("state")
+        if ended in ENDED:
+            print(f"{job_id}: marked stop in jobs.json; it has already ended ({ended}), so there is no pane to close")
+        else:
+            print(
+                f"{job_id}: marked stop in jobs.json; if it is still running, the loop closes its pane within one tick"
+            )
 
     def check(self, jobs, state, job_id):
         """Evidence 1, 2 and 4 for one job, without Herdr; a person or the lead uses it by hand."""
@@ -849,6 +909,9 @@ def main():
         return
     if "--check" in sys.argv:
         sys.exit(0 if run.check(jobs, state, sys.argv[sys.argv.index("--check") + 1]) else 1)
+    if "--stop" in sys.argv:
+        run.request_stop(jobs, state, sys.argv[sys.argv.index("--stop") + 1])
+        return
     caps = run.load("caps.json", {})
     run.take_lease()
     run.log(f"pm_run start: {len(jobs)} jobs")
@@ -860,7 +923,8 @@ def main():
         if saved and all(state.get(j["id"], {}).get("state") in ENDED for j in jobs):
             run.log("pm_run done: " + ", ".join(f"{j['id']}={state[j['id']]['state']}" for j in jobs))
             unconfirmed = any(a.get("stopped_confirmed") is False for j in jobs for a in state[j["id"]]["attempts"])
-            handed = any(state[j["id"]]["state"] == "handed-over" for j in jobs)  # its session stays open
+            # a handed-over session stays open, and so does the pane of a job deleted while it ran
+            handed = any(s["state"] in ("handed-over", "removed") for k, s in state.items() if not k.startswith("_"))
             if state.get("_herdr_workspace") and not unconfirmed and not handed:
                 herdr("workspace", "close", state["_herdr_workspace"])
             (run.root / "pm_run.lease").unlink(missing_ok=True)
