@@ -1,11 +1,14 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import mermaid from 'astro-mermaid';
+import { satteri } from '@astrojs/markdown-satteri';
+import { mdLinks } from './src/md-links.mjs';
 
 export default defineConfig({
   site: 'https://kscl1.github.io',
   base: '/project-manager',
   trailingSlash: 'always',
+  markdown: { processor: satteri({ mdastPlugins: [mdLinks] }) },
   integrations: [
     mermaid({ enableLog: false }),
     starlight({

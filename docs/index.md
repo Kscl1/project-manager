@@ -23,8 +23,8 @@ A new session starts from the repository and the active task, not from an old ch
 
 ## Start small
 
-1. Read [how it works](./how-it-works/) to see the workflow and where each tool runs.
-2. Follow [getting started](./getting-started/) to install the core layer in your project.
+1. Read [how it works](how-it-works.md) to see the workflow and where each tool runs.
+2. Follow [getting started](getting-started.md) to install the core layer in your project.
 3. Open your project in your coding agent and run `/pm-setup`.
 
 The package does not require one model provider. Setup installs Claude Code today; the optional swarm uses Pi workers. Your model accounts and any API charges are separate from this MIT-licensed package.

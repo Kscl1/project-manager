@@ -80,4 +80,4 @@ The lead then reads the active task and continues from its live notes. Task stat
 
 Before committing, the package's hooks run consistency checks and call any project-specific checks you configured. The drift check can also flag documentation whose described code changed. Neither can prove that prose is true or software behaves correctly: that still needs code review, tests and real use.
 
-Ready to try it? Follow [getting started](../getting-started/). For the underlying rules, read the [working principles](https://github.com/Kscl1/project-manager/blob/main/template/.pm/principles.md).
+Ready to try it? Follow [getting started](getting-started.md). For the underlying rules, read the [working principles](https://github.com/Kscl1/project-manager/blob/main/template/.pm/principles.md).

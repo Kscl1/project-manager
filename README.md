@@ -16,7 +16,7 @@ It is neither a harness nor a framework. It combines existing open tools with pl
 
 ## How the parts fit together
 
-See [How it works](docs/how-it-works.md) for the workflow, roles, architecture diagram and what runs where. The diagram and explanation live there, shared by GitHub and the documentation site.
+See [How it works](docs/how-it-works.md) for the workflow, roles, architecture diagram and what runs where.
 
 - [Introduction](docs/index.md): what it is and who it is for.
 - [Getting started](docs/getting-started.md): the guided setup and manual path.

@@ -41,11 +41,11 @@ npm run test:site # checks the built pages, fallback notice, local links and ass
 npm run preview   # preview the built site
 ```
 
-`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` and `sidebar.order` are optional. Names beginning `_` are not loaded. Navigation includes new pages automatically.
+`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` and `sidebar.order` are optional. Files whose names begin with `_` are not loaded. Navigation includes new pages automatically.
 
 English is the source language. The introduction and getting-started guide have Turkish versions; other pages fall back to English with Starlight's missing-translation notice. When changing a translated page, update both versions in the same PR, or remove the outdated translation so the notice appears. The notice detects missing files, not stale translations.
 
-For links between site pages, use relative directory-style URLs: `./getting-started/` from the index, `../getting-started/` from another top-level page. Use explicit GitHub URLs for files outside `docs/`. A Mermaid code fence renders as a diagram in the browser; keep a prose explanation alongside it.
+Link between pages with the relative Markdown file, for example `getting-started.md` or, from `docs/tr/`, `../how-it-works.md`. GitHub follows these links as they are, and the site build turns them into page URLs (`src/md-links.mjs`). Use explicit GitHub URLs for files outside `docs/`. A Mermaid code fence renders as a diagram in the browser; keep a prose explanation alongside it.
 
 Pull requests build and test the site but never deploy it. Publishing is manual: after reading and merging the change, the maintainer sets the repository's **Settings → Pages → Source** to **GitHub Actions**, then runs **Documentation site → Run workflow** on `main`. The workflow does not enable Pages itself, and neither pushes nor pull requests can deploy. The configured project URL is `https://kscl1.github.io/project-manager/`.
 
