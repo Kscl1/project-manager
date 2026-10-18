@@ -775,6 +775,42 @@ class DoneTaskTest(RepoTestCase):
         )
         self.assertEqual(self.run_check().returncode, 0)
 
+    def test_owner_ask_with_options_needs_them_written_out(self):
+        path = self.task("Active", ["- [ ] #1 one"])
+        base = path.read_text(encoding="utf-8")
+        path.write_text(base + "\n## Implementation Notes\n\nNext: wait\nNeeds owner: pick A or B\n", encoding="utf-8")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("offers options A, B, but A, B is not written out", result.stdout)
+
+        options = "\n- A: keep the old name; free, but confusing\n- **B**: rename it; one migration\n"
+        path.write_text(base + "\n## Implementation Notes\n\nNext: wait\nNeeds owner: pick A or B\n" + options)
+        self.assertEqual(self.run_check().returncode, 0, self.run_check().stdout)
+
+    def test_owner_ask_options_match_any_case_and_dash_but_not_a_fenced_example(self):
+        path = self.task("Active", ["- [ ] #1 one"])
+        base = path.read_text(encoding="utf-8") + "\n## Implementation Notes\n\nNext: wait\n"
+        for ask, options in (
+            ("pick (a) or (b)", "- A: keep the old name\n- B: rename it\n"),
+            ("A or B?", "- a: keep\n- b: rename\n"),
+            ("pick A or B", "- A — keep the old name\n- B — rename it\n"),
+        ):
+            path.write_text(base + f"Needs owner: {ask}\n\n{options}", encoding="utf-8")
+            self.assertEqual(self.run_check().returncode, 0, (ask, self.run_check().stdout))
+
+        fenced = "```\n- A: an example\n- B: another\n```\n"
+        path.write_text(base + "Needs owner: pick A or B\n\n" + fenced, encoding="utf-8")
+        self.assertEqual(self.run_check().returncode, 1)
+
+    def test_owner_ask_without_options_or_on_a_done_task_passes(self):
+        for status, ask in (("Active", "Needs owner: say how long the install took"), ("Done", "Needs owner: A/B/C")):
+            path = self.task(status, ["- [x] #1 one"])
+            path.write_text(path.read_text(encoding="utf-8") + f"\n## Implementation Notes\n\n{ask}\n")
+
+            self.assertEqual(self.run_check().returncode, 0, (status, self.run_check().stdout))
+
     def test_old_done_task_without_dod_needs_no_doc_impact(self):
         self.task("Done", ["- [x] #1 one"], summary="Shipped it.")
 
