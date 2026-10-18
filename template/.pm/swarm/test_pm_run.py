@@ -370,7 +370,10 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
 
         with patch.object(Path, "open", held), patch("sys.stdout", io.StringIO()):
             run.log("TICK-ERROR KeyError: 'x'; the loop goes on")  # must not raise
-        self.assertIn("TICK-ERROR", run.log_path.read_text(encoding="utf-8"))
+            run.log("RETRY a: worker is gone")
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("TICK-ERROR", log)
+        self.assertEqual(log.count("could not append"), 1, "warned once")
 
     def test_failing_check_keeps_the_report_and_never_relaunches(self):
         self.jobs(

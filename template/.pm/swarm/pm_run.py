@@ -391,6 +391,7 @@ class Run:
         self.state_path = self.root / "receipts.json"
         self.log_path = self.root / "pm_run.log"
         self.bad = {}  # file name -> the parse error last logged for it
+        self.failures_warned = False  # the shared failure log could not be written; said once
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -407,7 +408,12 @@ class Run:
                 with failures.open("a", encoding="utf-8") as f:
                     f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {run} {event}\n")
             except OSError as exc:
-                print(f"pm_run: could not append to {failures}: {exc}", flush=True)
+                if not self.failures_warned:  # once, and without log(): that would recurse
+                    self.failures_warned = True
+                    warning = f"pm_run: could not append to {failures}: {exc}; failures stay in pm_run.log only"
+                    print(warning, flush=True)
+                    with self.log_path.open("a", encoding="utf-8") as f:
+                        f.write(warning + "\n")
 
     def load(self, name, default, live=False):
         """A missing file gives the default; a file that is not valid JSON stops the run with the parse error.
