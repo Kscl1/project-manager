@@ -49,6 +49,8 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                         A first-run screen that only the owner can pass (agy: colour scheme, then its terms) is handed
                         over before the brief is sent: finish it once in that Herdr tab, then rerun the job)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
+The loop re-reads jobs.json and caps.json every tick; a copy that is not valid JSON (an edit saved half-way) is
+skipped with one log line. An error inside one tick is logged and the loop goes on.
 Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts it). The Herdr server must be running
 (start `herdr` once).
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check),
@@ -69,6 +71,7 @@ import shutil
 import subprocess
 import sys
 import time
+import traceback
 from collections import Counter
 from datetime import datetime
 from hashlib import sha256
@@ -149,6 +152,17 @@ RESUME = (
     "keep what is there, finish it, "
     "then append the exact last line <!-- done -->."
 )
+
+
+def held(action):
+    """Run a file action; on Windows retry for about 3 s while another process (a --status call, a watcher) holds
+    the file open, which makes a rename or a read fail with PermissionError. The last failure is raised."""
+    for wait in (0.1, 0.2, 0.4, 0.8, 1.6):
+        try:
+            return action()
+        except PermissionError:
+            time.sleep(wait)
+    return action()
 
 
 def herdr(*args, plain=False):
@@ -358,6 +372,7 @@ class Run:
         self.repo = Path(os.environ.get("PM_RUN_REPO", Path.cwd())).resolve()
         self.state_path = self.root / "receipts.json"
         self.log_path = self.root / "pm_run.log"
+        self.bad = {}  # file name -> the parse error last logged for it
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -367,25 +382,58 @@ class Run:
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-    def load(self, name, default):
+    def load(self, name, default, live=False):
         """A missing file gives the default; a file that is not valid JSON stops the run with the parse error.
+        In the running loop (live) it gives the default instead, the last good copy, and logs the error once:
+        a person editing jobs.json may save it half-written. A file another process keeps locked is handled the same.
 
         utf-8-sig also reads a file that starts with a byte order mark, as Windows PowerShell 5.1 writes it.
         """
         path = self.root / name
         try:
-            text = path.read_text(encoding="utf-8-sig")
+            data = json.loads(held(lambda: path.read_text(encoding="utf-8-sig")))
+            self.bad.pop(name, None)  # a later error, even the same one, is logged again
+            return data
         except FileNotFoundError:
             return default
-        try:
-            return json.loads(text)
-        except ValueError as exc:
-            sys.exit(f"pm_run: {path} is not valid JSON: {exc}")
+        except (ValueError, PermissionError) as exc:
+            what = "not valid JSON" if isinstance(exc, ValueError) else "held by another process"
+            if not live:
+                sys.exit(f"pm_run: {path} is {what}: {exc}")
+            if str(exc) != self.bad.get(name):
+                self.log(f"SKIPPED {name}: {what} ({exc}); the last good copy is used until it can be read")
+            self.bad[name] = str(exc)
+            return default
 
     def save(self, state):
+        """Write the receipts; True when they reached the file. If another process keeps it locked, the caller keeps
+        the state in memory as the truth and saves again next tick."""
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=1), encoding="utf-8")
-        os.replace(tmp, self.state_path)
+        try:
+            held(lambda: tmp.write_text(json.dumps(state, indent=1), encoding="utf-8"))
+            held(lambda: os.replace(tmp, self.state_path))
+            return True
+        except PermissionError as exc:
+            held_file = Path(exc.filename).name if exc.filename else "receipts.json"
+            self.log(f"SAVE-FAILED {held_file} is held by another process ({exc}); saved again next tick")
+            return False
+
+    def cycle(self, jobs, caps, state, saved):
+        """One pass of the loop: re-read the run files, tick, save; returns (jobs, caps, state, saved).
+        receipts.json is re-read only after a save that worked: otherwise it is older than the state in memory."""
+        try:
+            jobs, caps = self.load("jobs.json", jobs, live=True), self.load("caps.json", caps, live=True)
+            if saved:
+                state = self.load("receipts.json", state, live=True)
+            self.tick(jobs, state, caps)
+        except Exception as exc:  # noqa: BLE001 - one bad tick must not leave the workers unwatched
+            error = f"{type(exc).__name__}: {exc}"
+            if error != self.bad.get("tick"):  # once per distinct error, not every tick
+                self.log(f"TICK-ERROR {error}; the loop goes on (traceback in pm_run.log)")
+                with self.log_path.open("a", encoding="utf-8") as f:
+                    f.write(traceback.format_exc())
+            self.bad["tick"] = error
+        return jobs, caps, state, self.save(state)
 
     # ---- lease: one scheduler per run directory -------------------------------------------------
     def take_lease(self):
@@ -784,14 +832,15 @@ def main():
         return
     if "--check" in sys.argv:
         sys.exit(0 if run.check(jobs, state, sys.argv[sys.argv.index("--check") + 1]) else 1)
+    caps = run.load("caps.json", {})
     run.take_lease()
     run.log(f"pm_run start: {len(jobs)} jobs")
+    saved = True
     while True:
         run.refresh_lease()
-        jobs, caps = run.load("jobs.json", jobs), run.load("caps.json", {})
-        state = run.tick(jobs, run.load("receipts.json", state), caps)
-        run.save(state)
-        if all(state[j["id"]]["state"] in ENDED for j in jobs):
+        jobs, caps, state, saved = run.cycle(jobs, caps, state, saved)
+        # the run ends only once its final receipts are on disk
+        if saved and all(state.get(j["id"], {}).get("state") in ENDED for j in jobs):
             run.log("pm_run done: " + ", ".join(f"{j['id']}={state[j['id']]['state']}" for j in jobs))
             unconfirmed = any(a.get("stopped_confirmed") is False for j in jobs for a in state[j["id"]]["attempts"])
             handed = any(state[j["id"]]["state"] == "handed-over" for j in jobs)  # its session stays open
