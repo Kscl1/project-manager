@@ -12,6 +12,7 @@ The fake Herdr keeps its state in a JSON file and reads each worker's behaviour 
   lost      loses the first brief without working; the resent brief finishes
 """
 
+import contextlib
 import importlib.util
 import io
 import json
@@ -458,6 +459,51 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertRegex(long, r"^[a-z][a-z0-9_-]{0,31}$")
         self.assertRegex(long, r"-12-[0-9a-f]{4}$")
 
+    def test_an_output_from_another_run_is_copied_before_the_first_attempt(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("a verified report from another run\n", encoding="utf-8")
+        (self.tmp / "out" / "a.kept.md").write_text("an older copy\n", encoding="utf-8")
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        self.assertEqual(
+            (self.tmp / "out" / "a.kept-2.md").read_text(encoding="utf-8"), "a verified report from another run\n"
+        )
+        self.assertEqual((self.tmp / "out" / "a.kept.md").read_text(encoding="utf-8"), "an older copy\n")
+        self.assertIn(
+            "KEPT a: a.md existed before this run; a copy is at a.kept-2.md",
+            (self.run_dir / "pm_run.log").read_text(encoding="utf-8"),
+        )
+
+    def test_a_brief_changed_while_the_worker_ran_is_flagged(self):
+        brief = self.tmp / "brief.md"
+        brief.write_text("item one\n", encoding="utf-8")
+        self.jobs(self.job("a", "lazy"))  # finishes only after a nudge, so the brief can change in between
+        real_launch = pm_run.Run.launch
+
+        def launch_then_edit(run, job, attempt, state):
+            sent = real_launch(run, job, attempt, state)
+            brief.write_text("item two\n", encoding="utf-8")
+            return sent
+
+        state = {}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.Run, "launch", launch_then_edit), patch.object(pm_run, "SETTLE_S", 0), patch.object(
+            pm_run, "QUIET_S", 0
+        ):
+            for _ in range(20):
+                run.tick([self.job("a", "lazy")], state, {})
+                if state["a"]["state"] in pm_run.ENDED:
+                    break
+                time.sleep(0.6)
+        self.assertEqual(state["a"]["state"], "verified")
+        self.assertTrue(state["a"]["attempts"][-1]["brief_changed"])
+        self.assertIn("BRIEF-CHANGED a", run.log_path.read_text(encoding="utf-8"))
+
     def test_old_artifact_from_before_the_attempt_does_not_count(self):
         out = self.tmp / "out" / "a.md"
         out.parent.mkdir(parents=True)
@@ -748,7 +794,28 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(state["a"]["state"], "failed")
         self.assertEqual(len(state["a"]["attempts"]), 1)
         self.assertEqual(out.read_text(encoding="utf-8"), "previous output")
-        self.assertIn("could not keep previous output; no retry", run.log_path.read_text(encoding="utf-8"))
+        self.assertIn("KEPT-FAILED a: could not keep the previous output", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_briefly_locked_output_is_kept_after_a_retry(self):
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        (self.tmp / "a.md").write_text("previous output", encoding="utf-8")
+        state = {"a": {"state": "pending", "attempts": []}}
+        copy = shutil.copy2
+        calls = []
+
+        def locked_once(src, dst):
+            calls.append(src)
+            if len(calls) == 1:
+                raise PermissionError("held by a scanner")
+            return copy(src, dst)
+
+        with patch.object(pm_run.shutil, "copy2", side_effect=locked_once), patch.object(
+            pm_run.time, "sleep"
+        ), patch.object(run, "launch", side_effect=lambda job, attempt, state: attempt.update(pane="p1") or True):
+            run.tick([self.job("a", "nothing", out="a.md")], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual((self.tmp / "a.kept.md").read_text(encoding="utf-8"), "previous output")
 
     def settled_worker(self, error="500", screen="working"):
         """A Pi worker whose turn looks settled, with a session log that ends in a provider error."""
@@ -788,7 +855,9 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
             patch.object(pm_run.time, "time", return_value=now),
             patch.object(run, "status_of", return_value="done"),
         ]
-        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        with contextlib.ExitStack() as stack:
+            for p in patches:
+                stack.enter_context(p)
             run.tick([self.job("a", "nothing")], state, {})
         return self.herdr_state()["agents"]["worker"]["prompts"]
 
@@ -839,6 +908,43 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertIn("rerun the job after it resets", run.log_path.read_text(encoding="utf-8"))
                 self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
                 run.log_path.unlink()
+
+    def test_a_quota_that_resets_soon_is_waited_out_then_nudged(self):
+        run, log, attempt, state = self.settled_worker("429 The usage limit has been reached (reset after 2m 0s)")
+        for now, prompts in ((1100, 1), (1200, 1), (1249, 1), (1251, 2)):
+            with self.subTest(now=now):
+                self.assertEqual(len(self.tick_at(run, state, now, QUIET_S=0, MAX_NUDGES=3)), prompts)
+                self.assertEqual(state["a"]["state"], "started")
+        self.assertIn("QUOTA-WAIT a", run.log_path.read_text(encoding="utf-8"))
+        self.assertIn("RESUME a", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_quota_is_waited_out_once_per_attempt_and_never_past_the_hard_limit(self):
+        run, log, attempt, state = self.settled_worker("429 usage limit reached (reset after 2m 0s)")
+        self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)
+        self.assertTrue(attempt["quota_waited"])
+        entry = {"type": "message", "message": {"role": "assistant", "stopReason": "error", "errorMessage": ""}}
+        entry["message"]["errorMessage"] = "429 usage limit reached (reset after 3m 0s)"  # a countdown that restarted
+        log.write_text(log.read_text(encoding="utf-8") + json.dumps(entry) + "\n", encoding="utf-8")
+        os.utime(log, (1200, 1200))
+        self.tick_at(run, state, 1300, QUIET_S=0, MAX_NUDGES=3)
+        self.assertEqual(state["a"]["state"], "handed-over", "a second wait in one attempt is not allowed")
+
+        run, log, attempt, state = self.settled_worker("429 usage limit reached (reset after 20m 0s)")
+        self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3, HARD_S=1500)
+        self.assertEqual(state["a"]["state"], "handed-over", "the wait would end after the hard limit")
+
+    def test_a_quota_that_resets_late_or_never_says_is_still_handed_over(self):
+        for error in ("429 usage limit reached, resets in 5h", '429 {"message":"Go usage limit exceeded"}'):
+            with self.subTest(error=error):
+                run, log, attempt, state = self.settled_worker(error)
+                self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 1)
+                self.assertEqual(state["a"]["state"], "handed-over")
+                run.log_path.unlink()
+
+    def test_reset_times_are_read_from_the_message(self):
+        for text, seconds in (("(reset after 15m 19s)", 919), ("Resets in 2h", 7200), ("reset after 44s)", 44)):
+            self.assertEqual(pm_run.reset_seconds(text), seconds)
+        self.assertIsNone(pm_run.reset_seconds("limit reached, try later"))
 
     def test_bare_429_throttling_and_worker_prose_are_still_nudged(self):
         outage = '429: {"type":"server_error","message":"Upstream request failed: Endpoint is unavailable."}'

@@ -21,10 +21,17 @@ in a row the job is **handed-over**: pm_run stops watching, leaves the session o
 A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
 out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
-is nudged as before.
+is nudged as before. A quota message that names a reset within PM_RUN_QUOTA_WAIT_S (1800 s) plus 30 s of slack,
+written as "reset after 15m 19s" or "resets in 2h" (h, m, s units; other wordings are handed over as before), is
+waited out instead (QUOTA-WAIT): once per attempt and only if the wait ends within the time limit (overtime already
+granted included); then one nudge in the same session, or a hand-over if the limit is still shown.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
-before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes.
+before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes. An output
+file that already exists when a job's first attempt starts (another run dir, or an earlier job with the same `out`)
+is copied to <stem>.kept<suffix> first, so a finished report is never lost to a relaunch.
+A brief that changes while its worker runs is logged as BRIEF-CHANGED when the job is judged, and the receipt keeps
+brief_changed: the report answers the brief the worker read, which may no longer be the job's.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -65,6 +72,7 @@ Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts i
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check),
 PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it ready).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
+PM_RUN_QUOTA_WAIT_S (1800),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
 Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
@@ -108,10 +116,12 @@ SETUP_S = _env("SETUP_S", 2)  # let the pane's setup line finish before the agen
 START_S = _env("START_S", 10)
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
+QUOTA_WAIT_S = _env("QUOTA_WAIT_S", 30 * 60)
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
+FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED"}
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -284,6 +294,15 @@ def stop_sign(attempt, screen):
     return None
 
 
+def reset_seconds(text):
+    """Seconds until a limit resets when the message says so ("reset after 15m 19s", "resets in 2h"), else None."""
+    found = re.search(r"\bresets? (?:after|in) ((?:\d+ ?[hms]\b ?)+)", text, re.I)
+    if not found:
+        return None
+    units = {"h": 3600, "m": 60, "s": 1}
+    return sum(int(n) * units[u.lower()] for n, u in re.findall(r"(\d+) ?([hms])", found.group(1), re.I))
+
+
 def check_artifact(path, started, min_words):
     """Evidence 1 and 2: the artifact, or None with the reason."""
     if not path.exists():
@@ -332,6 +351,30 @@ def session_log(attempt, now):
         return st.st_size, now - st.st_mtime
     except (KeyError, OSError):
         return None, None
+
+
+def keep_output(out, stem, move):
+    """Move or copy the output file to <stem><suffix>, adding -2, -3 on name clashes; return the new path."""
+    kept, extra = out.with_name(stem + out.suffix), 2
+    while kept.exists():
+        kept = out.with_name(f"{stem}-{extra}{out.suffix}")
+        extra += 1
+    if move:
+        out.rename(kept)
+    else:
+        shutil.copy2(out, kept)
+    return kept
+
+
+def brief_digest(job, repo):
+    """One hash over the job's brief files as they are now; a missing brief counts as its own content."""
+    digest = sha256()
+    for brief in job["briefs"]:
+        try:
+            digest.update((repo / brief).read_bytes())
+        except OSError:
+            digest.update(b"missing:" + brief.encode("utf-8"))
+    return digest.hexdigest()[:16]
 
 
 def agent_name(job_id, n, root):
@@ -566,6 +609,7 @@ class Run:
         attempt["seq0"] = attempt.get("completion_seq")
         sent = herdr("agent", "prompt", attempt["name"], launch_prompt(job))
         attempt["prompted"] = time.time()
+        attempt["briefs_sha"] = brief_digest(job, self.repo)  # the text the worker was just pointed at
         self.reset_observation(attempt)
         return "error" not in sent
 
@@ -698,6 +742,12 @@ class Run:
                     a["stopped_confirmed"] = True
                 art, why = check_artifact(self.repo / job["out"], a["started"], job.get("min_words", 0))
                 if art:
+                    if a.get("briefs_sha") and brief_digest(job, self.repo) != a["briefs_sha"]:
+                        a["brief_changed"] = True
+                        self.log(
+                            f"BRIEF-CHANGED {job['id']}: a brief changed while the worker ran; its report answers the "
+                            f"brief it read, so check it against the job"
+                        )
                     a.update(artifact=art, ended=now, stopped_confirmed=a.get("stopped_confirmed") or self.stop(a))
                     if not a["stopped_confirmed"]:
                         self.fail_or_retry(job, s, "artifact present but the worker could not be confirmed stopped")
@@ -730,8 +780,11 @@ class Run:
                     if not a.get("held"):
                         a["held"] = True
                         self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}")
-                elif self.stop_hand_over(job, s, a, why):
-                    continue
+                elif a.get("wait_until", 0) > now:
+                    pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
+                elif self.stop_hand_over(job, s, a, why, now):
+                    if s["state"] == "handed-over":
+                        continue
                 elif not self.nudge(job, s, a, now, size, why):
                     continue
             elif now - a["started"] > HARD_S + a.get("overtime", 0):
@@ -756,21 +809,18 @@ class Run:
             if busy.get(bucket, 0) >= caps.get(bucket, 2):
                 continue
             n = len(s["attempts"]) + 1
-            if n > 1:
-                out = self.repo / job["out"]
-                try:
-                    if out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
-                        stem = f"{out.stem}.attempt{n - 1}"
-                        kept, extra = out.with_name(stem + out.suffix), 2
-                        while kept.exists():
-                            kept = out.with_name(f"{stem}-{extra}{out.suffix}")
-                            extra += 1
-                        out.rename(kept)
-                        self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
-                except OSError as exc:
-                    s["state"] = "failed"
-                    self.log(f"FAILED {job['id']}: could not keep previous output; no retry: {exc}")
-                    continue
+            out = self.repo / job["out"]
+            try:
+                if n > 1 and out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
+                    kept = held(lambda: keep_output(out, f"{out.stem}.attempt{n - 1}", move=True))
+                    self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
+                elif n == 1 and out.exists():
+                    kept = held(lambda: keep_output(out, f"{out.stem}.kept", move=False))
+                    self.log(f"KEPT {job['id']}: {out.name} existed before this run; a copy is at {kept.name}")
+            except OSError as exc:
+                s["state"] = "failed"
+                self.log(f"KEPT-FAILED {job['id']}: could not keep the previous output, so no worker starts: {exc}")
+                continue
             a = {"name": agent_name(job["id"], n, self.root), "started": time.time()}
             s["attempts"].append(a)
             if self.launch(job, a, state):
@@ -844,13 +894,24 @@ class Run:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
         return True
 
-    def stop_hand_over(self, job, s, a, why):
-        """Hand over a settled worker whose quota is used up or whose sign-in ran out; True when it did."""
+    def stop_hand_over(self, job, s, a, why, now):
+        """Hand over a settled worker whose quota is used up or whose sign-in ran out, or wait out a quota that resets
+        soon; True when it did either."""
         sign = stop_sign(a, herdr("agent", "read", a["name"], "--source", "visible", plain=True))
-        if not sign:
+        if not sign or sign[1] == a.get("waited_for"):  # after the wait the old message is still on the pane
             return False
         kind, text = sign
         a[kind] = text
+        wait = reset_seconds(text) if kind == "quota" else None
+        ends = now + wait + 30 if wait is not None else 0
+        limit = a["started"] + HARD_S + a.get("overtime", 0)
+        if wait is not None and wait <= QUOTA_WAIT_S and not a.get("quota_waited") and ends <= limit:
+            a.update(waited_for=text, wait_until=ends, quota_waited=True)  # once per attempt, inside the time limit
+            self.log(
+                f'QUOTA-WAIT {job["id"]}: "{text}"; the limit resets in {wait / 60:.0f} min, so the same session '
+                f"gets a nudge after it instead of a hand-over"
+            )
+            return True
         if kind == "login":
             what = "sign the harness in again (Claude Code: run claude, then /login), then rerun the job"
             self.hand_over(job, s, f'sign-in needed: "{text}"; not resent, {what}; {why}')
@@ -889,9 +950,11 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
+            if a.get("wait_until", 0) > time.time():  # a running quota wait, as a clock time
+                detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
