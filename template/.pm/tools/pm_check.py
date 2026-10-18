@@ -6,7 +6,8 @@ Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
-an open task keeps its live Next and Evidence lines short, so the resume summary stays short.
+an open task keeps its live Next and Evidence lines short, so the resume summary stays short,
+and an owner ask that offers lettered options (`Needs owner: pick A or B`) has each option written out.
 A file path written in backticks must exist: in a living doc any repo path, in a decision in force a path into
 a repository next to this one (`../repo/file`). A deleted file passes when its deleting commit is named beside it.
 
@@ -449,6 +450,7 @@ def check_file(path, decisions):
         problems += check_open_task_type(name, lines)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_live_lines(name, lines)
+        problems += check_owner_options(name, lines)
     if STUDY_ENTRY.match(name):
         problems += check_study(path, name, lines)
     return problems
@@ -613,6 +615,42 @@ def check_live_lines(name, lines):
                     f"    → keep the current state in one short line; move the history to a dated note below the block"
                 )
     return problems
+
+
+# Option labels in an owner ask: "A or B", "A/B/C", "(a) or (b)", "option B". Two or more make it a choice.
+ASK_OPTIONS = re.compile(
+    r"\(([a-dA-D])\)|\b(?:[Oo]ption|[Ss]eçenek)\s+([A-D])\b|\b([A-D])(?=\s*(?:/|,|\bor\b|\bveya\b))"
+)
+ASK_OPTIONS_AFTER = re.compile(r"(?:/|,|\bor\b|\bveya\b)\s*\(?([A-D])\b")
+
+
+def check_owner_options(name, lines):
+    """An open task whose `Needs owner:` line offers lettered options writes each option out in the task.
+    The owner may come back days later in a new session; options that lived only in a chat are lost."""
+    status = next((value for _, value in read_frontmatter(lines).get("status", [])), "").strip("'\"")
+    if status == "Done":
+        return []
+    notes = sections(lines).get("Implementation Notes", [])
+    ask = next((line for line in notes if line.startswith("Needs owner:")), "")
+    letters = {group for match in ASK_OPTIONS.finditer(ask) for group in match.groups() if group}
+    letters |= set(ASK_OPTIONS_AFTER.findall(ask))
+    if len(letters) < 2:
+        return []
+    others = [line for line in lines if not line.startswith("Needs owner:")]
+    missing = []
+    for letter in sorted(letters):
+        label = re.compile(
+            rf"^\s*(?:[-*]\s*)?(?:\*\*)?(?:[Oo]ption\s+|[Ss]eçenek\s+)?\(?{letter}\)?(?:\*\*)?\s*[:).–-]"
+        )
+        if not any(label.match(line) for line in others):
+            missing.append(letter)
+    if not missing:
+        return []
+    return [
+        f"{name}: 'Needs owner:' offers options {', '.join(sorted(letters))}, but {', '.join(missing)} "
+        f"is not written out in the task\n"
+        f"    → add a line per option (for example '- {missing[0]}: what it is and what it costs') before asking"
+    ]
 
 
 def unfenced_lines(lines):
