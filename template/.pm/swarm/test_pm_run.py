@@ -1146,6 +1146,38 @@ class LockedFileTest(unittest.TestCase):
             self.assertEqual(self.run.load("receipts.json", {}), {"a": 1})
         self.assertEqual(len(calls), 2)
 
+    def test_after_a_failed_save_the_state_in_memory_stays_the_truth(self):
+        self.run.save({"a": {"state": "started"}})
+
+        def finish(jobs, state, caps):
+            state["a"]["state"] = "verified"
+
+        with patch.object(self.run, "tick", finish), patch.object(
+            pm_run.os, "replace", side_effect=PermissionError(13)
+        ):
+            jobs, caps, state, saved = self.run.cycle([], {}, {}, True)
+        self.assertFalse(saved, "the main loop must not end the run on this pass")
+        self.assertEqual(state, {"a": {"state": "verified"}})
+        with patch.object(self.run, "tick"):
+            jobs, caps, state, saved = self.run.cycle(jobs, caps, state, saved)
+        self.assertTrue(saved)
+        self.assertEqual(state, {"a": {"state": "verified"}}, "the older file on disk was not read back")
+        self.assertEqual(self.run.load("receipts.json", {}), {"a": {"state": "verified"}})
+
+    def test_a_run_file_that_stays_held_keeps_the_last_good_copy(self):
+        (self.run.root / "jobs.json").write_text("[]", encoding="utf-8")
+        with patch.object(Path, "read_text", side_effect=PermissionError(13, "held")), patch.object(
+            self.run, "tick"
+        ) as tick:
+            jobs, caps, state, saved = self.run.cycle([{"id": "a"}], {"x": 1}, {"a": {}}, True)
+            self.run.cycle(jobs, caps, state, saved)
+        self.assertEqual((jobs, caps, state), ([{"id": "a"}], {"x": 1}, {"a": {}}))
+        self.assertEqual(tick.call_count, 2, "the loop goes on")
+        log = self.run.log_path.read_text(encoding="utf-8")
+        self.assertEqual(log.count("SKIPPED jobs.json: held by another process"), 1, "logged once per error")
+        with self.assertRaises(SystemExit), patch.object(Path, "read_text", side_effect=PermissionError(13)):
+            self.run.load("jobs.json", [])  # at start and for --status a clear stop is right
+
 
 class HerdrSafetyTest(unittest.TestCase):
     def test_only_agent_not_found_means_gone(self):
