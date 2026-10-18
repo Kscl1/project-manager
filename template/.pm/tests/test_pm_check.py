@@ -789,6 +789,21 @@ class DoneTaskTest(RepoTestCase):
         path.write_text(base + "\n## Implementation Notes\n\nNext: wait\nNeeds owner: pick A or B\n" + options)
         self.assertEqual(self.run_check().returncode, 0, self.run_check().stdout)
 
+    def test_owner_ask_options_match_any_case_and_dash_but_not_a_fenced_example(self):
+        path = self.task("Active", ["- [ ] #1 one"])
+        base = path.read_text(encoding="utf-8") + "\n## Implementation Notes\n\nNext: wait\n"
+        for ask, options in (
+            ("pick (a) or (b)", "- A: keep the old name\n- B: rename it\n"),
+            ("A or B?", "- a: keep\n- b: rename\n"),
+            ("pick A or B", "- A — keep the old name\n- B — rename it\n"),
+        ):
+            path.write_text(base + f"Needs owner: {ask}\n\n{options}", encoding="utf-8")
+            self.assertEqual(self.run_check().returncode, 0, (ask, self.run_check().stdout))
+
+        fenced = "```\n- A: an example\n- B: another\n```\n"
+        path.write_text(base + "Needs owner: pick A or B\n\n" + fenced, encoding="utf-8")
+        self.assertEqual(self.run_check().returncode, 1)
+
     def test_owner_ask_without_options_or_on_a_done_task_passes(self):
         for status, ask in (("Active", "Needs owner: say how long the install took"), ("Done", "Needs owner: A/B/C")):
             path = self.task(status, ["- [x] #1 one"])

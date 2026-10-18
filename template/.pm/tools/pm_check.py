@@ -636,11 +636,11 @@ def check_owner_options(name, lines):
     letters |= set(ASK_OPTIONS_AFTER.findall(ask))
     if len(letters) < 2:
         return []
-    others = [line for line in lines if not line.startswith("Needs owner:")]
+    others = [line for line in unfenced_lines(lines) if not line.startswith("Needs owner:")]
     missing = []
     for letter in sorted(letters):
         label = re.compile(
-            rf"^\s*(?:[-*]\s*)?(?:\*\*)?(?:[Oo]ption\s+|[Ss]eçenek\s+)?\(?{letter}\)?(?:\*\*)?\s*[:).–-]"
+            rf"^\s*(?:[-*]\s*)?(?:\*\*)?(?:option\s+|seçenek\s+)?\(?{letter}\)?(?:\*\*)?\s*[:).–—-]", re.IGNORECASE
         )
         if not any(label.match(line) for line in others):
             missing.append(letter)
