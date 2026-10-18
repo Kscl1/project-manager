@@ -97,6 +97,7 @@ class PmInitTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("EDITED", result.stdout)
+        self.assertNotIn("differs", result.stdout)  # a missing manifest would hide the edits
 
     def test_dry_run_flags_a_local_edit_to_a_file_the_package_dropped(self):
         self.assertEqual(self.run_init().returncode, 0)
