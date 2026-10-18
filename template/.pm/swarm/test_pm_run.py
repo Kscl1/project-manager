@@ -167,12 +167,20 @@ sys.exit(2)
 """
 
 
+def repo_for_in_process_runs(test, repo):
+    """A Run made inside the test process writes its failure log under PM_RUN_REPO, never into the checkout."""
+    patcher = patch.dict(os.environ, {"PM_RUN_REPO": str(repo)})
+    patcher.start()
+    test.addCleanup(patcher.stop)
+
+
 class PmRunFixture:
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_test_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.run_dir = self.tmp / "run"
         self.run_dir.mkdir()
+        repo_for_in_process_runs(self, self.tmp)
         fake = self.tmp / "fake_herdr.py"
         fake.write_text(FAKE_HERDR, encoding="utf-8")
         self.fake_state = self.tmp / "herdr.json"
@@ -338,6 +346,34 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.run_pm()
         prompt = self.herdr_state()["gone"][self.a1]["prompts"][0]
         self.assertIn("Write only that file and the paths site/, notes/x.md. ", prompt)
+
+    def test_failures_of_every_run_go_to_one_shared_log_one_line_each(self):
+        self.jobs(
+            self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(1)"'),
+            self.job("b", "ok", verify=None),
+        )
+        self.run_pm()
+        lines = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2, "LAUNCH and the start and done lines are routine")
+        self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
+        self.assertRegex(lines[1], r" run ARTIFACT b ")
+
+    def test_a_held_failure_log_never_stops_the_logging_loop(self):
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        real = Path.open
+
+        def held(path, *args, **kwargs):
+            if path.name == "failures.log":
+                raise PermissionError(13, "Permission denied", str(path))
+            return real(path, *args, **kwargs)
+
+        with patch.object(Path, "open", held), patch("sys.stdout", io.StringIO()):
+            run.log("TICK-ERROR KeyError: 'x'; the loop goes on")  # must not raise
+            run.log("RETRY a: worker is gone")
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("TICK-ERROR", log)
+        self.assertEqual(log.count("could not append"), 1, "warned once")
 
     def test_failing_check_keeps_the_report_and_never_relaunches(self):
         self.jobs(
@@ -1264,6 +1300,11 @@ class LockedFileTest(unittest.TestCase):
 
 
 class HerdrSafetyTest(unittest.TestCase):
+    def setUp(self):
+        tmp = Path(tempfile.mkdtemp(prefix="pm_run_safety_"))
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        repo_for_in_process_runs(self, tmp)
+
     def test_only_agent_not_found_means_gone(self):
         run = pm_run.Run(".")
         for code, expected in (("agent_not_found", None), ("server_timeout", "unknown"), ("other", "unknown")):
