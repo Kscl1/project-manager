@@ -16,62 +16,12 @@ It is neither a harness nor a framework. It combines existing open tools with pl
 
 ## How the parts fit together
 
-```mermaid
-flowchart TB
-    Owner["You (project owner)"]
-    Lead["Lead agent"]
+See [How it works](docs/how-it-works.md) for the workflow, roles, architecture diagram and what runs where. The diagram and explanation live there, shared by GitHub and the documentation site.
 
-    subgraph Repo["Your Git repository"]
-        Board["Task board · Backlog.md"]
-        Records["Charter, specs & decisions"]
-        Map["Architecture map · LikeC4"]
-        Check["Consistency & drift checks"]
-    end
-
-    subgraph Swarm["Visible Herdr panes"]
-        Worker["Worker (Pi, own Git worktree)"]
-        TestWriter["Test-writer (from brief alone)"]
-        Researcher["Researcher (cited sources)"]
-        Reviewer["Reviewer (different model family)"]
-    end
-
-    Owner <-->|"intent & approvals"| Lead
-    Lead -->|"session resume & task updates"| Board
-    Lead -->|"maintains"| Records
-    Lead -->|"updates & validates"| Map
-    Lead -->|"scoped leaf briefs"| Swarm
-    Swarm -->|"evidence & diffs"| Lead
-    Check -->|"guards commits & flags stale docs"| Repo
-```
-
-### Records
-
-- **Tasks:** Markdown files in Backlog.md, viewed with `backlog browser`.
-- **Decisions and specs:** One file per decision, a project charter, and Epic specifications.
-- **Architecture:** System model in LikeC4.
-- **One home per fact:** Each fact lives in one file and is linked, never duplicated.
-
-### Roles
-
-- **Lead:** Frames tasks, writes scoped leaf briefs, verifies evidence, and owns living docs. Any capable agent can fill this role, including in Pi; setup installs Claude Code today.
-- **Worker:** Runs one leaf brief in an isolated Git worktree inside a visible Herdr pane.
-- **Test-writer & researcher:** Write tests from the brief alone or collect cited sources.
-- **Reviewer:** Reviews the brief, diff, and report from a different model family than the author.
-
-### Principles
-
-- **Smallest change** that solves the stated problem.
-- **Subtract first** before adding rules, files, or steps.
-- **Minimize reader load** with short prose and decisions up front.
-- **Prove it works** with command output, tests, or measurements.
-- **Guard the context window** by delegating bulk reading and leaf work.
-
-### Checks and continuity
-
-- **Commit gate:** Pre-commit hook that blocks dead links, superseded decisions, oversized docs, and unverified Done tasks.
-- **Drift check (`python .pm/tools/pm_check.py --stale`):** Lists docs whose `describes:` files changed in Git since their `reviewed:` marker.
-- **Session resume (`python .pm/tools/pm_board.py --resume`):** Session hook comparing Git status, active tasks, and worktrees at session start.
-- **Skills:** `/pm-setup` (onboarding), `/pm-grill-me` and `pm-grilling` (design stress-test), `/pm-scratch` (side ideas), `/pm-feedback` (redacted bug report, sent only on your yes).
+- [Introduction](docs/index.md): what it is and who it is for.
+- [Getting started](docs/getting-started.md): the guided setup and manual path.
+- [Türkçe giriş](docs/tr/index.md) · [Türkçe başlangıç](docs/tr/getting-started.md).
+- [Working principles](template/.pm/principles.md): the rules behind the workflow.
 
 ## Layers
 

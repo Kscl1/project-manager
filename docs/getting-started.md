@@ -1,4 +1,9 @@
-# Getting started
+---
+title: Getting started
+description: Install the work-system package in your project, then fit it with your agent.
+sidebar:
+  order: 3
+---
 
 project-manager keeps your tasks, decisions and working rules next to your code, so your coding agent plans and checks work the same way every session.
 
