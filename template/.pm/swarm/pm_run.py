@@ -21,7 +21,8 @@ in a row the job is **handed-over**: pm_run stops watching, leaves the session o
 A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
 out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
-is nudged as before.
+is nudged as before. A quota message that names a reset within PM_RUN_QUOTA_WAIT_S (1800 s), such as "reset after
+15m 19s", is waited out instead (QUOTA-WAIT): one nudge in the same session after the reset, then the usual budget.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
 before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes. An output
@@ -112,6 +113,7 @@ SETUP_S = _env("SETUP_S", 2)  # let the pane's setup line finish before the agen
 START_S = _env("START_S", 10)
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
+QUOTA_WAIT_S = _env("QUOTA_WAIT_S", 30 * 60)
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
@@ -286,6 +288,15 @@ def stop_sign(attempt, screen):
         if (line is error or ERROR_LINE.search(line)) and QUOTA.search(line):
             return "quota", " ".join(line.split())[:160]
     return None
+
+
+def reset_seconds(text):
+    """Seconds until a limit resets when the message says so ("reset after 15m 19s", "resets in 2h"), else None."""
+    found = re.search(r"\bresets? (?:after|in) ((?:\d+ ?[hms]\b ?)+)", text, re.I)
+    if not found:
+        return None
+    units = {"h": 3600, "m": 60, "s": 1}
+    return sum(int(n) * units[u.lower()] for n, u in re.findall(r"(\d+) ?([hms])", found.group(1), re.I))
 
 
 def check_artifact(path, started, min_words):
@@ -765,8 +776,11 @@ class Run:
                     if not a.get("held"):
                         a["held"] = True
                         self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}")
-                elif self.stop_hand_over(job, s, a, why):
-                    continue
+                elif a.get("wait_until", 0) > now:
+                    pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
+                elif self.stop_hand_over(job, s, a, why, now):
+                    if s["state"] == "handed-over":
+                        continue
                 elif not self.nudge(job, s, a, now, size, why):
                     continue
             elif now - a["started"] > HARD_S + a.get("overtime", 0):
@@ -876,13 +890,22 @@ class Run:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
         return True
 
-    def stop_hand_over(self, job, s, a, why):
-        """Hand over a settled worker whose quota is used up or whose sign-in ran out; True when it did."""
+    def stop_hand_over(self, job, s, a, why, now):
+        """Hand over a settled worker whose quota is used up or whose sign-in ran out, or wait out a quota that resets
+        soon; True when it did either."""
         sign = stop_sign(a, herdr("agent", "read", a["name"], "--source", "visible", plain=True))
-        if not sign:
+        if not sign or sign[1] == a.get("waited_for"):  # after the wait the old message is still on the pane
             return False
         kind, text = sign
         a[kind] = text
+        wait = reset_seconds(text) if kind == "quota" else None
+        if wait is not None and wait <= QUOTA_WAIT_S:
+            a.update(waited_for=text, wait_until=now + wait + 30)
+            self.log(
+                f'QUOTA-WAIT {job["id"]}: "{text}"; the limit resets in {wait / 60:.0f} min, so the same session '
+                f"gets a nudge after it instead of a hand-over"
+            )
+            return True
         if kind == "login":
             what = "sign the harness in again (Claude Code: run claude, then /login), then rerun the job"
             self.hand_over(job, s, f'sign-in needed: "{text}"; not resent, {what}; {why}')

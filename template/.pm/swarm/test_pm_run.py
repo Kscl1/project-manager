@@ -885,6 +885,28 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
                 run.log_path.unlink()
 
+    def test_a_quota_that_resets_soon_is_waited_out_then_nudged(self):
+        run, log, attempt, state = self.settled_worker("429 The usage limit has been reached (reset after 2m 0s)")
+        for now, prompts in ((1100, 1), (1200, 1), (1249, 1), (1251, 2)):
+            with self.subTest(now=now):
+                self.assertEqual(len(self.tick_at(run, state, now, QUIET_S=0, MAX_NUDGES=3)), prompts)
+                self.assertEqual(state["a"]["state"], "started")
+        self.assertIn("QUOTA-WAIT a", run.log_path.read_text(encoding="utf-8"))
+        self.assertIn("RESUME a", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_quota_that_resets_late_or_never_says_is_still_handed_over(self):
+        for error in ("429 usage limit reached, resets in 5h", '429 {"message":"Go usage limit exceeded"}'):
+            with self.subTest(error=error):
+                run, log, attempt, state = self.settled_worker(error)
+                self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 1)
+                self.assertEqual(state["a"]["state"], "handed-over")
+                run.log_path.unlink()
+
+    def test_reset_times_are_read_from_the_message(self):
+        for text, seconds in (("(reset after 15m 19s)", 919), ("Resets in 2h", 7200), ("reset after 44s)", 44)):
+            self.assertEqual(pm_run.reset_seconds(text), seconds)
+        self.assertIsNone(pm_run.reset_seconds("limit reached, try later"))
+
     def test_bare_429_throttling_and_worker_prose_are_still_nudged(self):
         outage = '429: {"type":"server_error","message":"Upstream request failed: Endpoint is unavailable."}'
         throttled = "API Error: 429 rate_limit_error: this request would exceed your rate limit"
