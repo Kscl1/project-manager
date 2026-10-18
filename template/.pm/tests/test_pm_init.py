@@ -83,6 +83,21 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(edited.read_text(encoding="utf-8"), before)
         self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
 
+    def test_a_clone_with_autocrlf_reports_no_skill_as_edited(self):
+        # Git for Windows often sets core.autocrlf=true; the manifest hashes bytes, so CRLF copies looked edited.
+        self.assertEqual(self.run_init().returncode, 0)
+        git = [GIT, "-c", "user.name=t", "-c", "user.email=t@example.com"]
+        subprocess.run([*git, "add", "-A"], cwd=self.root, check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-qm", "install"], cwd=self.root, check=True, capture_output=True)
+        clone = Path(tempfile.mkdtemp(prefix="pm_clone_")) / "c"
+        self.addCleanup(shutil.rmtree, clone.parent, onerror=_remove_readonly)
+        subprocess.run([GIT, "-c", "core.autocrlf=true", "clone", "-q", str(self.root), str(clone)], check=True)
+
+        result = self.run_init(clone, "--upgrade", "--dry-run")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("EDITED", result.stdout)
+
     def test_dry_run_flags_a_local_edit_to_a_file_the_package_dropped(self):
         self.assertEqual(self.run_init().returncode, 0)
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
