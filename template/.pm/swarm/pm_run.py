@@ -36,17 +36,23 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
-                       "harness": "pi" | "claude", "setup": "shell line run in the pane first", "args": [...],
+                       "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"]}]   (paths the worker may write besides `out`, e.g. code it builds)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
-                        (CLAUDE_SETTINGS); thinking applies to Pi only;
-                        both start without in-process sub-agent tools: a helper is its own pm_run job, so it is visible
-                        too, and a worker that wants one writes "Helper needed" in its output for the lead)
+                        (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                        carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
+                        or similar so file writes need no approval); thinking applies to Pi only;
+                        Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
+                        it is visible too, and a worker that wants one writes "Helper needed" in its output for the lead;
+                        agy has no switch for its sub-agents, so there only the brief forbids them.
+                        A first-run screen that only the owner can pass (agy: colour scheme, then its terms) is handed
+                        over before the brief is sent: finish it once in that Herdr tab, then rerun the job)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
 Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts it). The Herdr server must be running
 (start `herdr` once).
-Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check).
+Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check),
+PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it ready).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
@@ -82,6 +88,7 @@ def _env(name, default):
 HARD_S, TICK, SETTLE_S = _env("HARD_S", 75 * 60), _env("TICK", 15), _env("SETTLE_S", 20)
 STALL_S = _env("STALL_S", 300)
 SETUP_S = _env("SETUP_S", 2)  # let the pane's setup line finish before the agent starts
+START_S = _env("START_S", 10)
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
@@ -129,7 +136,14 @@ CLAUDE_SETTINGS = {
 # No allow rules for shell commands: Claude Code runs read-only commands (ls, cat, grep, Get-Content, read-only git)
 # without a prompt in both shells and checks their arguments, so `git diff --output=x` still asks. A prefix rule
 # would let that through.
-NO_HELPERS = {"pi": ["--exclude-tools", "Agent,SubagentWorkflow"], "claude": ["--disallowedTools", "Agent,Workflow"]}
+NO_HELPERS = {
+    "pi": ["--exclude-tools", "Agent,SubagentWorkflow"],
+    "claude": ["--disallowedTools", "Agent,Workflow"],
+    "agy": [],  # no switch for its sub-agents; the brief forbids them
+}
+# Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
+# no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms.
+FIRST_RUN = re.compile(r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use")
 RESUME = (
     "Your previous turn ended before the output was finished. Re-read the brief file(s) {briefs} and {out}, "
     "keep what is there, finish it, "
@@ -452,12 +466,31 @@ class Run:
         if "error" in start:
             attempt["launch_error"] = start["error"].get("message", "")
             return False
+        if harness == "agy" and self.first_run(attempt):
+            return False
         self.status_of(attempt)  # baseline before sending: ready/idle alone does not prove Pi can receive the brief
         attempt["seq0"] = attempt.get("completion_seq")
         sent = herdr("agent", "prompt", attempt["name"], launch_prompt(job))
         attempt["prompted"] = time.time()
         self.reset_observation(attempt)
         return "error" not in sent
+
+    def first_run(self, attempt):
+        """True when agy shows its first-run screen. Herdr reports agy ready about 4 s before agy draws anything
+        (Herdr 0.9.5, agy 1.4.2), so read until the screen changes from the bare launch line, for up to START_S."""
+        before = None
+        for _ in range(max(1, int(START_S))):
+            screen = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
+            if isinstance(screen, str):
+                found = FIRST_RUN.search(screen)
+                if found:
+                    attempt["first_run"] = found.group()
+                    return True
+                if before is not None and screen != before:
+                    return False
+                before = screen if before is None else before
+            time.sleep(1)
+        return False
 
     def status_of(self, attempt):
         got = herdr("agent", "get", attempt["name"])
@@ -630,6 +663,13 @@ class Run:
                 s["state"] = "started"
                 busy[bucket] = busy.get(bucket, 0) + 1
                 self.log(f"LAUNCH {job['id']} attempt {n} on {job['model']} in Herdr pane {a['pane']}")
+            elif a.get("first_run"):
+                self.hand_over(
+                    job,
+                    s,
+                    f'first-run screen ("{a["first_run"]}"); brief not sent: finish the setup once in Herdr tab '
+                    f"{job['id']}, then rerun the job",
+                )
             else:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
         return state

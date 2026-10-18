@@ -281,6 +281,36 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("ran", herdr)
         self.assertIn("Write only that file. ", herdr["gone"]["run-a-1"]["prompts"][0])
 
+    def seed_reads(self, *screens):
+        empty = {"n": 0, "workspaces": [], "agents": {}, "gone": {}, "closed": []}
+        self.fake_state.write_text(json.dumps({**empty, "reads": list(screens)}), encoding="utf-8")
+
+    def test_agy_harness_waits_for_its_screen_then_gets_the_brief(self):
+        # Herdr reports agy ready before agy draws: the first read shows only the launch line.
+        self.seed_reads("PS> agy --model ok", "> Type a message")
+        self.jobs(self.job("a", "ok", harness="agy", thinking="high", args=["--mode", "accept-edits"]))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        started = self.herdr_state()["gone"]["run-a-1"]
+        argv = started["argv"]
+        self.assertEqual(argv[argv.index("--kind") + 1], "agy")
+        self.assertEqual(argv[argv.index("--") + 1 :], ["--model", "ok", "--mode", "accept-edits"])
+        self.assertIn("brief.md", started["prompts"][0])
+
+    def test_agy_first_run_screen_is_handed_over_without_the_brief(self):
+        self.seed_reads("PS> agy --model ok", "Welcome to Antigravity CLI!\n\nChoose your color scheme:\n  > terminal")
+        self.jobs(self.job("a", "ok", harness="agy"), self.job("b", "ok", after=["a"]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertEqual(len(state["a"]["attempts"]), 1, "the same screen would stop every retry")
+        self.assertIn("first-run screen", state["a"]["attempts"][0]["why"])
+        self.assertEqual(state["b"]["state"], "blocked")
+        herdr = self.herdr_state()
+        self.assertEqual(herdr["agents"]["run-a-1"]["prompts"], [], "the brief must not land in the menu")
+        self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
+
     def test_writes_lets_the_worker_write_more_than_its_output(self):
         self.jobs(self.job("a", "ok", writes=["site/", "notes/x.md"]))
         self.run_pm()
