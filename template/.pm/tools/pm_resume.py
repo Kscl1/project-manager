@@ -1,12 +1,15 @@
 """Print an English resume summary for active Backlog tasks.
 
 Usage: python .pm/tools/pm_resume.py
+       python .pm/tools/pm_resume.py --brief            a short briefing for the owner; the default is the agents' hand-over
        python .pm/tools/pm_resume.py --did YYYY-MM-DD   the Did part of a multi-goal worklog
        python .pm/tools/pm_resume.py --commits REQ-n    one task's commits and models
 """
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import date, datetime, timezone
@@ -43,6 +46,10 @@ NOTHING_NEEDED = {"none", "nothing", "yok", "-", "?", "n/a"}
 SECTION_MARKER = re.compile(r"<!--\s*SECTION:([A-Za-z0-9_:]+)\s*-->", re.IGNORECASE)
 DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 FINDING_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
+READY_SHOWN = 10
+# Optional: other GitHub repos whose open pull requests are listed too, one owner/repo per line; # starts a comment.
+PR_REPOS_FILE = ROOT / ".pm" / "pr-repos.txt"
+GH_TIMEOUT = 20
 
 
 def scalar(value):
@@ -476,6 +483,65 @@ def held_lines(tasks, drafts, today):
     return lines
 
 
+def ready_lines(tasks):
+    """Ready tasks by name in board order, so the next pick is visible without opening Backlog."""
+    ready = sorted((task for task in tasks if task["status"] == "Ready"), key=task_order)
+    lines = [f"- {task['id']} · {task['title']}" for task in ready[:READY_SHOWN]]
+    if len(ready) > READY_SHOWN:
+        lines.append(f"- … and {len(ready) - READY_SHOWN} more")
+    return lines
+
+
+def pr_repos():
+    """This repo when it has a GitHub remote (None stands for it), then the repos in .pm/pr-repos.txt."""
+    repos = [None] if "github.com" in (git_stdout(["remote", "-v"], "") or "") else []
+    if PR_REPOS_FILE.exists():
+        for line in PR_REPOS_FILE.read_text(encoding="utf-8").splitlines():
+            repo = line.split("#", 1)[0].strip()
+            if repo:
+                repos.append(repo)
+    return repos
+
+
+def pr_lines():
+    """Open pull requests through the GitHub CLI, or None when there is no GitHub repo to ask.
+    A failed call says so: an empty list must mean "no open pull requests", never "could not look"."""
+    repos = pr_repos()
+    if not repos:
+        return None
+    gh = shutil.which("gh")
+    if gh is None:
+        return ["- ⚠️ GitHub CLI (gh) not found; open pull requests not listed"]
+    lines = []
+    for repo in repos:
+        name = repo or "this repo"
+        command = [gh, "pr", "list", "--state", "open", "--limit", "20", "--json", "number,title,isDraft"]
+        command += ["--repo", repo] if repo else []
+        try:
+            result = subprocess.run(
+                command,
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=GH_TIMEOUT,
+                check=False,
+            )
+            pulls = json.loads(result.stdout) if result.returncode == 0 else None
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            pulls = None
+        if not isinstance(pulls, list):
+            lines.append(f"- ⚠️ Could not list the open pull requests of {name}")
+            continue
+        for pull in pulls:
+            draft = " (draft)" if pull.get("isDraft") else ""
+            lines.append(f"- {repo or ''}#{pull.get('number')} · {pull.get('title')}{draft}")
+        if not pulls:
+            lines.append(f"- {name}: none open")
+    return lines
+
+
 def report_findings(path):
     """Finding numbers of a raw audit report: table rows `| n |` in the `## Findings` section.
 
@@ -586,7 +652,36 @@ def render_section(name, body):
     return f"## {name}\n{body}"
 
 
-def main():
+def asks_something(value):
+    return bool(value) and value.split()[0].strip(".,;:").lower() not in NOTHING_NEEDED
+
+
+def brief_task_lines(tasks):
+    """Each open task with its next step, and its blocker or owner ask only when there is one."""
+    lines = []
+    for task in tasks:
+        live = task["live"]
+        lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
+        lines.append(f"  Next: {live['Next'] if live['Next'] is not None else '?'}")
+        lines.extend(f"  {name}: {live[name]}" for name in ("Blocker", "Needs owner") if asks_something(live[name]))
+    return lines
+
+
+def full_task_lines(tasks):
+    """Each open task with its whole live block and worker lines: what the next agent needs."""
+    lines = []
+    for task in tasks:
+        lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
+        for name in LIVE_FIELDS:
+            value = task["live"][name]
+            lines.append(f"  {name}: {value if value is not None else '?'}")
+        for worker in task["live"]["Worker"]:
+            lines.append(f"  Worker: {worker}")
+    return lines
+
+
+def main(brief=False):
+    """The agents' hand-over by default; with brief=True a short briefing the owner reads in a minute."""
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
@@ -596,53 +691,50 @@ def main():
     all_tasks = load_tasks()
     tasks = [task for task in all_tasks if task["status"] in ACTIVE_STATUSES]
     status_output = git_stdout(["status", "-sb"], "⚠️ Could not run `git status -sb`.")
-    log_output = git_stdout(["log", "-5", "--oneline"], "⚠️ Could not run `git log -5 --oneline`.")
-
-    task_lines = []
-    for task in tasks:
-        task_lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
-        for name in LIVE_FIELDS:
-            value = task["live"][name]
-            task_lines.append(f"  {name}: {value if value is not None else '?'}")
-        for worker in task["live"]["Worker"]:
-            task_lines.append(f"  Worker: {worker}")
-
     warning_lines = collect_warnings(all_tasks) + audit_warnings(all_tasks)
-    weekly = weekly_audit_warning(date.today())
-    if weekly:
-        warning_lines.append(weekly)
-    gap = worklog_gap_warning()
-    if gap:
-        warning_lines.append(gap)
-    finished = worklog_next_warning(all_tasks + load_closed())
-    if finished:
-        warning_lines.append(finished)
-    stale_map = map_warning()
-    if stale_map:
-        warning_lines.append(stale_map)
+    for extra in (
+        weekly_audit_warning(date.today()),
+        worklog_gap_warning(),
+        worklog_next_warning(all_tasks + load_closed()),
+        map_warning(),
+    ):
+        if extra:
+            warning_lines.append(extra)
     drafts = load_tasks(DRAFTS_DIR)
     waiting = owner_lines(all_tasks) + owner_lines(drafts)
-    sections = [
-        ("Git status", status_output),
-        ("Last 5 commits", log_output),
-        ("Open tasks", "\n".join(task_lines) if task_lines else "- (none)"),
-        ("Waiting on the owner", "\n".join(waiting) if waiting else "- (none)"),
-        ("Waiting and ageing work", "\n".join(held_lines(all_tasks, drafts, date.today()))),
-        ("Warnings", "\n".join(warning_lines) if warning_lines else "- (none)"),
-    ]
-    if drafts:
-        sections.insert(3, ("Drafts", "\n".join(f"- {d['id']} · {d['title']}" for d in drafts)))
     closed = closed_lines(all_tasks + load_closed())
-    if closed:
-        sections.insert(2, ("Recently closed tasks", "\n".join(closed)))
+    ready = ready_lines(all_tasks)
+    pulls = pr_lines()
 
-    output = "# Resume summary\n\n"
-    for index, (name, body) in enumerate(sections):
-        output += render_section(name, body)
-        if not output.endswith("\n"):
-            output += "\n"
-        if index < len(sections) - 1:
-            output += "\n"
+    sections = []
+    if brief:
+        status = status_output.splitlines() or [""]
+        changed = f"\n{len(status) - 1} changed file(s)" if len(status) > 1 else ""
+        sections.append(("Git", status[0].removeprefix("## ") + changed))
+        if closed:
+            sections.append(("Recently closed", "\n".join(line for line in closed if line.startswith("- "))))
+        sections.append(("Open tasks", "\n".join(brief_task_lines(tasks)) or "- (none)"))
+    else:
+        log_output = git_stdout(["log", "-5", "--oneline"], "⚠️ Could not run `git log -5 --oneline`.")
+        sections += [("Git status", status_output), ("Last 5 commits", log_output)]
+        if closed:
+            sections.append(("Recently closed tasks", "\n".join(closed)))
+        sections.append(("Open tasks", "\n".join(full_task_lines(tasks)) or "- (none)"))
+        if drafts:
+            sections.append(("Drafts", "\n".join(f"- {d['id']} · {d['title']}" for d in drafts)))
+    sections.append(("Waiting on the owner", "\n".join(waiting) or "- (none)"))
+    if not brief:
+        sections.append(("Waiting and ageing work", "\n".join(held_lines(all_tasks, drafts, date.today()))))
+    if ready:
+        sections.append(("Ready", "\n".join(ready)))
+    if pulls is not None:
+        sections.append(("Open pull requests", "\n".join(pulls)))
+    sections.append(("Warnings", "\n".join(warning_lines) or "- (none)"))
+
+    output = "# Briefing\n\n" if brief else "# Resume summary\n\n"
+    output += "\n\n".join(render_section(name, body.rstrip("\n")) for name, body in sections) + "\n"
+    if brief:
+        output += "\nAgent detail (evidence, workers, commits, drafts): python .pm/tools/pm_board.py --resume\n"
     print(output, end="")
     return 0
 
@@ -652,4 +744,4 @@ if __name__ == "__main__":
         sys.exit(did_main(sys.argv[sys.argv.index("--did") + 1]))
     if "--commits" in sys.argv:
         sys.exit(commits_main(sys.argv[sys.argv.index("--commits") + 1]))
-    sys.exit(main())
+    sys.exit(main(brief="--brief" in sys.argv))

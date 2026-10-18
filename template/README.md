@@ -20,12 +20,13 @@ For an existing project, repeat the command with `--upgrade` to refresh **packag
 
 ```bash
 python .pm/tools/pm_board.py --resume          # git and active-task handoff
+python .pm/tools/pm_board.py --resume --brief  # the same as a one-minute briefing for you
 python .pm/tools/pm_board.py --tree            # Epic → package → leaf
 backlog browser                                # create and edit tasks
 python .pm/tools/pm_check.py --stale          # doc freshness hints
 python -m unittest discover -s .pm/tests      # the package's own tests
 ```
 
-Edit task fields in Backlog's browser; documents are plain Markdown, read in any editor. `--resume` and `--tree` are board interfaces; verify the installed version supports them.
+Edit task fields in Backlog's browser; documents are plain Markdown, read in any editor. `--resume` and `--tree` are board interfaces; verify the installed version supports them. `--resume` also lists Ready tasks by name and, when the GitHub CLI is installed, the open pull requests of this repo (if it has a GitHub remote) and of each `owner/repo` line in an optional `.pm/pr-repos.txt`.
 
 See `.pm/README.md` for the package/data ownership table and roles. `pm_check` in the git pre-commit hook checks doc consistency; a clean result does not prove the docs are true.
