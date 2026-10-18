@@ -42,6 +42,7 @@ GITIGNORE = [".pm/local/", ".pm-report.md", ".worktrees/", "__pycache__/"]
 # LF everywhere in the package: the hook is a shell script and breaks with CRLF on Windows.
 GITATTRIBUTES = [
     ".pm/** text eol=lf",
+    ".agents/skills/pm-*/** text eol=lf",
     "AGENTS.md text eol=lf",
     "CLAUDE.md text eol=lf",
     "backlog.config.yml text eol=lf",
@@ -72,7 +73,7 @@ That file is the only copy of the instructions; this one only points Claude Code
 
 
 def say(action, path, note=""):
-    print(f"  {action:<8}{path}{'  (' + note + ')' if note else ''}")
+    print(f"  {action + ' ':<8}{path}{'  (' + note + ')' if note else ''}")  # a long label keeps one space
 
 
 def files_in(folder):
