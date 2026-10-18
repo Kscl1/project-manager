@@ -24,7 +24,11 @@ the same wall until the limit resets or the owner signs in again. A bare 429 (an
 is nudged as before.
 At the hard limit a live worker gets PM_RUN_OVERTIME_S more, once (a settled one also gets a nudge), then is handed
 over. A fresh session (a retry) starts only when the worker is gone or did not start, up to PM_RUN_MAX_TRIES attempts;
-before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes.
+before it, this attempt's fresh output is kept as <stem>.attempt<n><suffix>, with -2, -3 on name clashes. An output
+file that already exists when a job's first attempt starts (another run dir, or an earlier job with the same `out`)
+is copied to <stem>.kept<suffix> first, so a finished report is never lost to a relaunch.
+A brief that changes while its worker runs is logged as BRIEF-CHANGED when the job is judged, and the receipt keeps
+brief_changed: the report answers the brief the worker read, which may no longer be the job's.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -334,6 +338,30 @@ def session_log(attempt, now):
         return None, None
 
 
+def keep_output(out, stem, move):
+    """Move or copy the output file to <stem><suffix>, adding -2, -3 on name clashes; return the new path."""
+    kept, extra = out.with_name(stem + out.suffix), 2
+    while kept.exists():
+        kept = out.with_name(f"{stem}-{extra}{out.suffix}")
+        extra += 1
+    if move:
+        out.rename(kept)
+    else:
+        shutil.copy2(out, kept)
+    return kept
+
+
+def brief_digest(job, repo):
+    """One hash over the job's brief files as they are now; a missing brief counts as its own content."""
+    digest = sha256()
+    for brief in job["briefs"]:
+        try:
+            digest.update((repo / brief).read_bytes())
+        except OSError:
+            digest.update(b"missing:" + brief.encode("utf-8"))
+    return digest.hexdigest()[:16]
+
+
 def agent_name(job_id, n, root):
     """Herdr agent names are global to the server: a tag from the run directory keeps two runs with the same job id
     apart. Herdr allows 32 characters, so the job id is cut, never the attempt number or the tag."""
@@ -556,6 +584,7 @@ class Run:
             settings.write_text(json.dumps(CLAUDE_SETTINGS) + "\n", encoding="utf-8")
             agent_args += ["--settings", str(settings)]
         attempt["model"] = job["model"]  # the model asked for; the session log shows what actually ran
+        attempt["briefs_sha"] = brief_digest(job, self.repo)
         start = herdr("agent", "start", attempt["name"], *agent_args, *job.get("args", []))
         if "error" in start:
             attempt["launch_error"] = start["error"].get("message", "")
@@ -698,6 +727,12 @@ class Run:
                     a["stopped_confirmed"] = True
                 art, why = check_artifact(self.repo / job["out"], a["started"], job.get("min_words", 0))
                 if art:
+                    if a.get("briefs_sha") and brief_digest(job, self.repo) != a["briefs_sha"]:
+                        a["brief_changed"] = True
+                        self.log(
+                            f"BRIEF-CHANGED {job['id']}: a brief changed while the worker ran; its report answers the "
+                            f"brief it read, so check it against the job"
+                        )
                     a.update(artifact=art, ended=now, stopped_confirmed=a.get("stopped_confirmed") or self.stop(a))
                     if not a["stopped_confirmed"]:
                         self.fail_or_retry(job, s, "artifact present but the worker could not be confirmed stopped")
@@ -756,21 +791,18 @@ class Run:
             if busy.get(bucket, 0) >= caps.get(bucket, 2):
                 continue
             n = len(s["attempts"]) + 1
-            if n > 1:
-                out = self.repo / job["out"]
-                try:
-                    if out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
-                        stem = f"{out.stem}.attempt{n - 1}"
-                        kept, extra = out.with_name(stem + out.suffix), 2
-                        while kept.exists():
-                            kept = out.with_name(f"{stem}-{extra}{out.suffix}")
-                            extra += 1
-                        out.rename(kept)
-                        self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
-                except OSError as exc:
-                    s["state"] = "failed"
-                    self.log(f"FAILED {job['id']}: could not keep previous output; no retry: {exc}")
-                    continue
+            out = self.repo / job["out"]
+            try:
+                if n > 1 and out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
+                    kept = keep_output(out, f"{out.stem}.attempt{n - 1}", move=True)
+                    self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
+                elif n == 1 and out.exists():
+                    kept = keep_output(out, f"{out.stem}.kept", move=False)
+                    self.log(f"KEPT {job['id']}: {out.name} existed before this run; a copy is at {kept.name}")
+            except OSError as exc:
+                s["state"] = "failed"
+                self.log(f"FAILED {job['id']}: could not keep previous output; no retry: {exc}")
+                continue
             a = {"name": agent_name(job["id"], n, self.root), "started": time.time()}
             s["attempts"].append(a)
             if self.launch(job, a, state):
@@ -889,7 +921,7 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")

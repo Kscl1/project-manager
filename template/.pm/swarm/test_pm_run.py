@@ -458,6 +458,51 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertRegex(long, r"^[a-z][a-z0-9_-]{0,31}$")
         self.assertRegex(long, r"-12-[0-9a-f]{4}$")
 
+    def test_an_output_from_another_run_is_copied_before_the_first_attempt(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("a verified report from another run\n", encoding="utf-8")
+        (self.tmp / "out" / "a.kept.md").write_text("an older copy\n", encoding="utf-8")
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        self.assertEqual(
+            (self.tmp / "out" / "a.kept-2.md").read_text(encoding="utf-8"), "a verified report from another run\n"
+        )
+        self.assertEqual((self.tmp / "out" / "a.kept.md").read_text(encoding="utf-8"), "an older copy\n")
+        self.assertIn(
+            "KEPT a: a.md existed before this run; a copy is at a.kept-2.md",
+            (self.run_dir / "pm_run.log").read_text(encoding="utf-8"),
+        )
+
+    def test_a_brief_changed_while_the_worker_ran_is_flagged(self):
+        brief = self.tmp / "brief.md"
+        brief.write_text("item one\n", encoding="utf-8")
+        self.jobs(self.job("a", "lazy"))  # finishes only after a nudge, so the brief can change in between
+        real_launch = pm_run.Run.launch
+
+        def launch_then_edit(run, job, attempt, state):
+            sent = real_launch(run, job, attempt, state)
+            brief.write_text("item two\n", encoding="utf-8")
+            return sent
+
+        state = {}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.Run, "launch", launch_then_edit), patch.object(pm_run, "SETTLE_S", 0), patch.object(
+            pm_run, "QUIET_S", 0
+        ):
+            for _ in range(20):
+                run.tick([self.job("a", "lazy")], state, {})
+                if state["a"]["state"] in pm_run.ENDED:
+                    break
+                time.sleep(0.6)
+        self.assertEqual(state["a"]["state"], "verified")
+        self.assertTrue(state["a"]["attempts"][-1]["brief_changed"])
+        self.assertIn("BRIEF-CHANGED a", run.log_path.read_text(encoding="utf-8"))
+
     def test_old_artifact_from_before_the_attempt_does_not_count(self):
         out = self.tmp / "out" / "a.md"
         out.parent.mkdir(parents=True)
