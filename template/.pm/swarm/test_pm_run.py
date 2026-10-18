@@ -1107,6 +1107,7 @@ class LockedFileTest(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp(prefix="pm_run_lock_"))
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         self.run = pm_run.Run(tmp)
+        self.run.repo = tmp  # nothing a test writes may land in the checkout
         self.addCleanup(patch.stopall)
         patch.object(pm_run.time, "sleep").start()
         patch("sys.stdout", io.StringIO()).start()
