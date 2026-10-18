@@ -65,6 +65,9 @@ PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it rea
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
+Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
+without a check, a question, a stall...) is also appended, one line with date and run directory, to
+<repo>/.pm/local/failures.log, shared by all runs, so failures are recorded when they happen, not recalled later.
 PM_RUN_STALL_S (300 seconds): warn the caller once per inactivity episode; never stop or prompt the worker.
 Working panes are also checked for suspected repeating output. Warnings reach stdout and pm_run.log; the receipt keeps stall/loop flags.
 Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new stall warning.
@@ -102,6 +105,9 @@ START_S = _env("START_S", 10)
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
+# The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
+FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
+FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -391,6 +397,11 @@ class Run:
         print(line.encode(enc, "replace").decode(enc), flush=True)
         with self.log_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
+        if text.split(" ", 1)[0] in FAILURES:
+            failures = self.repo / ".pm" / "local" / "failures.log"
+            failures.parent.mkdir(parents=True, exist_ok=True)
+            with failures.open("a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.root.name} {' '.join(text.split())[:400]}\n")
 
     def load(self, name, default, live=False):
         """A missing file gives the default; a file that is not valid JSON stops the run with the parse error.

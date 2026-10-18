@@ -339,6 +339,17 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         prompt = self.herdr_state()["gone"][self.a1]["prompts"][0]
         self.assertIn("Write only that file and the paths site/, notes/x.md. ", prompt)
 
+    def test_failures_of_every_run_go_to_one_shared_log_one_line_each(self):
+        self.jobs(
+            self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(1)"'),
+            self.job("b", "ok", verify=None),
+        )
+        self.run_pm()
+        lines = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2, "LAUNCH and the start and done lines are routine")
+        self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
+        self.assertRegex(lines[1], r" run ARTIFACT b ")
+
     def test_failing_check_keeps_the_report_and_never_relaunches(self):
         self.jobs(
             self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(1)"'),
