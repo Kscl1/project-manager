@@ -67,7 +67,9 @@ PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5)
 PM_RUN_REPO (the repo root; default the current folder).
 Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
 without a check, a question, a stall...) is also appended, one line with date and run directory, to
-<repo>/.pm/local/failures.log, shared by all runs, so failures are recorded when they happen, not recalled later.
+<repo>/.pm/local/failures.log, shared by all runs of that repo root (each git worktree has its own), so
+failures are recorded when they happen, not recalled later. Give run directories unique names: the line keeps only
+the directory's own name.
 PM_RUN_STALL_S (300 seconds): warn the caller once per inactivity episode; never stop or prompt the worker.
 Working panes are also checked for suspected repeating output. Warnings reach stdout and pm_run.log; the receipt keeps stall/loop flags.
 Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new stall warning.
@@ -401,8 +403,9 @@ class Run:
             failures = self.repo / ".pm" / "local" / "failures.log"
             try:  # best effort: a held or unwritable shared log must never stop the loop that logs
                 failures.parent.mkdir(parents=True, exist_ok=True)
+                run, event = "-".join(self.root.name.split()), " ".join(text.split())[:400]  # one line each
                 with failures.open("a", encoding="utf-8") as f:
-                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {self.root.name} {' '.join(text.split())[:400]}\n")
+                    f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {run} {event}\n")
             except OSError as exc:
                 print(f"pm_run: could not append to {failures}: {exc}", flush=True)
 
