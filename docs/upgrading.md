@@ -81,7 +81,7 @@ For maintainers reviewing an upstream candidate:
 
 1. Compare the old source commit to the proposed commit, including referenced files and the licence.
 2. Copy the intended changes, reapply the documented local changes, retain the licence and update the source note and BOM `ref` to describe the files actually shipped. Candidate fields alone are not provenance.
-3. Run the [skill-selection checks](https://github.com/Kscl1/project-manager/blob/main/tests/selection/README.md), plus the relevant syntax/CLI checks for a changed skill. Review the results before releasing.
+3. Run the relevant syntax/CLI checks for a changed skill and review the results before releasing. The [selection test](https://github.com/Kscl1/project-manager/blob/main/tests/selection/README.md) is not rerun for each update; it runs right before a stage change, such as the first beta.
 
 For a user's **own** third-party skill, use its upstream installer/version pin and keep its previous copy. It is not managed by `.pm`; see [your own tools](own-tools.md).
 

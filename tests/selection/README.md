@@ -1,6 +1,6 @@
 # Selection test
 
-A manual release check: does the lead pick the right project-management tool at the right moment, without being pushed, and does a worker leave that to the lead? Thirteen scripted sessions on a tiny fixture project, scored by hand against `cases.md`. Run it once before an alpha tag, and again after a change to the lead's tool table, a shipped skill or the supported harness.
+A manual release check: does the lead pick the right project-management tool at the right moment, without being pushed, and does a worker leave that to the lead? Thirteen scripted sessions on a tiny fixture project, scored by hand against `cases.md`. It costs about two hours and a few million tokens, so it runs only right before a stage change: it ran once before the first alpha, and runs next right before the first beta. Alpha releases in between ship without it, even when the lead's tool table, a shipped skill or the supported harness changed; first users' trials and `/pm-feedback` reports watch those.
 
 It is not a unit test: it measures a model following written instructions, so the result holds for the package version, harness and model it ran on, and only for those.
 
