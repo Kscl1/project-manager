@@ -6,6 +6,8 @@ import test from 'node:test';
 const root = path.resolve('dist');
 const base = '/project-manager/';
 const html = (name) => readFileSync(path.join(root, name, 'index.html'), 'utf8');
+// Every release bumps the README's install line; the site's getting-started pages must name the same tag.
+const release = readFileSync('README.md', 'utf8').match(/git clone --branch (v\d+\.\d+\.\d+\S*)/)[1];
 
 function files(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -22,7 +24,7 @@ test('English and Turkish pages build at the project Pages base', () => {
   assert.match(html(''), /Who is it for/);
   assert.match(html('tr'), /Kimler için/);
   for (const name of ['getting-started', 'tr/getting-started']) {
-    assert.match(html(name), /v0\.1\.0-alpha\.1/);
+    assert.ok(html(name).includes(`--branch ${release}`), `${name} installs ${release}, the README's release`);
     assert.match(html(name), /pm-setup/);
     assert.match(html(name), /tools\/setup\/app\.py/);
   }
