@@ -826,10 +826,24 @@ def stale_flags(path):
     ]
 
 
+@functools.cache
+def git_visible():
+    """Files git tracks or would add (not ignored), or None outside a git repo."""
+    try:
+        listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {ROOT / name for name in listed.split("\0") if name}
+
+
 def markdown_files():
+    """Docs to check: every .md file except skipped folders and files git ignores (they are not docs)."""
+    visible = git_visible()
     for path in sorted(ROOT.rglob("*.md")):
         parts = path.relative_to(ROOT).parts
-        if not SKIP_DIRS.intersection(parts) and not any(parts[: len(p)] == p for p in SKIP_PREFIXES):
+        if SKIP_DIRS.intersection(parts) or any(parts[: len(p)] == p for p in SKIP_PREFIXES):
+            continue
+        if visible is None or path in visible:
             yield path
 
 

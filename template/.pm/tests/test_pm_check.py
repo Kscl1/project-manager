@@ -654,6 +654,21 @@ class StagedTest(RepoTestCase):
         self.assertIn("docs/other_bad.md", result.stdout)
         self.assertIn("docs/untracked_bad.md", result.stdout)
 
+    def test_files_git_ignores_are_not_docs(self):
+        # Issue #37: an ignored tool report over the line limit failed every check and blocked decision commits.
+        self.git_init()
+        self.write(".gitignore", "build/\n")
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("build/report.md", "\n".join(f"line {i}" for i in range(301)) + "\n")
+        self.write("docs/untracked_bad.md", "[missing](nope.md)\n")
+        self.git("add", ".pm/decisions.md")
+
+        for args in ((), ("--staged",)):
+            result = self.run_check(*args)
+
+            self.assertNotIn("build/report.md", result.stdout)
+            self.assertIn("docs/untracked_bad.md", result.stdout)
+
 
 class StaleTest(RepoTestCase):
     def test_stale_flags_described_path_changed_after_review(self):
