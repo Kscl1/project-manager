@@ -15,6 +15,7 @@ A blackboard for ideas that come up mid-session and do not belong to the current
 - A short title line, then the owner's words exactly as received. Do not polish, interpret, research or act on them.
 - If a message clearly continues the previous idea, append it to that note; otherwise make a new one.
 - Say `Saved · <short title>` only after the file is saved. If saving fails, say so.
+- The lead also writes notes itself when the owner says something in passing that no task holds (its role card says when). Those titles start with `Lead note:`; they wait and are processed like any other note.
 
 ## Commands
 
