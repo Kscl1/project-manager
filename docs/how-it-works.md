@@ -61,7 +61,7 @@ The diagram's worker roles belong to the optional swarm. The core works with a l
 |---|---|
 | Your machine | Git, Python and Node.js; your coding agent; optionally LikeC4, Pi and Herdr. Model requests still go to the provider you configure: local files do not mean local inference. |
 | The project-manager clone | The installer and setup screen. Keep this clone next to your project, not inside it. |
-| Your project's `.pm/` | Tasks, charter, specs, decisions, lessons, role cards, tools and hooks. These records are tracked in your project's Git history. |
+| Your project's `.pm/` | Tasks, charter, specs, decisions, lessons (`lessons.md`, started with the first lesson), role cards, tools and hooks. These records are tracked in your project's Git history. |
 | Your project's own folders | Application code, tests and product documentation. They remain separate from the work-system package. |
 | A worker worktree and Herdr pane | With Swarm enabled, an isolated working directory and a terminal you can watch and intervene in. The runner records state and checks completion evidence. |
 | GitHub | Your remote repository and any CI you configure. This documentation site is static: it does not run your agents or upload your project records. |

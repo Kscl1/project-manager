@@ -43,8 +43,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
-                                                            jobs.json: its worker would run on unwatched); delete the
-                                                            job's "stop" from jobs.json to let it run again
+                                                            jobs.json: its worker would run on unwatched); a stopped
+                                                            job stays ended in this run dir: to run it again, put it
+                                                            in a new run dir
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
@@ -54,7 +55,7 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
                        "helpers": ["model", ...],  (lets the worker start helpers as its own pm_run jobs, in a run
                                                     dir inside `writes`, on these models only; default: none)
-                       "stop": true}]          (set by --stop; delete it to let the job run again)
+                       "stop": true}]          (set by --stop; the job then stays ended here)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
                         (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]

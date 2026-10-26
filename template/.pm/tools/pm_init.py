@@ -54,6 +54,9 @@ docs cite; its fields are in `.pm/templates/decision.md`. A replaced decision mo
 its replacement and why it was dropped. Never delete one. After adding or moving a file, run
 `python .pm/tools/pm_check.py --write-index`; the part below is generated.
 
+- Living docs list the decisions they rely on in frontmatter: `depends_on: [D-01]`.
+- When a decision changes, search for its ID and review every file that cites it.
+
 <!-- decision-index:begin -->
 <!-- decision-index:end -->
 """

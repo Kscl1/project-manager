@@ -19,14 +19,14 @@ The project's work system, installed inside its own repository. Start at the roo
 | Package | `.pm/roles/`, `templates/`, `tools/`, `tests/`, `hooks/`, `swarm/` (with `--swarm`) | Replaced by the package version. Keep project-specific changes out of these directories. |
 | Version stamp | `.pm/VERSION`, `.pm/package-files.sha256` | Rewritten on every install and upgrade: the package commit, and each package file's hash as installed. `--upgrade --dry-run` uses the hashes to say which side changed a file. |
 | Seed | `.pm/README.md`, `board.md`, `principles.md`, `models.md` | Written once if missing; then owned by the project and kept on upgrade. |
-| Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md`, `specs/`, `backlog/`, `worklog/` | Never overwritten. |
+| Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md` (started with the first lesson; the installer does not create it), `specs/`, `backlog/`, `worklog/` | Never overwritten. |
 
 | Root adapters | `AGENTS.md`, `CLAUDE.md`, `backlog.config.yml` | Written only when absent. Review an existing file manually. |
 | Machine-local | `.pm/local/`, worker `.pm-report.md` files, `.worktrees/` | Not distributed or committed. |
 
 A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
 
-The package lives in git, including tasks, decisions, specs and delivery records. Ignore only `.pm/local/`, `.pm-report.md` and `.worktrees/` as appropriate. Product code, tests and living product docs stay in the product's own directories. Do not use `backlog decision` or `backlog doc`: decisions live in `.pm/decisions/`, one file each with `.pm/decisions.md` as the index, product documentation in `docs/`. Backlog may recreate empty internal directories; they are not extra sources of truth.
+The package lives in git, including tasks, decisions, specs and delivery records. Ignore only `.pm/local/`, `.pm-report.md`, `.worktrees/` and `__pycache__/`, the rules the installer adds. Product code, tests and living product docs stay in the product's own directories. Do not use `backlog decision` or `backlog doc`: decisions live in `.pm/decisions/`, one file each with `.pm/decisions.md` as the index, product documentation in `docs/`. Backlog may recreate empty internal directories; they are not extra sources of truth.
 
 ## Install and use
 
