@@ -142,4 +142,3 @@ asked for, written or shown: `AFTER` names it as the step left to the user. Noth
 ## Left for later, on purpose
 
 - A one-line bootstrap that makes the virtual environment for the user, and a clean-machine run on Linux (Windows was rehearsed in Windows Sandbox in October 2026).
-- Renovate watching `bom.toml`.

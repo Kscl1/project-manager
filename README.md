@@ -30,6 +30,7 @@ See [How it works](docs/how-it-works.md) for the workflow, roles, architecture d
 | **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
 | **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
 | **Swarm** | Opt-in (`--swarm`) | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
+| **EVREN** | Opt-in, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi ([details](docs/getting-started.md#evren-layer-optional)). |
 
 ## Install
 
