@@ -1,8 +1,6 @@
 ---
 title: How it works
 description: From a request to checked work, with records kept in your repository.
-sidebar:
-  order: 2
 ---
 
 ## One request, from intent to evidence

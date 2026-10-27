@@ -1,8 +1,6 @@
 ---
 title: Giriş
 description: Git deponun içinde, senin ve kodlama ajanlarının birlikte kullandığı dosya tabanlı çalışma alanı.
-sidebar:
-  order: 1
 ---
 
 project-manager; **görevleri, karar kayıtlarını ve çalışma kurallarını kodunun hemen yanında tutar**. Sen ve kodlama ajanların (seninle birlikte kod okuyup yazabilen yapay zekâ araçları) aynı dosyaları kullanırsınız. İşi bu dosyalardan planlar, kontrol eder ve bir önceki oturumun (ajanla yaptığın çalışma sohbetinin) kaldığı yerden devam edersiniz.

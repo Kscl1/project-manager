@@ -1,8 +1,6 @@
 ---
 title: Introduction
 description: A file-based workspace for you and your coding agents, inside Git.
-sidebar:
-  order: 1
 ---
 
 project-manager keeps **tasks, decisions and working rules next to your code**. You and your coding agents use the same files to plan work, check it and pick up where the last session stopped.

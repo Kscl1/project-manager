@@ -1,8 +1,6 @@
 ---
 title: Başlangıç
 description: Çalışma sistemi paketini projene kur, ardından ajanınla birlikte projene uyarla.
-sidebar:
-  order: 3
 ---
 
 project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtlarını (teknik seçimlerin nedenlerini) ve çalışma kurallarını kodunun yanında tutar. Böylece kodlama ajanın (kod okuyup yazan yapay zekâ aracın) her oturumda (çalışma sohbetinde) işi aynı yöntemle planlar ve kontrol eder.

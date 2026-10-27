@@ -36,6 +36,19 @@ test('missing Turkish translation uses English with Starlight notice', () => {
   assert.match(html('tr/how-it-works'), /One request, from intent to evidence/);
 });
 
+const pages = readdirSync('docs').filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -'.md'.length));
+const slug = (page) => (page === 'index' ? '' : `${page}/`);
+
+// The menu once rendered an empty group (autogenerate on a directory that matched no page) and every test passed.
+test('the menu of a content page links every page in its language', () => {
+  for (const [page, prefix] of [['getting-started', ''], ['tr/getting-started', 'tr/']]) {
+    const nav = html(page).match(/<sl-sidebar-pane[\s\S]*?<\/sl-sidebar-pane>/)?.[0] ?? '';
+    for (const target of pages) {
+      assert.ok(nav.includes(`href="${base}${prefix}${slug(target)}"`), `${page} menu lacks ${prefix}${slug(target)}`);
+    }
+  }
+});
+
 test('edit links point at the actual single-source documents', () => {
   for (const [page, source] of [['', 'index.md'], ['how-it-works', 'how-it-works.md'], ['tr/getting-started', 'tr/getting-started.md']]) {
     assert.ok(html(page).includes(`https://github.com/Kscl1/project-manager/edit/main/docs/${source}`));

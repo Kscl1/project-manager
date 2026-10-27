@@ -41,7 +41,7 @@ npm run test:site # checks the built pages, fallback notice, local links and ass
 npm run preview   # preview the built site
 ```
 
-`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` and `sidebar.order` are optional. Files whose names begin with `_` are not loaded. Navigation includes new pages automatically.
+`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` is optional. Files whose names begin with `_` are not loaded. The menu is the `sidebar` list in `astro.config.mjs`, one slug per page in reading order; add a new page there (the site test fails when a page is missing from the menu).
 
 English is the source language. The introduction and getting-started guide have Turkish versions; other pages fall back to English with Starlight's missing-translation notice. When changing a translated page, update both versions in the same PR, or remove the outdated translation so the notice appears. The notice detects missing files, not stale translations.
 

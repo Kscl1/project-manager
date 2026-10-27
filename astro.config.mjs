@@ -21,13 +21,10 @@ export default defineConfig({
       },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Kscl1/project-manager' }],
       editLink: { baseUrl: 'https://github.com/Kscl1/project-manager/edit/main/' },
-      sidebar: [
-        {
-          label: 'Documentation',
-          translations: { tr: 'Belgeler' },
-          items: [{ autogenerate: { directory: '.' } }],
-        },
-      ],
+      // Each page by slug: Starlight links the reader's language and uses that page's title. Its own default menu
+      // nests translated pages under docs/tr, because the pages live outside src/content/docs. A new page goes here;
+      // the site test fails when a page is missing from the menu.
+      sidebar: ['index', 'how-it-works', 'getting-started', 'own-tools', 'upgrading'],
     }),
   ],
 });
