@@ -69,6 +69,54 @@ class PmInitTest(unittest.TestCase):
         self.assertIn("package: ", stamp)
         self.assertIn("installed: ", stamp)
 
+    def test_version_stamp_names_a_skill_only_commit_and_its_tag(self):
+        source = Path(tempfile.mkdtemp(prefix="pm_src_"))
+        self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
+        shutil.copytree(
+            PM_INIT.parent.parent, source / "template" / ".pm", ignore=shutil.ignore_patterns("__pycache__")
+        )
+        shutil.copytree(SKILLS, source / "template" / ".agents" / "skills")
+        git = [GIT, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=.git/hooks"]
+        subprocess.run([GIT, "init", "-q"], cwd=source, check=True, capture_output=True)
+        subprocess.run([*git, "add", "-A"], cwd=source, check=True, capture_output=True)
+        subprocess.run([*git, "commit", "-qm", "package"], cwd=source, check=True, capture_output=True)
+        skill = next((source / "template" / ".agents" / "skills").glob("pm-*/SKILL.md"))
+        skill.write_text(skill.read_text(encoding="utf-8") + "skill change\n", encoding="utf-8")
+        subprocess.run([*git, "commit", "-qam", "skill only"], cwd=source, check=True, capture_output=True)
+        subprocess.run([*git, "tag", "v9.9.9"], cwd=source, check=True, capture_output=True)
+        head = subprocess.run(
+            [GIT, "log", "-1", "--format=%h"], cwd=source, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+        result = subprocess.run(
+            [sys.executable, str(source / "template" / ".pm" / "tools" / "pm_init.py"), str(self.root)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        stamp = (self.root / ".pm" / "VERSION").read_text(encoding="utf-8").splitlines()[0]
+        self.assertTrue(stamp.startswith(f"package: {head} "), stamp)
+        self.assertTrue(stamp.endswith(" (v9.9.9)"), stamp)
+
+    def test_an_upgrade_with_nothing_new_keeps_everything_and_names_the_upgrade_checks(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
+        self.assertIn("Plan for", result.stdout)
+        plan = result.stdout.split("Plan for", 1)[1].split("\n\n", 1)[0]
+        self.assertNotIn("upgrade", plan)
+        after = result.stdout.split("\nNext:", 1)[1]
+        self.assertIn("python -m unittest discover -s .pm/tests", after)
+        self.assertIn("python .pm/tools/pm_board.py --resume", after)
+        self.assertIn("upgrading.md", after)
+        self.assertNotIn("/pm-setup", after)
+
     def test_dry_run_reports_a_local_edit_and_writes_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         edited = self.root / ".pm" / "tools" / "pm_check.py"
@@ -86,7 +134,11 @@ class PmInitTest(unittest.TestCase):
     def test_a_clone_with_autocrlf_reports_no_skill_as_edited(self):
         # Git for Windows often sets core.autocrlf=true; the manifest hashes bytes, so CRLF copies looked edited.
         self.assertEqual(self.run_init().returncode, 0)
-        git = [GIT, "-c", "user.name=t", "-c", "user.email=t@example.com"]
+        # Without the installed hooks: run from an installed project, the seed files cite that project's own paths
+        # and its pm_check would refuse this commit.
+        no_hooks = tempfile.mkdtemp(prefix="pm_nohooks_")
+        self.addCleanup(shutil.rmtree, no_hooks)
+        git = [GIT, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", f"core.hooksPath={no_hooks}"]
         subprocess.run([*git, "add", "-A"], cwd=self.root, check=True, capture_output=True)
         subprocess.run([*git, "commit", "-qm", "install"], cwd=self.root, check=True, capture_output=True)
         clone = Path(tempfile.mkdtemp(prefix="pm_clone_")) / "c"

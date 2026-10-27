@@ -206,6 +206,13 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertNotIn("TASK-4", section)
         self.assertNotIn("TASK-5", section)
 
+    def test_a_repo_without_commits_prints_no_warning(self):
+        result = self.run_resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(no commits yet)", result.stdout)
+        self.assertNotIn("Could not", result.stdout)
+
     def test_owner_line_with_a_parenthetical_counts(self):
         self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1", "Two leads", "Active", notes="Needs owner (both leads agree): four decisions")

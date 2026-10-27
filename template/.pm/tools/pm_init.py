@@ -65,6 +65,7 @@ SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
 SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
+UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -175,9 +176,16 @@ def report_changes(src, dst, part, manifest):
     return found
 
 
+def same_files(src, dst, part):
+    return not any(classify(src, dst, part, {}))
+
+
 def copy_dir(src, dst, upgrade, backup, manifest, part):
     if dst.exists() and not upgrade:
         say("skip", dst, "exists; use --upgrade to refresh")
+        return
+    if dst.exists() and same_files(src, dst, part):
+        say("keep", dst, "same as the package")  # no backup either: nothing would be lost
         return
     if dst.exists():
         report_changes(src, dst, part, manifest)
@@ -244,12 +252,17 @@ def add_lines(target, name, wanted):
 
 
 def package_commit():
-    """The package revision this installer comes from, as '<hash> <date>', marked when it has local changes."""
-    rev = subprocess.run(["git", "log", "-1", "--format=%h %cs", "--", "."], cwd=PKG, capture_output=True, text=True)
-    dirty = subprocess.run(["git", "status", "--porcelain", "--", "."], cwd=PKG, capture_output=True, text=True)
+    """The package revision this installer comes from, as '<hash> <date>', with the release tag when the source
+    sits on one, and marked when it has local changes. The skills ship with the package, so their commits count."""
+    paths = ["--", ".", str(SKILLS)]
+    rev = subprocess.run(["git", "log", "-1", "--format=%h %cs", *paths], cwd=PKG, capture_output=True, text=True)
+    dirty = subprocess.run(["git", "status", "--porcelain", *paths], cwd=PKG, capture_output=True, text=True)
+    tag = subprocess.run(["git", "describe", "--tags", "--exact-match"], cwd=PKG, capture_output=True, text=True)
     commit = (
         rev.stdout.strip() if rev.returncode == 0 and rev.stdout.strip() else "unknown (source is not a git checkout)"
     )
+    if tag.returncode == 0 and tag.stdout.strip():
+        commit += f" ({tag.stdout.strip()})"
     if dirty.returncode == 0 and dirty.stdout.strip():
         commit += " +local changes"
     return commit
@@ -425,10 +438,10 @@ def plan(target, args, conflicts):
     """Every change the install makes, as (action, path relative to the project, note), before anything is written.
     main() makes exactly these changes; the tests check that no file is written outside this list."""
     entries, copies = [], 0
-    for _, dst, _ in package_parts(target, args.map, args.swarm):
+    for src, dst, part in package_parts(target, args.map, args.swarm):
         if not dst.exists():
             entries.append(("copy", dst, ""))
-        elif args.upgrade:
+        elif args.upgrade and not same_files(src, dst, part):
             entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
         else:
             continue
@@ -437,7 +450,7 @@ def plan(target, args, conflicts):
         pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
         if not pointer.exists() or args.upgrade:
             entries.append(("write", pointer, "points Claude Code to the skill"))
-    if copies or not (target / ".pm" / "VERSION").exists():
+    if copies or not (target / ".pm" / "VERSION").exists() or not (target / ".pm" / MANIFEST).exists():
         entries.append(("write", target / ".pm" / MANIFEST, "what each package file looked like"))
     for part in [*SEED, "decisions.md"]:
         if not (target / ".pm" / part).exists():
@@ -596,9 +609,20 @@ def main(argv=None):
         for line in merge:
             print(f"  {line}")
     print("\nNext:")
-    print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")
-    print("  2. python .pm/tools/pm_check.py    # should print: No problems found")
-    print("  3. backlog browser                 # the task screen")
+    if first:
+        print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")
+        print("  2. python .pm/tools/pm_check.py    # should print: No problems found")
+        print("  3. backlog browser                 # the task screen")
+        return 0
+    # Already installed (an upgrade, a rollback or a new layer): the upgrade guide's checks, run from the project.
+    checks = ["python .pm/tools/pm_check.py", "python -m unittest discover -s .pm/tests"]
+    if (target / ".pm" / SWARM).is_dir():
+        checks.append(f"python -m unittest discover -s .pm/{SWARM}")
+    checks.append("python .pm/tools/pm_board.py --resume")
+    print(f"  In {target}, review the diff and any merge list, then run:")
+    for number, check in enumerate(checks, 1):
+        print(f"  {number}. {check}")
+    print(f"  Guide: {UPGRADE_GUIDE}")
     return 0
 
 

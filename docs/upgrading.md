@@ -36,7 +36,7 @@ python template/.pm/tools/pm_init.py ../my-project --upgrade --map --swarm
 Read the dry run first. It reports new/removed files, local edits and files changed on both sides. It writes nothing. The real upgrade:
 
 - Replaces `.pm/tools`, `tests`, `hooks`, `roles`, `templates` and the installed swarm layer. Removed package files disappear from those managed folders.
-- Replaces shipped `pm-*` skills in `.agents/skills/` and refreshes their Claude Code pointers. **Local edits inside managed folders are overwritten.** Their old folders go to `.pm/local/backup/<timestamp>/`; use them to reapply intentional edits, not to overwrite the entire new package blindly. Backups use second-resolution timestamps: wait until the next second before another real upgrade.
+- Replaces shipped `pm-*` skills in `.agents/skills/` and refreshes their Claude Code pointers. **Local edits inside managed folders are overwritten.** Their old folders go to `.pm/local/backup/<timestamp>/` (a folder that already matches the package is kept and gets no backup); use them to reapply intentional edits, not to overwrite the entire new package blindly. Backups use second-resolution timestamps: wait until the next second before another real upgrade.
 - Leaves project tasks, decisions, worklog, specs, charter and seed files such as `.pm/models.md` alone. Your own skills outside the shipped `pm-*` names are not touched; do not give a personal skill a shipped name.
 - Keeps existing root instructions, Backlog config, `.claude/settings.json` and `.mcp.json`; missing integrations go into `.pm/local/merge-by-hand.md`. It may append package rules to `.gitignore` / `.gitattributes` and activate/stage package hooks when the project has no hooks of its own.
 
@@ -48,7 +48,7 @@ python -m unittest discover -s .pm/tests
 python .pm/tools/pm_board.py --resume
 ```
 
-If you installed swarm, also run `python -m unittest discover -s .pm/swarm`. Inspect `.pm/VERSION` and try a normal task/resume flow. A consistency check is not a compatibility certification. Review before committing the upgrade in your project, and keep the ignored backups until you are satisfied.
+If you installed swarm, also run `python -m unittest discover -s .pm/swarm`; the upgrade prints these checks as its next steps. Inspect `.pm/VERSION`: it names the last package commit and, on a release checkout, the tag. Then try a normal task/resume flow. A consistency check is not a compatibility certification. Review before committing the upgrade in your project, and keep the ignored backups until you are satisfied.
 
 ## 3. Upgrade tools separately
 
