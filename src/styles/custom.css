@@ -1,0 +1,17 @@
+/* The blue of the logo as the accent colour, in dark and light mode. */
+:root {
+  --sl-color-accent-low: #172554;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #bfdbfe;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #dbeafe;
+  --sl-color-accent: #1d4ed8;
+  --sl-color-accent-high: #172554;
+}
+
+/* The landing page: a larger logo beside the title. */
+.hero > img {
+  width: min(10rem, 40vw);
+}

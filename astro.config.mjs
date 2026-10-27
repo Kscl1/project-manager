@@ -19,6 +19,8 @@ export default defineConfig({
         root: { label: 'English', lang: 'en' },
         tr: { label: 'Türkçe', lang: 'tr' },
       },
+      logo: { src: './src/assets/logo.svg' },
+      customCss: ['./src/styles/custom.css'],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Kscl1/project-manager' }],
       editLink: { baseUrl: 'https://github.com/Kscl1/project-manager/edit/main/' },
       // Each page by slug: Starlight links the reader's language and uses that page's title. Its own default menu

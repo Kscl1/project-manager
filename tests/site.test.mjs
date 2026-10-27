@@ -50,6 +50,13 @@ test('the menu of a content page links every page in its language', () => {
   }
 });
 
+test('the introduction is a landing page whose buttons lead to getting started', () => {
+  for (const [page, prefix] of [['', ''], ['tr', 'tr/']]) {
+    assert.match(html(page), /class="hero/);
+    assert.ok(html(page).includes(`href="${base}${prefix}getting-started/"`), `${page || 'index'} hero has no getting-started button`);
+  }
+});
+
 test('edit links point at the actual single-source documents', () => {
   for (const [page, source] of [['', 'index.md'], ['how-it-works', 'how-it-works.md'], ['tr/getting-started', 'tr/getting-started.md']]) {
     assert.ok(html(page).includes(`https://github.com/Kscl1/project-manager/edit/main/docs/${source}`));

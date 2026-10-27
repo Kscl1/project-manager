@@ -1,6 +1,24 @@
 ---
 title: Giriş
 description: Git deponun içinde, senin ve kodlama ajanlarının birlikte kullandığı dosya tabanlı çalışma alanı.
+template: splash
+hero:
+  title: project-manager
+  tagline: Görevler, kararlar ve çalışma kuralları kodunun yanında; her ajan oturumu bir öncekinin kaldığı yerden başlar.
+  image:
+    file: ../../src/assets/logo.svg
+    alt: project-manager logosu
+  actions:
+    - text: Başla
+      link: /project-manager/tr/getting-started/
+      icon: right-arrow
+    - text: Nasıl çalışır?
+      link: /project-manager/tr/how-it-works/
+      variant: secondary
+    - text: GitHub
+      link: https://github.com/Kscl1/project-manager
+      icon: external
+      variant: minimal
 ---
 
 project-manager; **görevleri, karar kayıtlarını ve çalışma kurallarını kodunun hemen yanında tutar**. Sen ve kodlama ajanların (seninle birlikte kod okuyup yazabilen yapay zekâ araçları) aynı dosyaları kullanırsınız. İşi bu dosyalardan planlar, kontrol eder ve bir önceki oturumun (ajanla yaptığın çalışma sohbetinin) kaldığı yerden devam edersiniz.
