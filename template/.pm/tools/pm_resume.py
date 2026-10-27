@@ -32,6 +32,7 @@ CLOSED_SHOWN = 3  # a one-goal session writes no worklog, so the next one reads 
 # The closing-summary lines shown under the first line; the owner line carries the owner's name or the word Owner.
 SUMMARY_LINE = re.compile(r"(?:[A-Z][\w'-]* said|Found|Next):")
 DRAFTS_DIR = ROOT / ".pm" / "backlog" / "drafts"  # private work items (Backlog drafts); shown only when present
+ARCHIVED_DRAFTS_DIR = ROOT / ".pm" / "backlog" / "archive" / "drafts"  # archived drafts still record their commits
 WORKTREES_DIR = ROOT / ".worktrees"
 AUDITS_DIR = ROOT / ".pm" / "local" / "audits"
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
@@ -346,8 +347,8 @@ def worklog_gap_warning():
     """Warn about commits after the newest worklog that no task records either.
 
     A one-goal session writes no worklog, so a commit is recorded when every task its Refs line names is open
-    or a draft (its file holds the work) or Done with a Final Summary; a commit with `Refs: none`, no Refs line,
-    an unknown task or a Done task without a summary is not.
+    or a draft, archived or not (its file holds the work), or Done with a Final Summary; a commit with
+    `Refs: none`, no Refs line, an unknown task or a Done task without a summary is not.
     """
     try:
         newest = max(WORKLOG_DIR.glob("*.md"), key=lambda path: path.name, default=None)
@@ -361,7 +362,7 @@ def worklog_gap_warning():
         return None  # the worklog is not committed yet
     recorded = {
         task["id"]
-        for task in load_tasks() + load_closed() + load_tasks(DRAFTS_DIR)
+        for task in load_tasks() + load_closed() + load_tasks(DRAFTS_DIR) + load_tasks(ARCHIVED_DRAFTS_DIR)
         if task["status"] != "Done" or task["summary"]
     }
     loose = [c for c in commits(f"{last}..HEAD") if not c["refs"] or not c["refs"] <= recorded]

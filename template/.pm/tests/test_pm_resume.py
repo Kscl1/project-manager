@@ -253,6 +253,14 @@ class ResumeSummaryTest(unittest.TestCase):
         self.commit_with("chore: park the idea", "Refs: DRAFT-1\nAssisted-by: M (high)", "2025-06-03")
         self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
 
+        # So does an archived draft's.
+        archived_dir = self.root / ".pm" / "backlog" / "archive" / "drafts"
+        archived_dir.mkdir(parents=True)
+        archived = "---\nid: DRAFT-2\ntitle: Settled idea\nstatus: Draft\n---\n"
+        (archived_dir / "draft-2 - Settled-idea.md").write_text(archived, encoding="utf-8")
+        self.commit_with("chore: settle the idea", "Refs: DRAFT-2\nAssisted-by: M (high)", "2025-06-03")
+        self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
+
     def test_names_finished_tasks_in_the_newest_worklogs_next(self):
         worklog_dir = self.root / ".pm" / "worklog"
         worklog_dir.mkdir(parents=True)
