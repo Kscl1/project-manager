@@ -13,6 +13,8 @@ from pathlib import Path
 PM_INIT = Path(__file__).resolve().parent.parent / "tools" / "pm_init.py"
 SKILLS = PM_INIT.parent.parent.parent / ".agents" / "skills"
 GIT = shutil.which("git")
+# A project's own .pm/local (run folders, backups, nested repos) is no part of the package: never copy it.
+PACKAGE_ONLY = shutil.ignore_patterns("__pycache__", "local")
 
 
 def _remove_readonly(func, path, _exc_info):
@@ -72,9 +74,7 @@ class PmInitTest(unittest.TestCase):
     def test_version_stamp_names_a_skill_only_commit_and_its_tag(self):
         source = Path(tempfile.mkdtemp(prefix="pm_src_"))
         self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
-        shutil.copytree(
-            PM_INIT.parent.parent, source / "template" / ".pm", ignore=shutil.ignore_patterns("__pycache__")
-        )
+        shutil.copytree(PM_INIT.parent.parent, source / "template" / ".pm", ignore=PACKAGE_ONLY)
         shutil.copytree(SKILLS, source / "template" / ".agents" / "skills")
         git = [GIT, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=.git/hooks"]
         subprocess.run([GIT, "init", "-q"], cwd=source, check=True, capture_output=True)
@@ -155,7 +155,7 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(self.run_init().returncode, 0)
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
         self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
-        shutil.copytree(PM_INIT.parent.parent, source / ".pm")
+        shutil.copytree(PM_INIT.parent.parent, source / ".pm", ignore=PACKAGE_ONLY)
         (source / ".pm" / "roles" / "reviewer.md").unlink()
         local = self.root / ".pm" / "roles" / "reviewer.md"
         local.write_text(local.read_text(encoding="utf-8") + "local rule\n", encoding="utf-8")
@@ -246,7 +246,7 @@ class PmInitTest(unittest.TestCase):
     def test_install_copies_every_pm_skill_with_a_claude_pointer(self):
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
         self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
-        shutil.copytree(PM_INIT.parent.parent, source / ".pm")
+        shutil.copytree(PM_INIT.parent.parent, source / ".pm", ignore=PACKAGE_ONLY)
         shutil.copytree(SKILLS, source / ".agents" / "skills")
         for name in ("pm-extra", "own-skill"):  # a pm- skill no list names, and a skill that is not the package's
             skill = source / ".agents" / "skills" / name / "SKILL.md"
