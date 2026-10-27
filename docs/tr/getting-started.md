@@ -127,13 +127,13 @@ Claude Code'da project-manager klasörünü değil, **kendi projeni** aç:
 
 `/pm-setup` yazıp Enter'a bas. Ajanın Backlog içinde bir kurulum Epic'i (her soru için bir alt görev barındıran üst görev) açar ve konuları tek tek sorar: mevcut ajan kuralların, Git kancaların, CI (kod gönderildiğinde testleri otomatik çalıştıran sürekli entegrasyon akışı), testlerin, görev listelerin, kurulumun seninle birleştirmek üzere bıraktığı dosyalar, projenin amacı (proje tüzüğü / `charter`) ve elindeki yapay zekâ modelleri. Sen onay vermeden hiçbir şey değiştirilmez.
 
-Zaten kullandığın MCP sunucuları, eklentiler (`plugin`), beceriler veya uygulamalar var mı? [Kendi araçlarını işe yarar kıl](../own-tools.md) sayfasına bak (şimdilik İngilizce). `/pm-setup` bunları tek tek ele alır, mevcut kurulumunu korur ve onay verirsen kısa bir “hangi araç ne zaman” kuralı ile gerçek bir duman testi (`smoke check`, aracın gerçekten çalıştığını gösteren küçük bir deneme) ekler.
+Zaten kullandığın MCP sunucuları, eklentiler (`plugin`), beceriler veya uygulamalar var mı? [Kendi araçlarını işe yarar kıl](own-tools.md) sayfasına bak. `/pm-setup` bunları tek tek ele alır, mevcut kurulumunu korur ve onay verirsen kısa bir “hangi araç ne zaman” kuralı ile gerçek bir duman testi (`smoke check`, aracın gerçekten çalıştığını gösteren küçük bir deneme) ekler.
 
 En sonda araçların sana nasıl açıklanmasını istediğini sorar: **kısa ipuçları** (varsayılan), **birlikte deneyelim** veya **kapalı**. Bunu sohbette istediğin zaman değiştirebilirsin ("öğretmeyi bırak", "Backlog'u zaten biliyorum").
 
 ## Sonradan güncelleme
 
-Sürüm etiketiyle yükseltme, araçların ve becerilerin ayrı güncellenmesi ve geri alırken proje kayıtlarının korunması için [Yükselt ve geri al](../upgrading.md) sayfasına bak (şimdilik İngilizce).
+Sürüm etiketiyle yükseltme, araçların ve becerilerin ayrı güncellenmesi ve geri alırken proje kayıtlarının korunması için [Yükselt ve geri al](upgrading.md) sayfasına bak.
 
 ## Bir şey bozulursa
 

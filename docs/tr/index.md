@@ -21,7 +21,7 @@ Yeni bir oturum eski sohbet geçmişinden değil, doğrudan Git deposundan ve o 
 
 ## Küçük başla
 
-1. İş akışını ve hangi aracın nerede çalıştığını görmek için [nasıl çalışır](../how-it-works.md) sayfasını oku.
+1. İş akışını ve hangi aracın nerede çalıştığını görmek için [nasıl çalışır](how-it-works.md) sayfasını oku.
 2. Çekirdek katmanı projene kurmak için [başlangıç rehberini](getting-started.md) izle.
 3. Projeni kodlama ajanında aç ve `/pm-setup` komutunu çalıştır.
 
