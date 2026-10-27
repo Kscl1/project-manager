@@ -716,7 +716,10 @@ def main(brief=False):
             sections.append(("Recently closed", "\n".join(line for line in closed if line.startswith("- "))))
         sections.append(("Open tasks", "\n".join(brief_task_lines(tasks)) or "- (none)"))
     else:
-        log_output = git_stdout(["log", "-5", "--oneline"], "⚠️ Could not run `git log -5 --oneline`.")
+        log_output = git_stdout(["log", "-5", "--oneline"], None)
+        if log_output is None:  # a new repository has no commits yet, which is not a failure
+            no_commits = git_stdout(["rev-parse", "--git-dir"], None) is not None
+            log_output = "(no commits yet)" if no_commits else "⚠️ Could not run `git log -5 --oneline`."
         sections += [("Git status", status_output), ("Last 5 commits", log_output)]
         if closed:
             sections.append(("Recently closed tasks", "\n".join(closed)))
