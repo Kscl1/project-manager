@@ -1,8 +1,24 @@
 ---
 title: Introduction
 description: A file-based workspace for you and your coding agents, inside Git.
-sidebar:
-  order: 1
+template: splash
+hero:
+  title: project-manager
+  tagline: Tasks, decisions and working rules next to your code, so every agent session starts where the last one stopped.
+  image:
+    file: ../src/assets/logo.svg
+    alt: project-manager logo
+  actions:
+    - text: Get started
+      link: /project-manager/getting-started/
+      icon: right-arrow
+    - text: How it works
+      link: /project-manager/how-it-works/
+      variant: secondary
+    - text: GitHub
+      link: https://github.com/Kscl1/project-manager
+      icon: external
+      variant: minimal
 ---
 
 project-manager keeps **tasks, decisions and working rules next to your code**. You and your coding agents use the same files to plan work, check it and pick up where the last session stopped.

@@ -30,10 +30,31 @@ test('English and Turkish pages build at the project Pages base', () => {
   }
 });
 
-test('missing Turkish translation uses English with Starlight notice', () => {
-  assert.equal(existsSync('docs/tr/how-it-works.md'), false);
-  assert.match(html('tr/how-it-works'), /Bu içerik henüz dilinizde mevcut değil\./);
-  assert.match(html('tr/how-it-works'), /One request, from intent to evidence/);
+const pages = readdirSync('docs').filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -'.md'.length));
+const slug = (page) => (page === 'index' ? '' : `${page}/`);
+
+test('every English page has a Turkish page, and no Turkish page shows the missing-translation notice', () => {
+  for (const page of pages) {
+    assert.ok(existsSync(`docs/tr/${page}.md`), `docs/${page}.md has no docs/tr/${page}.md`);
+    assert.doesNotMatch(html(`tr/${slug(page)}`), /Bu içerik henüz dilinizde mevcut değil\./);
+  }
+});
+
+// The menu once rendered an empty group (autogenerate on a directory that matched no page) and every test passed.
+test('the menu of a content page links every page in its language', () => {
+  for (const [page, prefix] of [['getting-started', ''], ['tr/getting-started', 'tr/']]) {
+    const nav = html(page).match(/<sl-sidebar-pane[\s\S]*?<\/sl-sidebar-pane>/)?.[0] ?? '';
+    for (const target of pages) {
+      assert.ok(nav.includes(`href="${base}${prefix}${slug(target)}"`), `${page} menu lacks ${prefix}${slug(target)}`);
+    }
+  }
+});
+
+test('the introduction is a landing page whose buttons lead to getting started', () => {
+  for (const [page, prefix] of [['', ''], ['tr', 'tr/']]) {
+    assert.match(html(page), /class="hero/);
+    assert.ok(html(page).includes(`href="${base}${prefix}getting-started/"`), `${page || 'index'} hero has no getting-started button`);
+  }
 });
 
 test('edit links point at the actual single-source documents', () => {

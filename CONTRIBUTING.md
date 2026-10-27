@@ -37,13 +37,13 @@ The site uses Astro and Starlight. From the repository root, with Node.js 24.14.
 npm ci
 npm run dev       # http://localhost:4321/project-manager/
 npm run build
-npm run test:site # checks the built pages, fallback notice, local links and assets
+npm run test:site # checks the built pages, the menu, Turkish pages, local links and assets
 npm run preview   # preview the built site
 ```
 
-`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` and `sidebar.order` are optional. Files whose names begin with `_` are not loaded. Navigation includes new pages automatically.
+`docs/` is the single content source, loaded directly by `src/content.config.ts`; do not create a second copy in `src/content/docs/`. English pages live at `docs/<slug>.md`, translations at `docs/tr/<same-slug>.md`; subdirectories work too. Each page needs YAML frontmatter with a `title`; `description` is optional. Files whose names begin with `_` are not loaded. The menu is the `sidebar` list in `astro.config.mjs`, one slug per page in reading order; add a new page there (the site test fails when a page is missing from the menu).
 
-English is the source language. The introduction and getting-started guide have Turkish versions; other pages fall back to English with Starlight's missing-translation notice. When changing a translated page, update both versions in the same PR, or remove the outdated translation so the notice appears. The notice detects missing files, not stale translations.
+English is the source language, and every page has a Turkish version; `npm run test:site` fails when one is missing. A new page or a change to a page updates both versions in the same PR. The test detects missing files, not stale translations.
 
 Link between pages with the relative Markdown file, for example `getting-started.md` or, from `docs/tr/`, `../how-it-works.md`. GitHub follows these links as they are, and the site build turns them into page URLs (`src/md-links.mjs`). Use explicit GitHub URLs for files outside `docs/`. A Mermaid code fence renders as a diagram in the browser; keep a prose explanation alongside it.
 
