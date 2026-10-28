@@ -181,7 +181,7 @@ layer = "map"
 path = ".agents/skills/pm-likec4-dsl"
 ref = "likec4/likec4@v1.60.0 (likec4-dsl)"
 # renovate-skill: depName=likec4/likec4 branch=main
-upstream_commit = "0375d146f8de2eb919033bd3b43b3701194f518b"
+upstream_commit = "1512779bd85c56cc8dd76b0f01ab1b0d67316737"
 similar = ["likec4-dsl"]
 
 # Swarm: optional, unticked until the user chooses it. Workers run in visible Herdr panes, driven by pm_run.
