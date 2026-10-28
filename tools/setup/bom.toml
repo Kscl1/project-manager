@@ -78,8 +78,8 @@ layer = "core"
 check = ["backlog", "--version"]
 min = "1.52.0"
 tested = "1.54.0"
-install.windows = "npm i -g backlog.md@1.54.0"
-install.linux = "npm i -g backlog.md@1.54.0"
+install.windows = "npm i -g backlog.md@1.55.3"
+install.linux = "npm i -g backlog.md@1.55.3"
 note = "Needs Node.js first. If npm says EACCES on Linux, follow https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally rather than sudo."
 
 [[item]]
