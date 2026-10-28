@@ -46,12 +46,19 @@ class RenovateTests(unittest.TestCase):
 
     def test_skill_candidates_keep_real_provenance(self):
         matches = [match for pattern in self.patterns(2) for match in pattern.finditer(self.bom)]
-        self.assertEqual(len(matches), 3)
-        self.assertEqual({match["depName"] for match in matches}, {"mattpocock/skills", "likec4/likec4"})
+        self.assertEqual(len(matches), 2)
+        self.assertEqual({match["depName"] for match in matches}, {"mattpocock/skills"})
         for match in matches:
             self.assertEqual(match["currentValue"], "main")
             self.assertEqual(len(match["currentDigest"]), 40)
         self.assertIn('ref = "mattpocock/skills@49dd158 (grilling)"', self.bom)
+
+    def test_likec4_skill_moves_with_the_cli_pin(self):
+        # Its main branch documents unreleased syntax; the skill follows the release the CLI pin names.
+        item = self.bom.split('id = "pm-likec4-dsl"')[1].split("[[item]]")[0]
+        self.assertNotIn("upstream_commit", item)
+        self.assertIn('ref = "likec4/likec4@v1.60.0 (likec4-dsl)"', item)
+        self.assertIn("npx likec4@1.60.0", self.bom)
 
     def test_replacing_every_capture_cannot_change_min_tested_or_ref(self):
         changed = self.bom

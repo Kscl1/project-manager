@@ -180,8 +180,7 @@ kind = "project-file"
 layer = "map"
 path = ".agents/skills/pm-likec4-dsl"
 ref = "likec4/likec4@v1.60.0 (likec4-dsl)"
-# renovate-skill: depName=likec4/likec4 branch=main
-upstream_commit = "0375d146f8de2eb919033bd3b43b3701194f518b"
+# No watch of its own: the skill documents one LikeC4 release, so it is updated in the PR that moves the likec4 pin.
 similar = ["likec4-dsl"]
 
 # Swarm: optional, unticked until the user chooses it. Workers run in visible Herdr panes, driven by pm_run.
