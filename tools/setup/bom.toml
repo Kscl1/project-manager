@@ -194,8 +194,8 @@ layer = "swarm"
 check = ["pi", "--version"]
 min = "1.0.3"
 tested = "1.3.0"
-install.windows = "npm i -g @earendil-works/pi-coding-agent@1.3.0"
-install.linux = "npm i -g @earendil-works/pi-coding-agent@1.3.0"
+install.windows = "npm i -g @earendil-works/pi-coding-agent@1.4.0"
+install.linux = "npm i -g @earendil-works/pi-coding-agent@1.4.0"
 note = "Needs Node.js first. Pi workers reach a model through the account you sign in with in Pi (/login); a ChatGPT plan works through OpenAI, Sign in with ChatGPT."
 
 [[item]]
