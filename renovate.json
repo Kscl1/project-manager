@@ -33,13 +33,13 @@
     },
     {
       "customType": "regex",
-      "description": "Upstream skill commit candidates; vendored provenance remains unchanged",
+      "description": "Upstream skill release candidates, never branch commits; vendored provenance remains unchanged",
       "managerFilePatterns": ["/^tools/setup/bom\\.toml$/"],
       "matchStrings": [
-        "# renovate-skill: depName=(?<depName>[^ \\r\\n]+) branch=(?<currentValue>[^ \\r\\n]+)\\r?\\nupstream_commit = \"(?<currentDigest>[a-f0-9]{40})\""
+        "# renovate-skill: depName=(?<depName>[^ \\r\\n]+)\\r?\\nupstream_version = \"(?<currentValue>v?[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ],
-      "datasourceTemplate": "github-digest",
-      "versioningTemplate": "exact"
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver-coerced"
     }
   ],
   "customDatasources": {

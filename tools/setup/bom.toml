@@ -15,7 +15,7 @@
 #         runs; no folder means missing.
 # Versions have different meanings: min is the support floor; tested is human-run compatibility evidence;
 # install.* contains actual command pins. Renovate changes only command pins and the upstream_* candidate fields
-# below, never min/tested/ref. upstream_version/upstream_commit discover upstream changes, not certification or
+# below, never min/tested/ref. upstream_version fields discover upstream releases, not certification or
 # installed provenance; setup does not consume them. Review and test before promoting any candidate.
 
 # Core: required.
@@ -114,8 +114,8 @@ kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-grilling"
 ref = "mattpocock/skills@49dd158 (grilling)"
-# renovate-skill: depName=mattpocock/skills branch=main
-upstream_commit = "59db609eb1e18aaf59b63284d0e52255aff0c63c"
+# renovate-skill: depName=mattpocock/skills
+upstream_version = "v1.3.1"
 similar = ["grilling"]
 
 [[item]]
@@ -125,8 +125,8 @@ kind = "project-file"
 layer = "core"
 path = ".agents/skills/pm-grill-me"
 ref = "mattpocock/skills@49dd158 (grill-me)"
-# renovate-skill: depName=mattpocock/skills branch=main
-upstream_commit = "59db609eb1e18aaf59b63284d0e52255aff0c63c"
+# renovate-skill: depName=mattpocock/skills
+upstream_version = "v1.3.1"
 similar = ["grill-me"]
 
 [[item]]
