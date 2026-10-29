@@ -38,7 +38,7 @@ Read the dry run first. It reports new/removed files, local edits and files chan
 - Replaces `.pm/tools`, `tests`, `hooks`, `roles`, `templates` and the installed swarm layer. Removed package files disappear from those managed folders.
 - Replaces shipped `pm-*` skills in `.agents/skills/` and refreshes their Claude Code pointers. **Local edits inside managed folders are overwritten.** Their old folders go to `.pm/local/backup/<timestamp>/` (a folder that already matches the package is kept and gets no backup); use them to reapply intentional edits, not to overwrite the entire new package blindly. Backups use second-resolution timestamps: wait until the next second before another real upgrade.
 - Leaves project tasks, decisions, worklog, specs, charter and seed files such as `.pm/models.md` alone. Your own skills outside the shipped `pm-*` names are not touched; do not give a personal skill a shipped name.
-- Keeps existing root instructions, Backlog config, `.claude/settings.json` and `.mcp.json`; missing integrations go into `.pm/local/merge-by-hand.md`. It may append package rules to `.gitignore` / `.gitattributes` and activate/stage package hooks when the project has no hooks of its own.
+- Keeps existing root instructions, Backlog config, `.claude/settings.json` and `.mcp.json`; missing integrations go into `.pm/local/merge-by-hand.md`. It may append package rules to `.gitignore` / `.gitattributes` / `.ignore` and activate/stage package hooks when the project has no hooks of its own.
 
 Review the diff and merge list. Compare kept root/seed files with the new templates when the release notes call for changes; `--upgrade` intentionally does not synchronize them. From **your project**, run:
 

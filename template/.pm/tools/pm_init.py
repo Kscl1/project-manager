@@ -39,6 +39,9 @@ PACKAGE = ["tools", "tests", "hooks", "roles", "templates"]  # refreshed by --up
 SEED = ["README.md", "board.md", "principles.md", "models.md"]  # the project may tune these, so written once
 DATA_DIRS = ["backlog/tasks", "backlog/drafts", "backlog/archive/tasks", "worklog", "specs", "decisions/archive"]
 GITIGNORE = [".pm/local/", ".pm-report.md", ".worktrees/", "__pycache__/"]
+# ripgrep skips hidden folders, so a plain search misses decisions, tasks and worklogs. .pm/local/ is named again
+# because ripgrep reads .gitignore only inside a git repository.
+IGNORE = ["!.pm/", ".pm/local/"]
 # LF everywhere in the package: the hook is a shell script and breaks with CRLF on Windows.
 GITATTRIBUTES = [
     ".pm/** text eol=lf",
@@ -461,7 +464,7 @@ def plan(target, args, conflicts):
     for name in ("AGENTS.md", "CLAUDE.md", "backlog.config.yml"):
         if not (target / name).exists():
             entries.append(("write", target / name, ""))
-    for name, wanted in ((".gitignore", GITIGNORE), (".gitattributes", GITATTRIBUTES)):
+    for name, wanted in ((".gitignore", GITIGNORE), (".gitattributes", GITATTRIBUTES), (".ignore", IGNORE)):
         if missing_lines(target, name, wanted):
             entries.append(("append", target / name, "adds lines at the end"))
     if settings_action(target) == "write":
@@ -579,6 +582,7 @@ def main(argv=None):
     write_once(target / "backlog.config.yml", text=config)
     add_lines(target, ".gitignore", GITIGNORE)
     add_lines(target, ".gitattributes", GITATTRIBUTES)
+    add_lines(target, ".ignore", IGNORE)
     if settings_action(target) == "write":
         write_once(target / ".claude" / "settings.json", src=ROOT_TEMPLATES / "claude-settings.json")
     action, servers = mcp_action(target, args.map)

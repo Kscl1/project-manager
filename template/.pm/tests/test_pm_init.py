@@ -208,6 +208,50 @@ class PmInitTest(unittest.TestCase):
             with self.subTest(entry=entry):
                 self.assertEqual(lines.count(entry), 1)
 
+    def test_ignore_lets_search_into_pm_once_and_keeps_existing_lines(self):
+        fresh = self.run_init()
+        self.assertEqual(fresh.returncode, 0, fresh.stdout + fresh.stderr)
+        self.assertIn("!.pm/", (self.root / ".ignore").read_text(encoding="utf-8").splitlines())
+
+        other = Path(tempfile.mkdtemp(prefix="pm_ignore_"))
+        self.addCleanup(shutil.rmtree, other, onerror=_remove_readonly)
+        subprocess.run([GIT, "init", "-q"], cwd=other, check=True)
+        (other / ".ignore").write_text("vendor/\n!vendor/keep/", encoding="utf-8")  # no final newline
+        self.assertEqual(self.run_init(other).returncode, 0)
+        first = (other / ".ignore").read_text(encoding="utf-8")
+        self.assertTrue(first.startswith("vendor/\n!vendor/keep/\n"), first)
+        self.assertEqual(first.splitlines().count("!.pm/"), 1)
+        self.assertEqual(self.run_init(other, "--upgrade").returncode, 0)
+        self.assertEqual((other / ".ignore").read_text(encoding="utf-8"), first, "a second run changes nothing")
+
+    @unittest.skipUnless(shutil.which("rg"), "ripgrep is required for the search check")
+    def test_plain_rg_finds_pm_records_but_not_local_or_git_ignored_files(self):
+        needle = "needle" + "-4711"  # split, because the installed copy of this test sits in .pm/tests/ too
+        plain = Path(tempfile.mkdtemp(prefix="pm_nogit_"))  # ripgrep reads .gitignore only inside a git repository
+        self.addCleanup(shutil.rmtree, plain, onerror=_remove_readonly)
+        for root, git_ignored in ((self.root, "build/out.txt"), (plain, None)):
+            with self.subTest(git=git_ignored is not None):
+                self.assertEqual(self.run_init(root).returncode, 0)
+                with (root / ".gitignore").open("a", encoding="utf-8") as out:
+                    out.write("build/\n")
+                for relative in (".pm/decisions/D-1-sentinel.md", ".pm/local/scratch/note.md", git_ignored):
+                    if relative:
+                        path = root / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(needle + "\n", encoding="utf-8")
+
+                found = subprocess.run(
+                    # An explicit path: without one, rg reads stdin when stdin is not a terminal, as in CI.
+                    ["rg", "-l", needle, "."],
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                ).stdout
+                found = [Path(line).as_posix() for line in found.splitlines()]
+                self.assertEqual(found, [".pm/decisions/D-1-sentinel.md"])
+
     def test_upgrade_preserves_project_data_and_edits(self):
         installed = self.run_init()
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)

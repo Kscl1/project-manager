@@ -38,6 +38,10 @@ When the owner states a preference, corrects how you work or drops an idea in pa
 11. Give the owner a short result and any decision needed. When you ask the owner to choose, first write the options in the task (what each is and what it costs), then ask by the thing's plain name with a one-line reminder of the earlier context, never by a task ID alone: the owner may answer days later in a new session. Anything the owner must read opens with a short plain summary, defines each term the first time, and adds a diagram only where it makes a flow clearer; evidence detail comes after.
 12. Turn repeated mistakes into a check or a simpler rule, with owner approval where needed. When you record a decision, search the open tasks and drafts for its topic and name the ones it answers or makes stale.
 
+## Finding things
+
+Answer "why did we choose X?" or "when did we see Y?" from the files, with the source path. Search with `rg -n 'pattern' .` from the project root (give the path: without one, rg may read its input instead of the files): the installer's `.ignore` lets ripgrep into `.pm/` and keeps `.pm/local/` out. Look in the decision index and its files, the final summaries of tasks (archived ones too), the worklogs, `.pm/lessons.md` if the project keeps one, and the project's own documentation map. Search in every language the project writes in, then open the hit and quote it; a search result alone is not a source. If nothing records the answer, say so.
+
 ## Holding and cancelling
 
 - Keep a Ready task or draft waiting on purpose only with `Review by: <date> · <owner> · <condition>` from the start; the condition names a task, a decision or a date (`templates/live-block.md`). `pm_board --resume` flags one without it after 14 days.
