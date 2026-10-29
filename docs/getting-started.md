@@ -64,7 +64,7 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 | Install | One step at a time. It shows the command first; the project step also shows the installer's plan. | `y` runs, `s` skips, `c` copies, `r` checks again |
 | Done | What is ready, what is left, and how to open your project. | `o` opens Claude Desktop (Windows), `c` copies the commands |
 
-Nothing is installed until you press `y` on a step. A version above the tested one means **not tested yet**, not broken. Setup never rewrites a file of yours; it only adds lines at the end of `.gitignore` and `.gitattributes`. If your project already has its own `AGENTS.md`, git hooks, `.claude/settings.json` or `.mcp.json`, they are kept as they are and listed for `/pm-setup` to merge with you.
+Nothing is installed until you press `y` on a step. A version above the tested one means **not tested yet**, not broken. Setup never rewrites a file of yours; it only adds lines at the end of `.gitignore`, `.gitattributes` and `.ignore` (the last lets search tools such as ripgrep into the hidden `.pm/` folder). If your project already has its own `AGENTS.md`, git hooks, `.claude/settings.json` or `.mcp.json`, they are kept as they are and listed for `/pm-setup` to merge with you.
 
 **Stuck? Press `a`.** It copies a message for your coding agent, which can finish the setup without the TUI. If copying does not work, select the text on screen. `python tools/setup/bom.py --project <folder>` prints the same check and the commands; it installs nothing.
 
