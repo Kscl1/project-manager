@@ -49,9 +49,15 @@ class RenovateTests(unittest.TestCase):
         self.assertEqual(len(matches), 2)
         self.assertEqual({match["depName"] for match in matches}, {"mattpocock/skills"})
         for match in matches:
-            self.assertEqual(match["currentValue"], "main")
-            self.assertEqual(len(match["currentDigest"]), 40)
+            self.assertEqual(match["currentValue"], "v1.3.1")
         self.assertIn('ref = "mattpocock/skills@49dd158 (grilling)"', self.bom)
+
+    def test_watches_follow_releases_not_commits(self):
+        # The owner wants a PR only when upstream publishes a release, never for each branch commit.
+        for manager in self.config["customManagers"]:
+            self.assertNotIn(manager.get("datasourceTemplate"), {"github-digest", "git-refs"})
+            self.assertNotIn("currentDigest", " ".join(manager["matchStrings"]))
+        self.assertNotIn("upstream_commit", self.bom)
 
     def test_likec4_skill_moves_with_the_cli_pin(self):
         # Its main branch documents unreleased syntax; the skill follows the release the CLI pin names.
