@@ -22,7 +22,7 @@ jobs:
           echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
           sudo tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks
       - name: ripgrep, for the installer's search test
-        run: command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)
+        run: (command -v rg || (sudo apt-get update -q && sudo apt-get install -y -q ripgrep)) && rg --version
       - name: Secret scan, whole history (blocks)
         run: gitleaks git --redact --no-banner .
       - name: Python lint and format (blocks)

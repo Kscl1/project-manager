@@ -39,9 +39,9 @@ PACKAGE = ["tools", "tests", "hooks", "roles", "templates"]  # refreshed by --up
 SEED = ["README.md", "board.md", "principles.md", "models.md"]  # the project may tune these, so written once
 DATA_DIRS = ["backlog/tasks", "backlog/drafts", "backlog/archive/tasks", "worklog", "specs", "decisions/archive"]
 GITIGNORE = [".pm/local/", ".pm-report.md", ".worktrees/", "__pycache__/"]
-# ripgrep skips hidden folders, so a plain search misses decisions, tasks and worklogs; .gitignore still keeps
-# .pm/local/ out of it.
-IGNORE = ["!.pm/"]
+# ripgrep skips hidden folders, so a plain search misses decisions, tasks and worklogs. .pm/local/ is named again
+# because ripgrep reads .gitignore only inside a git repository.
+IGNORE = ["!.pm/", ".pm/local/"]
 # LF everywhere in the package: the hook is a shell script and breaks with CRLF on Windows.
 GITATTRIBUTES = [
     ".pm/** text eol=lf",

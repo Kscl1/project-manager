@@ -226,25 +226,31 @@ class PmInitTest(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("rg"), "ripgrep is required for the search check")
     def test_plain_rg_finds_pm_records_but_not_local_or_git_ignored_files(self):
-        self.assertEqual(self.run_init().returncode, 0)
         needle = "needle" + "-4711"  # split, because the installed copy of this test sits in .pm/tests/ too
-        with (self.root / ".gitignore").open("a", encoding="utf-8") as out:
-            out.write("build/\n")
-        for relative in (".pm/decisions/D-1-sentinel.md", ".pm/local/scratch/note.md", "build/out.txt"):
-            path = self.root / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(needle + "\n", encoding="utf-8")
+        plain = Path(tempfile.mkdtemp(prefix="pm_nogit_"))  # ripgrep reads .gitignore only inside a git repository
+        self.addCleanup(shutil.rmtree, plain, onerror=_remove_readonly)
+        for root, git_ignored in ((self.root, "build/out.txt"), (plain, None)):
+            with self.subTest(git=git_ignored is not None):
+                self.assertEqual(self.run_init(root).returncode, 0)
+                with (root / ".gitignore").open("a", encoding="utf-8") as out:
+                    out.write("build/\n")
+                for relative in (".pm/decisions/D-1-sentinel.md", ".pm/local/scratch/note.md", git_ignored):
+                    if relative:
+                        path = root / relative
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(needle + "\n", encoding="utf-8")
 
-        found = subprocess.run(
-            # An explicit path: without one, rg reads stdin when stdin is not a terminal, as in CI.
-            ["rg", "-l", needle, "."],
-            cwd=self.root,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-        ).stdout
-        self.assertEqual([Path(line).as_posix() for line in found.splitlines()], [".pm/decisions/D-1-sentinel.md"])
+                found = subprocess.run(
+                    # An explicit path: without one, rg reads stdin when stdin is not a terminal, as in CI.
+                    ["rg", "-l", needle, "."],
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                ).stdout
+                found = [Path(line).as_posix() for line in found.splitlines()]
+                self.assertEqual(found, [".pm/decisions/D-1-sentinel.md"])
 
     def test_upgrade_preserves_project_data_and_edits(self):
         installed = self.run_init()

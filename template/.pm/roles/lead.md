@@ -40,7 +40,7 @@ When the owner states a preference, corrects how you work or drops an idea in pa
 
 ## Finding things
 
-Answer "why did we choose X?" or "when did we see Y?" from the files, with the source path. Search with `rg -n 'pattern' .` from the project root (give the path: without one, rg may read its input instead of the files): the installer's `.ignore` lets ripgrep into `.pm/`, while `.gitignore` keeps `.pm/local/` out. Look in the decision index and its files, the final summaries of tasks (archived ones too), the worklogs, `.pm/lessons.md` if the project keeps one, and the project's own documentation map. Search in every language the project writes in, then open the hit and quote it; a search result alone is not a source. If nothing records the answer, say so.
+Answer "why did we choose X?" or "when did we see Y?" from the files, with the source path. Search with `rg -n 'pattern' .` from the project root (give the path: without one, rg may read its input instead of the files): the installer's `.ignore` lets ripgrep into `.pm/` and keeps `.pm/local/` out. Look in the decision index and its files, the final summaries of tasks (archived ones too), the worklogs, `.pm/lessons.md` if the project keeps one, and the project's own documentation map. Search in every language the project writes in, then open the hit and quote it; a search result alone is not a source. If nothing records the answer, say so.
 
 ## Holding and cancelling
 
