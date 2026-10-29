@@ -40,7 +40,7 @@ class RenovateTests(unittest.TestCase):
     def test_herdr_candidate_not_tested(self):
         matches = [match for pattern in self.patterns(1) for match in pattern.finditer(self.bom)]
         self.assertEqual(len(matches), 1)
-        self.assertEqual(matches[0]["currentValue"], "0.9.5")
+        self.assertRegex(matches[0]["currentValue"], r"^\d+\.\d+\.\d+$")
         self.assertIn('tested = "0.9.5"', self.bom)
         self.assertIn("https://herdr.dev/latest.json", str(self.config["customDatasources"]))
 
@@ -49,7 +49,8 @@ class RenovateTests(unittest.TestCase):
         self.assertEqual(len(matches), 2)
         self.assertEqual({match["depName"] for match in matches}, {"mattpocock/skills"})
         for match in matches:
-            self.assertEqual(match["currentValue"], "v1.3.1")
+            # Any release tag: Renovate bumps it, so pinning one value would fail every release PR.
+            self.assertRegex(match["currentValue"], r"^v?\d+\.\d+\.\d+$")
         self.assertIn('ref = "mattpocock/skills@49dd158 (grilling)"', self.bom)
 
     def test_watches_follow_releases_not_commits(self):
