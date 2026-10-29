@@ -4,6 +4,20 @@
   "automerge": false,
   "dependencyDashboard": true,
   "prConcurrentLimit": 3,
+  "schedule": ["* * * * 6"],
+  "updateNotScheduled": false,
+  "packageRules": [
+    {
+      "description": "One weekly pull request for every minor and patch update; a major still gets its own",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "tool and skill updates"
+    },
+    {
+      "description": "A release waits a week, so quick fix releases arrive together; Herdr's manifest has no release date, so it is not held",
+      "matchDatasources": ["npm", "github-releases"],
+      "minimumReleaseAge": "7 days"
+    }
+  ],
   "prBodyNotes": [
     "Discovery only: this update does not certify compatibility. Minimum and tested versions must remain human-reviewed evidence.",
     "Review the upstream diff and all matching setup/docs/runtime pins before release. Skill candidates do not replace vendored files; reapply local changes and run the selection checks.",
