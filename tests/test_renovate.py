@@ -51,7 +51,7 @@ class RenovateTests(unittest.TestCase):
         for match in matches:
             # Any release tag: Renovate bumps it, so pinning one value would fail every release PR.
             self.assertRegex(match["currentValue"], r"^v?\d+\.\d+\.\d+$")
-        self.assertIn('ref = "mattpocock/skills@49dd158 (grilling)"', self.bom)
+        self.assertIn('ref = "mattpocock/skills@d1478fc (grilling, v1.3.2)"', self.bom)
 
     def test_watches_follow_releases_not_commits(self):
         # The owner wants a PR only when upstream publishes a release, never for each branch commit.
