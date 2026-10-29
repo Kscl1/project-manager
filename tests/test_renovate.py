@@ -29,6 +29,17 @@ class RenovateTests(unittest.TestCase):
         for manager in self.config["customManagers"]:
             self.assertEqual(manager["managerFilePatterns"], ["/^tools/setup/bom\\.toml$/"])
 
+    def test_weekly_grouped_rhythm(self):
+        # The owner wants one pull request a week before the weekly Sunday look, not one per release.
+        self.assertEqual(self.config["schedule"], ["* * * * 6"])
+        self.assertIs(self.config["updateNotScheduled"], False)
+        group, age = self.config["packageRules"]
+        self.assertEqual(group["matchUpdateTypes"], ["minor", "patch"])  # a major stays its own pull request
+        self.assertIn("groupName", group)
+        self.assertEqual(age["minimumReleaseAge"], "7 days")
+        # Herdr's custom datasource has no release date; Renovate would hold it forever.
+        self.assertEqual(age["matchDatasources"], ["npm", "github-releases"])
+
     def test_npm_pins_cover_setup_commands(self):
         matches = [match for pattern in self.patterns(0) for match in pattern.finditer(self.bom)]
         self.assertEqual(
