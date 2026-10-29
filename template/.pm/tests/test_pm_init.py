@@ -236,7 +236,13 @@ class PmInitTest(unittest.TestCase):
             path.write_text(needle + "\n", encoding="utf-8")
 
         found = subprocess.run(
-            ["rg", "-l", needle], cwd=self.root, capture_output=True, text=True, encoding="utf-8"
+            # An explicit path: without one, rg reads stdin when stdin is not a terminal, as in CI.
+            ["rg", "-l", needle, "."],
+            cwd=self.root,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         ).stdout
         self.assertEqual([Path(line).as_posix() for line in found.splitlines()], [".pm/decisions/D-1-sentinel.md"])
 
