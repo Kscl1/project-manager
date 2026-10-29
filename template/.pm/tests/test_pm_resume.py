@@ -365,7 +365,7 @@ class ResumeSummaryTest(unittest.TestCase):
         run_git(self.root, "commit", "-m", subject, "-m", body, "--date", f"{day}T12:00:00")
         return run_git(self.root, "log", "-1", "--format=%h").strip()
 
-    def run_tool(self, *args):
+    def run_tool(self, *args, env=None):
         return subprocess.run(
             [sys.executable, str(self.root / ".pm" / "tools" / "pm_resume.py"), *args],
             cwd=self.root,
@@ -373,6 +373,7 @@ class ResumeSummaryTest(unittest.TestCase):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env=env,
         )
 
     def test_did_lists_tasks_closed_that_day_with_that_days_commits(self):
@@ -397,6 +398,19 @@ class ResumeSummaryTest(unittest.TestCase):
         for absent in ("TASK-2", "TASK-3", "Next: none"):
             self.assertNotIn(absent, out)
         self.assertIn("- (no task closed on 2025-07-01)", self.run_tool("--did", "2025-07-01").stdout)
+
+    def test_did_reads_the_explicit_utc_stamps_of_backlog_1_55_as_local_days(self):
+        # 20:00 UTC on 4 June is 5 June at UTC+9, in the old form and in the 'T...Z' form Backlog writes since 1.55.
+        for task_id, stamp in (("TASK-1", "2025-06-04T20:00:00Z"), ("TASK-2", "2025-06-04 20:00")):
+            path = write_task(self.root, task_id, f"Closed {task_id}", "Done")
+            text = path.read_text(encoding="utf-8").replace("labels: []", f"labels: []\nupdated_date: '{stamp}'")
+            text += "\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\nNext: none.\n"
+            path.write_text(text + "<!-- SECTION:FINAL_SUMMARY:END -->\n", encoding="utf-8")
+
+        out = self.run_tool("--did", "2025-06-05", env={**os.environ, "TZ": "JST-9"}).stdout
+
+        self.assertIn("- TASK-1 · Closed TASK-1: Done.", out)
+        self.assertIn("- TASK-2 · Closed TASK-2: Done.", out)
 
     def test_commits_lists_one_tasks_commits_and_models(self):
         first = self.commit_with("feat: one", "Refs: TASK-1\nAssisted-by: Model A (high)", "2025-06-01")

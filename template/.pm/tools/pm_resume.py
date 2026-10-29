@@ -137,7 +137,8 @@ def shorten(text, limit):
 def closed_lines(tasks):
     """The last few Done tasks with a closing summary, newest first by updated_date."""
     done = [task for task in tasks if task["status"] == "Done" and task["summary"]]
-    done.sort(key=lambda task: (task["updated"], task_order(task)), reverse=True)
+    # Old and new Backlog stamps ('... 16:39', '...T16:39:00Z') sort as one form.
+    done.sort(key=lambda task: (task["updated"][:16].replace("T", " "), task_order(task)), reverse=True)
     lines = []
     for task in done[:CLOSED_SHOWN]:
         lines.append(f"- {task['id']} · {task['title']} ({task['updated'][:10] or '?'})")
@@ -591,9 +592,15 @@ def audit_warnings(tasks):
 
 
 def local_day(stamp):
-    """Backlog writes updated_date in UTC ('2026-10-13 00:05'); the day a person means is the local one."""
+    """Backlog writes updated_date in UTC ('2026-10-13 00:05', since 1.55 '2026-10-13T00:05:00Z'); the day a person
+    means is the local one."""
     try:
-        return datetime.strptime(stamp[:16], "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc).astimezone().date()
+        return (
+            datetime.strptime(stamp[:16].replace("T", " "), "%Y-%m-%d %H:%M")
+            .replace(tzinfo=timezone.utc)
+            .astimezone()
+            .date()
+        )
     except ValueError:
         return as_date(stamp)
 
