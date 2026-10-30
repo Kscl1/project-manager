@@ -54,6 +54,10 @@ If you installed swarm, also run `python -m unittest discover -s .pm/swarm`; the
 
 The release's [bill of materials](https://github.com/Kscl1/project-manager/blob/main/tools/setup/bom.toml) is the command source. `min` is a support floor, `tested` is evidence from human-run checks, and `install.*` contains the actual pin where the installer supports one. They need not be equal. An installed version above `tested` is **not tested yet**, not automatically broken.
 
+The upgrade in step 2 ends with a short list, "Programs on this machine against this release": each program that is missing or below `min` (needed), older than a pinned `tested` version (optional) or newer than it (keep it unless something breaks), with its command. Nothing is installed. Your agent reads the list, explains each line and runs a command only after you say yes. To see it again: `python tools/setup/bom.py --updates --layers core,map,swarm`.
+
+To hear about new releases, open the repository on GitHub and choose **Watch → Custom → Releases**.
+
 Use the setup TUI or its read-only inventory after switching releases:
 
 ```bash

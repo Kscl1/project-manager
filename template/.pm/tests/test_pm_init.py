@@ -29,10 +29,15 @@ class PmInitTest(unittest.TestCase):
         self.root = Path(tempfile.mkdtemp(prefix="pm_init_test_"))
         self.addCleanup(shutil.rmtree, self.root, onerror=_remove_readonly)
         subprocess.run([GIT, "init", "-q"], cwd=self.root, check=True)
+        # The real program check runs every tool's version command; a fake prints the arguments it was given.
+        self.fake_bom = Path(tempfile.mkdtemp(prefix="pm_init_bom_")) / "bom.py"
+        self.addCleanup(shutil.rmtree, self.fake_bom.parent)
+        self.fake_bom.write_text("import sys\nprint('FAKE BOM', *sys.argv[1:])\n", encoding="utf-8")
 
     def run_init(self, target=None, *args):
         return subprocess.run(
             [sys.executable, str(PM_INIT), str(target or self.root), *args],
+            env={**os.environ, "PM_BOM_TOOL": str(self.fake_bom)},
             cwd=self.root,
             capture_output=True,
             text=True,
@@ -681,6 +686,62 @@ class PmInitTest(unittest.TestCase):
         self.assertTrue(text.startswith(own), "the user's lines and fenced examples stay as they were")
         self.assertIn("## Language\n\nLanguage: tr\n", text)
         self.assertEqual(self.run_init(self.root, "--lang", "tr").stdout.count("  set "), 0, "a rerun finds the line")
+
+    def test_upgrade_lists_the_programs_that_differ_from_the_release(self):
+        first = self.run_init(self.root)
+        dry = self.run_init(self.root, "--upgrade", "--dry-run")
+        upgrade = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(upgrade.returncode, 0, upgrade.stdout + upgrade.stderr)
+        self.assertNotIn("FAKE BOM", first.stdout, "a first install leaves programs to the setup TUI")
+        self.assertNotIn("FAKE BOM", dry.stdout, "a dry run only lists package files")
+        self.assertIn("Programs on this machine against this release (nothing was installed):", upgrade.stdout)
+        self.assertIn("FAKE BOM --updates --layers core\n", upgrade.stdout)
+        self.assertLess(upgrade.stdout.index("FAKE BOM"), upgrade.stdout.index("Next:"))
+
+    def test_a_crashing_program_check_never_stops_the_upgrade(self):
+        self.run_init(self.root)
+        # A crash exits 1 like a valid "needed" result; its traceback tells them apart.
+        self.fake_bom.write_text(
+            "print('partial')\nraise UnicodeEncodeError('cp1252', 'ı', 0, 1, 'x')\n", encoding="utf-8"
+        )
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("The program check could not run (UnicodeEncodeError: ", result.stdout)
+        self.assertIn("The upgrade itself is done", result.stdout)
+        self.assertIn("Next:", result.stdout)
+
+    def test_upgrade_without_the_program_list_says_nothing_about_programs(self):
+        self.run_init(self.root)
+        self.fake_bom.unlink()  # an installed project used as the source has no tools/setup
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Programs on this machine", result.stdout)
+
+    def test_an_installed_project_as_the_source_never_runs_a_script_above_it(self):
+        # Even a project in a folder named template, the checkout's own name, with a program list above it.
+        source, target = self.root / "template", self.root / "target"
+        for folder in (source, target):
+            folder.mkdir()
+            subprocess.run([GIT, "init", "-q"], cwd=folder, check=True)
+        self.assertEqual(self.run_init(source).returncode, 0)
+        outer = self.root / "tools" / "setup" / "bom.py"  # where the checkout's list would sit, seen from source/.pm
+        outer.parent.mkdir(parents=True)
+        outer.write_text("print('OUTER SCRIPT RAN')\n", encoding="utf-8")
+        outer.with_name("bom.toml").write_text("", encoding="utf-8")
+        env = {key: value for key, value in os.environ.items() if key != "PM_BOM_TOOL"}
+        installed = [sys.executable, str(source / ".pm" / "tools" / "pm_init.py"), str(target)]
+
+        subprocess.run(installed, env=env, check=True, capture_output=True)
+        result = subprocess.run([*installed, "--upgrade"], env=env, capture_output=True, text=True, encoding="utf-8")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("OUTER SCRIPT RAN", result.stdout)
+        self.assertNotIn("Programs on this machine", result.stdout)
 
     def test_check_prints_the_plan_and_writes_nothing(self):
         result = self.run_init(self.root, "--check")

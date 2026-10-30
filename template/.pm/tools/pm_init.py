@@ -23,6 +23,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
   the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
   in .pm/tools may run on its own project with --lang only, so /pm-setup can set the language later.
+- After an upgrade from the project-manager checkout, the programs on this machine (Backlog.md, Pi and the rest)
+  are compared with the release's tested versions (tools/setup/bom.py --updates); nothing is installed.
 - A second run with the same arguments changes nothing.
 
 For a clean package, install from the canonical source (template/.pm in project-manager): an installed
@@ -32,6 +34,7 @@ project's .pm/ also carries that project's own edits to its package files.
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -93,6 +96,22 @@ SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
+BOM_TIMEOUT_S = 180  # the program check after an upgrade; each program's own check has a shorter limit
+
+
+def checkout_bom():
+    """The release's program check, only when this package is the project-manager checkout's template/.pm.
+
+    Every installed .pm carries a VERSION stamp and the checkout's has none, so an installed project used as the
+    source, even one in a folder named template, never runs a script from the folder above it.
+    """
+    setup = PKG.parent.parent / "tools" / "setup"
+    if PKG.parent.name != "template" or (PKG / "VERSION").exists() or not (setup / "bom.toml").is_file():
+        return None
+    return setup / "bom.py"
+
+
+BOM_TOOL = Path(os.environ["PM_BOM_TOOL"]) if os.environ.get("PM_BOM_TOOL") else checkout_bom()  # tests: a fake
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -254,6 +273,31 @@ def write_once(dst, text=None, src=None):
     else:
         dst.write_text(text, encoding="utf-8", newline="\n")
     say("write", dst)
+
+
+def tool_layers(target):
+    """The layers the project has, for the program check: core, then map and swarm when installed."""
+    has_map = any((target / ".agents" / "skills" / name).is_dir() for name in MAP_SKILLS)
+    return ["core", *(["map"] if has_map else []), *(["swarm"] if (target / ".pm" / SWARM).is_dir() else [])]
+
+
+def tool_updates(target):
+    """Print which programs differ from what this release was tested with, for the agent to raise with the user."""
+    if BOM_TOOL is None or not BOM_TOOL.is_file():
+        return
+    print("\nPrograms on this machine against this release (nothing was installed):", flush=True)
+    command = [sys.executable, str(BOM_TOOL), "--updates", "--layers", ",".join(tool_layers(target))]
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # a path with ı or ş must not crash a cp1252 console
+    try:
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=BOM_TIMEOUT_S
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        result = subprocess.CompletedProcess(command, -1, "", str(error))
+    print(result.stdout, end="")
+    if result.returncode not in (0, 1) or "Traceback" in result.stderr:  # 1 only means a program is needed
+        print(f"  The program check could not run ({(result.stderr.strip().splitlines() or ['no output'])[-1]}).")
+        print("  The upgrade itself is done; run the check again later.")
 
 
 def run(command, cwd):
@@ -722,6 +766,8 @@ def main(argv=None):
         print("\nMerge by hand (the installer never rewrites a file of yours):")
         for line in merge:
             print(f"  {line}")
+    if not first:
+        tool_updates(target)
     print("\nNext:")
     if first:
         print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")
