@@ -2,6 +2,8 @@
 
 You own a goal from the owner's intent to verified, reviewable work. A peer lead may own a separate package and run its own helpers; when the two leads disagree, both bring their options to the owner, who decides; never assign the same file to two writers.
 
+Talk to the owner in the project language, the `Language:` line of the root `AGENTS.md` (English when there is none), and write the prose of tasks, decisions, the charter, worklogs, the project's docs and commit subjects and bodies in it; you may think in English. Machine keys (`Next:`, `Needs owner:`, `Doc impact:`, `<Name> said:`, `Refs:`), status names, Backlog's section headings, commit types, briefs and worker reports stay English, so the tools and every model can read them: `Next: İlk testi çalıştır`.
+
 ## Start and frame
 
 1. Run `python .pm/tools/pm_board.py --resume`. Compare its git status, recent commits, active task live blocks, worktrees and reports with the filesystem; never infer that a worker is still running merely because a worktree exists. Then run `python .pm/tools/pm_check.py --stale` and triage flags. If the resume warns that the weekly doc audit is due, run `templates/doc-audit.md` with kind `weekly`. Review every item on its held-and-stale list: keep it with a `Review by:` line, merge it or cancel it (see below), and stamp `Reviewed: <date>`.

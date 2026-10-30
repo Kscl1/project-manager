@@ -92,6 +92,8 @@ python template/.pm/tools/pm_init.py ../my-project
 
 `--check` prints everything it would write and writes nothing. If your project already has its own agent instructions, Backlog.md or git hooks, the installer stops; run it again with `--keep-existing` to install and keep yours. A second run changes nothing.
 
+**Your language.** Add `--lang tr` (or another language code) and the agent talks to you and writes tasks, decisions, worklogs and commit messages in that language. Keys such as `Next:` and status names such as `Done` stay English, because the tools read them: `Next: İlk testi çalıştır`. The flag writes one `Language: tr` line in `AGENTS.md` and Claude Code's `language` setting in the project's `.claude/settings.json`, so it holds for everyone who opens the project (a settings file of your own is listed for `/pm-setup` instead); without it, `/pm-setup` asks once. To change it later, run `python .pm/tools/pm_init.py . --lang <code>` in the project; older records are not translated. When a task or decision still reads as English, `pm_check` prints an `Info:` line about it and passes.
+
 ## Map layer (optional)
 
 [LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.60.0 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.60.0) teaches it the syntax; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
