@@ -834,6 +834,67 @@ class DoneTaskTest(RepoTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
 
+ENGLISH_NOTES = (
+    "The worker writes the report after the check passes, and the lead reads it before the merge. "
+    "When a check fails, the lead sends the evidence back to the worker with the command that failed. "
+    "This keeps the work and its proof in one place, so the next session can see what was done and why."
+)
+TURKISH_NOTES = (
+    "Çalışan kontrol geçince raporu yazar, lead de birleştirmeden önce okur. Bir kontrol düşerse lead kanıtı "
+    "ve düşen komutu çalışana geri gönderir. Böylece iş ve kanıtı tek yerde durur; bir sonraki oturum neyin "
+    "yapıldığını ve nedenini görür. `pm_check` ve `backlog task edit` gibi komutlar ve dosya adları İngilizce kalır."
+)
+
+
+class ProjectLanguageTest(RepoTestCase):
+    """In a project whose AGENTS.md names a non-English language, English record prose gets an Info line only."""
+
+    def record(self, relpath, notes, lang="tr"):
+        if lang:
+            self.write("AGENTS.md", f"# Demo\n\n## Language\n\nLanguage: {lang}\n")
+        dod = "- [ ] #1 Living docs this task affects are updated, and the final summary says so in one line"
+        return self.write(
+            relpath,
+            "---\nid: TASK-1\ntitle: Demo\nstatus: Active\ntype: task\n---\n\n## Description\n\n"
+            f"{notes}\n\n## Definition of Done\n<!-- DOD:BEGIN -->\n{dod}\n<!-- DOD:END -->\n\n"
+            "## Implementation Notes\n\nNext: Needs owner: none\n",
+        )
+
+    def test_english_task_prose_in_a_turkish_project_gets_an_info_line_and_passes(self):
+        self.record(".pm/backlog/tasks/task-1 - Demo.md", ENGLISH_NOTES)
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Info: .pm/backlog/tasks/task-1 - Demo.md: reads as English", result.stdout)
+        self.assertIn("No problems found", result.stdout)
+
+    def test_english_decision_prose_gets_an_info_line(self):
+        self.write(".pm/decisions.md", "# Decisions\n")
+        self.record(".pm/decisions/D-01.md", ENGLISH_NOTES)
+
+        self.assertIn("Info: .pm/decisions/D-01.md: reads as English", self.run_check().stdout)
+
+    def test_turkish_prose_with_english_keys_and_commands_is_quiet(self):
+        self.record(".pm/backlog/tasks/task-1 - Demo.md", TURKISH_NOTES)
+
+        self.assertNotIn("Info:", self.run_check().stdout)
+
+    def test_english_or_unset_language_and_short_bodies_are_quiet(self):
+        for lang, notes in (("en", ENGLISH_NOTES), ("", ENGLISH_NOTES), ("tr", "The check passed after the fix.")):
+            with self.subTest(lang=lang, notes=notes[:20]):
+                (self.root / "AGENTS.md").unlink(missing_ok=True)
+                self.record(".pm/backlog/tasks/task-1 - Demo.md", notes, lang)
+
+                self.assertNotIn("Info:", self.run_check().stdout)
+
+    def test_a_language_line_outside_its_heading_sets_nothing(self):
+        self.record(".pm/backlog/tasks/task-1 - Demo.md", ENGLISH_NOTES, lang="")
+        self.write("AGENTS.md", "# Demo\n\nLanguage: Python\n\n```text\n## Language\n\nLanguage: tr\n```\n")
+
+        self.assertNotIn("Info:", self.run_check().stdout)
+
+
 class AuditOutcomesTest(RepoTestCase):
     HEADER = "| # | Verified | Outcome | Evidence |\n|---|---|---|---|\n"
     REPORT = ".pm/local/audits/demo/report.md"
