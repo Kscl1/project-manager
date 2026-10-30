@@ -54,6 +54,10 @@ Sürü (`swarm`) katmanını kurduysan `python -m unittest discover -s .pm/swarm
 
 Komutların kaynağı, sürümün [malzeme listesidir (`bill of materials` / BOM)](https://github.com/Kscl1/project-manager/blob/main/tools/setup/bom.toml). Burada `min` desteklenen en düşük sürümü, `tested` insan tarafından çalıştırılan kontrollerle doğrulanmış sürümü, `install.*` ise kurucu destekliyorsa sabitlenmiş (`pinned`) kurulum sürümünü gösterir. Bu üç değerin birbirine eşit olması şart değildir. Kurulu bir sürümün `tested` değerinden yüksek olması, bozuk olduğu değil **henüz test edilmediği** anlamına gelir.
 
+2. adımdaki yükseltme kısa bir listeyle biter: "Programs on this machine against this release". Listede eksik ya da `min` altında olan (gerekli), sabitlenmiş `tested` sürümünden eski olan (isteğe bağlı) veya ondan yeni olan (bir şey bozulmadıkça kalsın) her program komutuyla yazılır. Hiçbir şey kurulmaz. Ajan listeyi okur, her satırı sana anlatır ve bir komutu yalnızca sen "evet" dersen çalıştırır. Listeyi yeniden görmek için: `python tools/setup/bom.py --updates --layers core,map,swarm`.
+
+Yeni sürümlerden haberdar olmak için depoyu GitHub'da aç ve **Watch → Custom → Releases** seç.
+
 Sürüm değiştirdikten sonra kurulum ekranını (`TUI`, metin tabanlı arayüz) veya onun salt okunur döküm komutunu kullan:
 
 ```bash

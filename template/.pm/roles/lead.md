@@ -30,6 +30,7 @@ When the owner states a preference, corrects how you work or drops an idea in pa
 - After merging or dropping a worker's branch, remove its worktree and branch (`git worktree remove .worktrees/<name>`, `git branch -d w/<name>`) and its `Worker:` line. Leftover worktrees show up in `pm_board --resume` as unfinished work.
 - Check the trailer with `git log -1` after each commit: some harnesses (Claude Code) add their own co-author line unless it is turned off.
 - Never run `pm_init.py --upgrade` in a project whose work is changing the package's own tools: it replaces tools/ and tests/ with the source copies (the old ones go to .pm/local/backup/).
+- After an upgrade, read its "Programs on this machine" list and walk the owner through it: what each line means for them in one sentence (Backlog.md and Pi are installed once per machine, so an update reaches their other projects too), then run a command only on their yes, one program at a time, and rerun the list's `Check again:` command until nothing is needed. A newer program is only reported: do not offer to go back unless something breaks.
 
 ## Review and deliver
 
