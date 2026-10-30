@@ -859,6 +859,52 @@ def staged_markdown_files():
     return [path for path in markdown_files() if path in staged]
 
 
+# The project language line pm_init writes in AGENTS.md, right under its "## Language" heading.
+LANGUAGE = re.compile(r"^## Language[ \t]*\n(?:[ \t]*\n)*Language: *(\S+)[ \t]*$", re.MULTILINE)
+FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
+# Common English words that other languages rarely use; a body with enough of them reads as English.
+ENGLISH_WORDS = frozenset(
+    "the and of to is are was were be been that this these with for from by which when what where will would should"
+    " could not but or if then than there their they has have had does into about after before only also each".split()
+)
+ENGLISH_SHARE = 0.08  # measured: English task notes 6-40% (median 16%), Turkish decisions at most 2.3%
+PROSE_MIN_WORDS = 40
+KEY_PREFIX = re.compile(r"^\s*(?:[-*]\s+)?(?:\[[ xX]\]\s+)?(?:#\d+\s+)?(?:[A-ZÇĞİÖŞÜ][\w'-]*(?: [\w'<>-]+){0,2}:\s)?")
+
+
+def project_language():
+    """The code on the Language line of the root AGENTS.md, or '' when it is missing or English."""
+    path = ROOT / "AGENTS.md"
+    text = FENCE.sub("", path.read_text(encoding="utf-8")) if path.is_file() else ""
+    found = LANGUAGE.search(text)
+    code = found.group(1).lower() if found else ""
+    return "" if code.split("-")[0] in ("", "en") else code
+
+
+def reads_english(lines):
+    """A record body of 40+ words whose prose reads as English. Frontmatter, fenced examples, headings, comments,
+    inline code, link targets, a line's leading key and Backlog's Definition of Done (the package's text) are skipped."""
+    if lines and lines[0].strip() == "---":
+        lines = lines[next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), 0) + 1 :]
+    words, skip = [], False
+    for line in unfenced_lines(lines):
+        if re.match(r"^\s{0,3}#{1,6}\s", line):
+            skip = line.strip("# ").strip() == "Definition of Done"
+            continue
+        if skip:
+            continue
+        line = INLINE_CODE.sub(" ", re.sub(r"<!--.*?-->|\]\([^)]*\)|https?://\S+", " ", line))
+        words += re.findall(r"[^\W\d_]+", KEY_PREFIX.sub("", line).lower())
+    common = sum(word in ENGLISH_WORDS for word in words)
+    return len(words) >= PROSE_MIN_WORDS and common >= ENGLISH_SHARE * len(words)
+
+
+def is_record(path):
+    name = rel(path)
+    in_decisions = DECISION_DIR and path.parent == DECISION_DIR and DECISION_FILE.match(path.stem)
+    return name.startswith(TASK_DIRS + DRAFT_DIRS) or bool(in_decisions)
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -887,8 +933,14 @@ def main():
     problems += check_worklogs()
     problems += check_catalogue()
     files = staged_markdown_files() if "--staged" in sys.argv else markdown_files()
+    language = project_language()
     for path in files:
         problems += check_file(path, decisions)
+        if language and is_record(path) and reads_english(path.read_text(encoding="utf-8").splitlines()):
+            print(
+                f"Info: {rel(path)}: reads as English, but AGENTS.md sets Language: {language}\n"
+                f"    → write the prose in the project language; keys such as Next: stay English (not a failure)"
+            )
 
     for problem in problems:
         print(problem)

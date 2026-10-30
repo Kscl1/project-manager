@@ -19,6 +19,10 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and writes nothing; --keep-existing installs
   and keeps those files as they are. --check prints the plan and the conflicts only. The project's own git hooks
   are never bypassed, on any run: core.hooksPath is set only when it is unset and there are none.
+- --lang <code> sets the project language: one 'Language: <code>' line under a '## Language' heading in AGENTS.md
+  (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
+  the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
+  in .pm/tools may run on its own project with --lang only, so /pm-setup can set the language later.
 - A second run with the same arguments changes nothing.
 
 For a clean package, install from the canonical source (template/.pm in project-manager): an installed
@@ -28,6 +32,7 @@ project's .pm/ also carries that project's own edits to its package files.
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +69,25 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
+# Claude Code's language setting takes a language name, not a code; an unknown code is written as it is.
+LANG_NAMES = {
+    "ar": "arabic", "az": "azerbaijani", "de": "german", "en": "english", "es": "spanish", "fa": "persian",
+    "fr": "french", "it": "italian", "ja": "japanese", "ko": "korean", "nl": "dutch", "pl": "polish",
+    "pt": "portuguese", "ru": "russian", "tr": "turkish", "uk": "ukrainian", "zh": "chinese",
+}  # fmt: skip
+# Only the line right under a "## Language" heading counts: a fenced example or a "Language: Python" line is not it.
+LANG_LINE = re.compile(r"^## Language[ \t]*\n(?:[ \t]*\n)*Language: *(\S*)[ \t]*$", re.MULTILINE)
+FENCE = re.compile(r"^(`{3,}|~{3,}).*?^\1[ \t]*$", re.MULTILINE | re.DOTALL)
+LANG_SECTION = """
+## Language
+
+Language: {code}
+
+Talk to the user in this language and write the prose of every record in it: tasks, decisions, the charter, worklogs,
+the project's own docs, and commit subjects and bodies. Machine keys (`Next:`, `Needs owner:`, `Doc impact:`,
+`<Name> said:`, `Refs:`), status names, Backlog's section headings, file names, commit types, worker briefs and reports
+stay English. A change to this line affects only what is written next; older records are not translated.
+"""
 # Shipped skills sit next to the package; their names all start with pm-, a namespace apart from the user's own skills.
 SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
@@ -384,6 +408,68 @@ def missing_lines(target, name, wanted):
     return [line for line in wanted if line not in lines]
 
 
+def lang_code(value):
+    code = value.strip().lower()
+    if not re.fullmatch(r"[a-z]{2,3}(-[a-z0-9]{2,8})?", code):
+        raise argparse.ArgumentTypeError(f"{value!r} is not a language code such as tr, en or pt-br")
+    return code
+
+
+def lang_name(code):
+    return LANG_NAMES.get(code.split("-")[0], code)
+
+
+def language_line(text):
+    """The Language line under its heading, outside fenced examples, or None."""
+    fences = [match.span() for match in FENCE.finditer(text)]
+    return next((m for m in LANG_LINE.finditer(text) if not any(a <= m.start() < b for a, b in fences)), None)
+
+
+def language_plan(target, code):
+    """(path, note) for each file --lang changes, plus a merge line for a settings file pm_init does not rewrite."""
+    changes, merge = [], []
+    agents = target / "AGENTS.md"
+    found = language_line(agents.read_text(encoding="utf-8")) if agents.exists() else None
+    if not found or found.group(1) != code:
+        changes.append((agents, f"Language: {code}"))
+    settings, name = target / ".claude" / "settings.json", lang_name(code)
+    data = read_json(settings) if settings.exists() else {}
+    if isinstance(data, dict) and data.get("language") == name:
+        pass
+    elif isinstance(data, dict) and settings_action(target) != "merge":  # ours: written now or holding our hooks
+        changes.append((settings, f'language: "{name}"'))
+    else:  # the user's own file, or one pm_init cannot read: never rewritten
+        merge.append(f'- .claude/settings.json: add "language": "{name}"')
+    return changes, merge
+
+
+def set_language(target, code):
+    """Write the Language line and the Claude Code key; every other line and key stays as it is."""
+    agents = target / "AGENTS.md"
+    text = agents.read_text(encoding="utf-8") if agents.exists() else ""
+    found = language_line(text)
+    if found and found.group(1) == code:
+        say("keep", agents, f"Language: {code}")
+    else:
+        if found:
+            text = text[: found.start(1)] + code + text[found.end(1) :]
+        else:
+            text = (text.rstrip("\n") + "\n" if text else "") + LANG_SECTION.format(code=code)
+        agents.write_text(text, encoding="utf-8", newline="\n")
+        say("set", agents, f"Language: {code}")
+    settings = target / ".claude" / "settings.json"
+    data = read_json(settings) if settings.exists() else {}
+    if not isinstance(data, dict) or settings_action(target) == "merge":
+        say("skip", settings, "yours or unreadable; the language key is on the merge list")
+    elif data.get("language") == lang_name(code):
+        say("keep", settings, f'language: "{lang_name(code)}"')
+    else:
+        data["language"] = lang_name(code)
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        settings.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+        say("set", settings, f'language: "{lang_name(code)}"')
+
+
 def merge_items(target, args, conflicts):
     """Everything the user merges by hand, as '- item: how' lines for .pm/local/merge-by-hand.md."""
     items = [(item, MERGE_HOW[item]) for item, _ in conflicts]
@@ -392,7 +478,8 @@ def merge_items(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "merge":
         items += [(".mcp.json", f"add the {name} server: {json.dumps(config)}") for name, config in servers.items()]
-    return [f"- {item}: {how}" for item, how in items]
+    lang_merge = language_plan(target, args.lang)[1] if args.lang else []
+    return [f"- {item}: {how}" for item, how in items] + lang_merge
 
 
 MERGE_LIST = """# Merge by hand
@@ -472,6 +559,8 @@ def plan(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "write":
         entries.append(("write", target / ".mcp.json", ", ".join(servers)))
+    if args.lang:
+        entries += [("set", path, note) for path, note in language_plan(target, args.lang)[0]]
     if not version_is_current(target):
         entries.append(("write", target / ".pm" / "VERSION", "the package revision"))
     if new_merge_lines(target, merge_items(target, args, conflicts)):
@@ -487,6 +576,22 @@ def shown(target, path):
     return path.relative_to(target).as_posix() if isinstance(path, Path) else path
 
 
+def language_only(target, args):
+    """Set the project language from the project's own .pm/tools: the two places, nothing else."""
+    changes, merge = language_plan(target, args.lang)
+    print(f"Plan for {target} ({len(changes)} change(s)):")
+    for path, note in changes:
+        say("set", shown(target, path), note)
+    for line in merge:
+        print(f"  {line}")
+    if args.check:
+        return 0
+    keep_merge_list(target, merge)
+    if changes:
+        set_language(target, args.lang)
+    return 0
+
+
 def main(argv=None):
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Install or upgrade the .pm/ package in a project.")
@@ -496,6 +601,7 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true", help="with --upgrade: list what would change, write nothing")
     parser.add_argument("--map", action="store_true", help="also add the LikeC4 MCP server and skill")
     parser.add_argument("--swarm", action="store_true", help="also add pm_run, which runs workers in Herdr")
+    parser.add_argument("--lang", type=lang_code, help="the project language, e.g. tr: AGENTS.md line, Claude setting")
     parser.add_argument("--check", action="store_true", help="print the plan and the conflicts, write nothing")
     parser.add_argument(
         "--keep-existing", action="store_true", help="install even if the project has its own AGENTS.md, hooks..."
@@ -506,7 +612,9 @@ def main(argv=None):
     if not target.is_dir():
         sys.exit(f"{target} is not a directory")
     if (target / ".pm").resolve() == PKG:
-        sys.exit("this is the package's own project; install into another folder")
+        if not args.lang or any((args.name, args.upgrade, args.dry_run, args.map, args.swarm, args.keep_existing)):
+            sys.exit("this is the package's own project; install into another folder (only --lang may run here)")
+        return language_only(target, args)
     name = args.name or target.name
     # An installed project used as the source carries only the layers it chose. A layer asked for, or one the target
     # already has, must be in the source: otherwise the upgrade would drop it from the manifest and stop updating it.
@@ -589,6 +697,8 @@ def main(argv=None):
     if action == "write":
         text = json.dumps({"mcpServers": servers}, indent=2) + "\n"
         write_once(target / ".mcp.json", text=text)
+    if args.lang:
+        set_language(target, args.lang)
     write_version(target)
     keep_merge_list(target, merge)
 

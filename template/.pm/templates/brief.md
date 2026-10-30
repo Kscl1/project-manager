@@ -1,6 +1,6 @@
 # Brief: <leaf task ID and title>
 
-Fill each field before giving a leaf to a worker who has not seen this chat. Paste concrete upstream findings, not a transcript. The brief and its acceptance checks are the contract.
+Fill each field before giving a leaf to a worker who has not seen this chat. Paste concrete upstream findings, not a transcript. The brief and its acceptance checks are the contract. Write the brief in English whatever the project language, and ask for the report in English; quote the owner's words as they were said, and name the project language when the worker writes text the user will read.
 
 ```text
 GOAL        <One observable outcome, in one sentence.>

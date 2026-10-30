@@ -580,6 +580,108 @@ class PmInitTest(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertTrue(any(name == p or name.startswith(p + "/") for p in paths), paths)
 
+    def agents_text(self):
+        return (self.root / "AGENTS.md").read_text(encoding="utf-8")
+
+    def claude_settings(self):
+        return json.loads((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"))
+
+    def test_lang_writes_one_language_line_and_the_claude_setting(self):
+        result = self.run_init(self.root, "--lang", "tr")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = self.agents_text().splitlines()
+        self.assertEqual([line for line in lines if line.startswith("Language:")], ["Language: tr"])
+        self.assertIn("## Start here", lines, "the template is still written around the line")
+        settings = self.claude_settings()
+        self.assertEqual(settings["language"], "turkish")
+        self.assertIn("SessionStart", settings["hooks"])
+
+    def test_without_lang_no_language_is_written(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        self.assertNotIn("Language:", self.agents_text())
+        self.assertNotIn("language", self.claude_settings())
+
+    def test_lang_is_kept_by_a_rerun_and_an_upgrade(self):
+        self.assertEqual(self.run_init(self.root, "--lang", "tr").returncode, 0)
+        before = self.snapshot()
+
+        rerun = self.run_init(self.root, "--lang", "tr")
+        upgrade = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(rerun.returncode, 0, rerun.stdout + rerun.stderr)
+        self.assertEqual(upgrade.returncode, 0, upgrade.stdout + upgrade.stderr)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_a_later_lang_changes_only_the_line_and_the_key(self):
+        self.assertEqual(self.run_init(self.root, "--lang", "tr").returncode, 0)
+        agents = self.root / "AGENTS.md"
+        agents.write_text(self.agents_text() + "\nOur own rule stays.\n", encoding="utf-8")
+        settings = self.claude_settings()
+        settings["model"] = "ours"
+        (self.root / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
+        expected = self.agents_text().replace("Language: tr", "Language: en")
+
+        result = self.run_init(self.root, "--lang", "en")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.agents_text(), expected)
+        settings = self.claude_settings()
+        self.assertEqual((settings["language"], settings["model"]), ("english", "ours"))
+
+    def test_lang_from_the_projects_own_package_sets_only_the_language(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        installed = self.root / ".pm" / "tools" / "pm_init.py"
+        before = self.snapshot()[0]
+
+        def own(*args):
+            return subprocess.run(
+                [sys.executable, str(installed), str(self.root), *args], capture_output=True, text=True, cwd=self.root
+            )
+
+        self.assertNotEqual(own("--upgrade").returncode, 0, "only --lang may run on the package's own project")
+        self.assertEqual(own("--lang", "tr", "--check").returncode, 0)
+        self.assertEqual(self.snapshot()[0], before, "--check writes nothing")
+        result = own("--lang", "tr")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        after = self.snapshot()[0]
+        self.assertEqual(
+            {name for name in after if after[name] != before.get(name)}, {"AGENTS.md", ".claude/settings.json"}
+        )
+        self.assertIn("Language: tr", self.agents_text())
+
+        (self.root / ".claude" / "settings.json").write_text('["a"]', encoding="utf-8")
+        self.assertEqual(own("--lang", "tr").returncode, 0, "AGENTS.md already says tr: only the merge line is new")
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn('add "language": "turkish"', kept)
+
+    def test_lang_never_rewrites_a_settings_file_of_the_users_own(self):
+        for text in ("{ not json", '{"model": "ours"}'):
+            with self.subTest(settings=text):
+                (self.root / ".claude").mkdir(exist_ok=True)
+                (self.root / ".claude" / "settings.json").write_text(text, encoding="utf-8")
+
+                result = self.run_init(self.root, "--lang", "tr", "--keep-existing")
+
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"), text)
+                kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+                self.assertIn('add "language": "turkish"', kept)
+
+    def test_lang_reads_only_the_line_under_its_heading(self):
+        own = "# Our rules\n\nLanguage: Python 3.12\n\n```text\n## Language\n\nLanguage: en\n```\n"
+        (self.root / "AGENTS.md").write_text(own, encoding="utf-8")
+
+        result = self.run_init(self.root, "--lang", "tr", "--keep-existing")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        text = self.agents_text()
+        self.assertTrue(text.startswith(own), "the user's lines and fenced examples stay as they were")
+        self.assertIn("## Language\n\nLanguage: tr\n", text)
+        self.assertEqual(self.run_init(self.root, "--lang", "tr").stdout.count("  set "), 0, "a rerun finds the line")
+
     def test_check_prints_the_plan_and_writes_nothing(self):
         result = self.run_init(self.root, "--check")
 
