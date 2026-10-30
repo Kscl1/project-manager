@@ -34,12 +34,12 @@ Your project must be a Git repository. For a new project, create its folder and 
 In the folder that holds your project, clone project-manager **next to** it, not inside it, and give the TUI its own virtual environment (a folder that keeps its Python libraries apart from the rest of your system):
 
 ```bash
-git clone --branch v0.1.0-alpha.3 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.4 https://github.com/Kscl1/project-manager.git
 cd project-manager
 python -m venv tools/setup/.venv
 ```
 
-`--branch v0.1.0-alpha.3` installs the release, not the newest `main`. Git then reports a "detached HEAD": that is expected, it only means the clone sits on a release instead of a branch. Newer releases are listed on the [Releases](https://github.com/Kscl1/project-manager/releases) page.
+`--branch v0.1.0-alpha.4` installs the release, not the newest `main`. Git then reports a "detached HEAD": that is expected, it only means the clone sits on a release instead of a branch. Newer releases are listed on the [Releases](https://github.com/Kscl1/project-manager/releases) page.
 
 Then install its libraries and start it with your project folder.
 
