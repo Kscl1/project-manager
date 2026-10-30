@@ -699,6 +699,20 @@ class PmInitTest(unittest.TestCase):
         self.assertIn("FAKE BOM --updates --layers core\n", upgrade.stdout)
         self.assertLess(upgrade.stdout.index("FAKE BOM"), upgrade.stdout.index("Next:"))
 
+    def test_a_crashing_program_check_never_stops_the_upgrade(self):
+        self.run_init(self.root)
+        # A crash exits 1 like a valid "needed" result; its traceback tells them apart.
+        self.fake_bom.write_text(
+            "print('partial')\nraise UnicodeEncodeError('cp1252', 'ı', 0, 1, 'x')\n", encoding="utf-8"
+        )
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("The program check could not run (UnicodeEncodeError: ", result.stdout)
+        self.assertIn("The upgrade itself is done", result.stdout)
+        self.assertIn("Next:", result.stdout)
+
     def test_upgrade_without_the_program_list_says_nothing_about_programs(self):
         self.run_init(self.root)
         self.fake_bom.unlink()  # an installed project used as the source has no tools/setup
@@ -709,7 +723,8 @@ class PmInitTest(unittest.TestCase):
         self.assertNotIn("Programs on this machine", result.stdout)
 
     def test_an_installed_project_as_the_source_never_runs_a_script_above_it(self):
-        source, target = self.root / "source", self.root / "target"
+        # Even a project in a folder named template, the checkout's own name, with a program list above it.
+        source, target = self.root / "template", self.root / "target"
         for folder in (source, target):
             folder.mkdir()
             subprocess.run([GIT, "init", "-q"], cwd=folder, check=True)
@@ -717,6 +732,7 @@ class PmInitTest(unittest.TestCase):
         outer = self.root / "tools" / "setup" / "bom.py"  # where the checkout's list would sit, seen from source/.pm
         outer.parent.mkdir(parents=True)
         outer.write_text("print('OUTER SCRIPT RAN')\n", encoding="utf-8")
+        outer.with_name("bom.toml").write_text("", encoding="utf-8")
         env = {key: value for key, value in os.environ.items() if key != "PM_BOM_TOOL"}
         installed = [sys.executable, str(source / ".pm" / "tools" / "pm_init.py"), str(target)]
 

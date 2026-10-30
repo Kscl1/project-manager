@@ -385,7 +385,7 @@ def updates(items, rows, layers=DEFAULT_LAYERS, system=None):
 def update_lines(found):
     """Plain lines for an agent to explain to the user, one program each, then what to do with them."""
     if not found:
-        return ["Every program this project uses matches what this release was tested with."]
+        return ["Nothing to raise: no program is missing, below the minimum or behind a pinned tested version."]
     why = {
         "needed": "needed, below the minimum this release supports",
         "optional": "optional, works but is older than this release was tested with",
@@ -400,7 +400,8 @@ def update_lines(found):
         elif update["command"]:
             lines.append(f"   {update['command']}")
         else:
-            lines.append(f"   {update.get('note') or 'no install command for this system; install it by hand'}")
+            note = update.get("note")
+            lines.append(f"   no install command for this system; install it by hand{f'. {note}' if note else ''}")
     lines.append(
         "For the agent: tell the user what each line means for them in one sentence; a program such as Backlog.md "
         "or Pi is installed once for the whole machine, so an update also reaches their other projects. Run a "
@@ -656,7 +657,9 @@ def main(argv=None, run=probe):
         else:
             print("\n".join(update_lines(found)))
             if found:
-                print(f"Check again: python {Path(__file__).resolve()} --updates --layers {','.join(layers)}")
+                script = str(Path(__file__).resolve())
+                script = f'"{script}"' if " " in script else script  # a folder such as C:\Users\Example User
+                print(f"Check again: python {script} --updates --layers {','.join(layers)}")
         return 1 if any(update["need"] == "needed" for update in found) else 0
     rows = check_all(items, run, project)
     steps, notes = plan(items, rows, layers, project=project)

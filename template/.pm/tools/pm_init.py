@@ -96,10 +96,22 @@ SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
-# The release's program list, only in the project-manager checkout (template/.pm): an installed project used as the
-# source has none, and the folder above it is not ours to run. PM_BOM_TOOL lets the tests use a fake.
-CHECKOUT_BOM = PKG.parent.parent / "tools" / "setup" / "bom.py" if PKG.parent.name == "template" else None
-BOM_TOOL = Path(os.environ["PM_BOM_TOOL"]) if os.environ.get("PM_BOM_TOOL") else CHECKOUT_BOM
+BOM_TIMEOUT_S = 180  # the program check after an upgrade; each program's own check has a shorter limit
+
+
+def checkout_bom():
+    """The release's program check, only when this package is the project-manager checkout's template/.pm.
+
+    Every installed .pm carries a VERSION stamp and the checkout's has none, so an installed project used as the
+    source, even one in a folder named template, never runs a script from the folder above it.
+    """
+    setup = PKG.parent.parent / "tools" / "setup"
+    if PKG.parent.name != "template" or (PKG / "VERSION").exists() or not (setup / "bom.toml").is_file():
+        return None
+    return setup / "bom.py"
+
+
+BOM_TOOL = Path(os.environ["PM_BOM_TOOL"]) if os.environ.get("PM_BOM_TOOL") else checkout_bom()  # tests: a fake
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -275,8 +287,17 @@ def tool_updates(target):
         return
     print("\nPrograms on this machine against this release (nothing was installed):", flush=True)
     command = [sys.executable, str(BOM_TOOL), "--updates", "--layers", ",".join(tool_layers(target))]
-    if subprocess.run(command, check=False).returncode == 2:  # its own error is printed above; the upgrade stands
-        print("  The program check could not run; the upgrade itself is done.")
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}  # a path with ı or ş must not crash a cp1252 console
+    try:
+        result = subprocess.run(
+            command, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=BOM_TIMEOUT_S
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        result = subprocess.CompletedProcess(command, -1, "", str(error))
+    print(result.stdout, end="")
+    if result.returncode not in (0, 1) or "Traceback" in result.stderr:  # 1 only means a program is needed
+        print(f"  The program check could not run ({(result.stderr.strip().splitlines() or ['no output'])[-1]}).")
+        print("  The upgrade itself is done; run the check again later.")
 
 
 def run(command, cwd):

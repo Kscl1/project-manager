@@ -372,11 +372,12 @@ class Updates(unittest.TestCase):
             "2. Herdr 1.3 (tested 1.2): newer than this release was tested with; keep it, this is information only",
         )
         self.assertEqual(lines[3], "   only if something breaks, the tested version: x@1.2")
-        self.assertEqual(lines[5], "   by hand")
+        self.assertEqual(lines[5], "   no install command for this system; install it by hand. by hand")
         self.assertIn("only after they say yes, one program at a time", lines[-1])
-        self.assertEqual(
-            bom.update_lines([]), ["Every program this project uses matches what this release was tested with."]
-        )
+        empty = bom.update_lines([])
+        self.assertEqual(len(empty), 1)
+        self.assertTrue(empty[0].startswith("Nothing to raise:"), "an empty list certifies nothing")
+        self.assertNotIn("tested with", empty[0].split(":")[0])
 
 
 class ListedVersion(unittest.TestCase):
@@ -500,6 +501,11 @@ class Main(unittest.TestCase):
         code, out = self.run_main(["--updates", "--layers", "core", "--json"], found)
         self.assertEqual(code, 0)
         self.assertEqual([(u["id"], u["need"]) for u in json.loads(out)["updates"]], [("backlog", "optional")])
+
+    def test_check_again_quotes_a_path_with_a_space(self):
+        with patch.object(bom, "__file__", str(Path(tempfile.gettempdir()) / "Example User" / "bom.py")):
+            _, out = self.run_main(["--updates", "--layers", "core"], {"backlog": ("/bin/backlog", True, "1.0.0")})
+        self.assertRegex(out, r'Check again: python "[^"]*Example User[^"]*bom\.py" --updates')
 
     def test_missing_bom_exit_2(self):
         with patch.object(bom, "BOM", Path("no-such-folder/bom.toml")), patch("sys.stderr"):
