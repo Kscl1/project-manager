@@ -340,7 +340,7 @@ class ResumeSummaryTest(unittest.TestCase):
             "TASK-4",
             "Newest",
             "2025-06-04 09:00",
-            "Newest summary.\nSam said: ship it.\nFound: one gap.",
+            "Newest summary.\nSam said: ship it.\nÖmer said: tamam.\nFound: one gap.",
             folder="archive/tasks",
         )
         done("TASK-5", "No summary", "2025-06-05 09:00", None)
@@ -352,7 +352,10 @@ class ResumeSummaryTest(unittest.TestCase):
         order = [line.split(" · ")[0] for line in section.splitlines() if line.startswith("- ")]
         self.assertEqual(order, ["- TASK-4", "- TASK-3", "- TASK-2"])
         self.assertIn(
-            "- TASK-4 · Newest (2025-06-04)\n  Newest summary.\n  Sam said: ship it.\n  Found: one gap.", section
+            "- TASK-4 · Newest (2025-06-04)\n  Newest summary.\n  Sam said: ship it.\n  Ömer said: tamam.\n"
+            "  Found: one gap.",
+            section,
+            "an owner name may start with a Turkish capital (Ç, Ğ, İ, Ö, Ş, Ü)",
         )
         self.assertIn("  Next: none.", section)
         self.assertNotIn("Evidence: 9 tests OK", section, "only the first line and the closing-summary lines are shown")
