@@ -23,6 +23,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
   the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
   in .pm/tools may run on its own project with --lang only, so /pm-setup can set the language later.
+- After an upgrade from the project-manager checkout, the programs on this machine (Backlog.md, Pi and the rest)
+  are compared with the release's tested versions (tools/setup/bom.py --updates); nothing is installed.
 - A second run with the same arguments changes nothing.
 
 For a clean package, install from the canonical source (template/.pm in project-manager): an installed
@@ -32,6 +34,7 @@ project's .pm/ also carries that project's own edits to its package files.
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -93,6 +96,10 @@ SKILLS = PKG.parent / ".agents" / "skills"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
+# The release's program list, only in the project-manager checkout (template/.pm): an installed project used as the
+# source has none, and the folder above it is not ours to run. PM_BOM_TOOL lets the tests use a fake.
+CHECKOUT_BOM = PKG.parent.parent / "tools" / "setup" / "bom.py" if PKG.parent.name == "template" else None
+BOM_TOOL = Path(os.environ["PM_BOM_TOOL"]) if os.environ.get("PM_BOM_TOOL") else CHECKOUT_BOM
 # Claude Code reads skills only from .claude/skills, so each skill gets a pointer there; the instructions stay in one copy.
 POINTER = """---
 {front}
@@ -254,6 +261,22 @@ def write_once(dst, text=None, src=None):
     else:
         dst.write_text(text, encoding="utf-8", newline="\n")
     say("write", dst)
+
+
+def tool_layers(target):
+    """The layers the project has, for the program check: core, then map and swarm when installed."""
+    has_map = any((target / ".agents" / "skills" / name).is_dir() for name in MAP_SKILLS)
+    return ["core", *(["map"] if has_map else []), *(["swarm"] if (target / ".pm" / SWARM).is_dir() else [])]
+
+
+def tool_updates(target):
+    """Print which programs differ from what this release was tested with, for the agent to raise with the user."""
+    if BOM_TOOL is None or not BOM_TOOL.is_file():
+        return
+    print("\nPrograms on this machine against this release (nothing was installed):", flush=True)
+    command = [sys.executable, str(BOM_TOOL), "--updates", "--layers", ",".join(tool_layers(target))]
+    if subprocess.run(command, check=False).returncode == 2:  # its own error is printed above; the upgrade stands
+        print("  The program check could not run; the upgrade itself is done.")
 
 
 def run(command, cwd):
@@ -722,6 +745,8 @@ def main(argv=None):
         print("\nMerge by hand (the installer never rewrites a file of yours):")
         for line in merge:
             print(f"  {line}")
+    if not first:
+        tool_updates(target)
     print("\nNext:")
     if first:
         print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")

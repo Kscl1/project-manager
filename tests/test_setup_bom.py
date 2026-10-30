@@ -315,6 +315,70 @@ class Plan(unittest.TestCase):
         self.assertEqual(flags[bom.LAYERS], ["--keep-existing", "--map", "--swarm"])
 
 
+class Updates(unittest.TestCase):
+    """What an agent raises with the user after a release: row(...) has minimum 1.0 and tested 1.2."""
+
+    def test_needed_optional_and_newer(self):
+        items = [
+            item("gone", install={"windows": "npm i -g gone@1.2"}),
+            item("old", install={"windows": "npm i -g old@1.2"}, upgrade={"windows": "npm update -g old"}),
+            item("behind", install={"windows": "npm i -g behind@1.2"}),
+            item("ahead", install={"windows": "npm i -g ahead@1.2"}),
+            item("same", install={"windows": "npm i -g same@1.2"}),
+        ]
+        rows = [
+            row("Gone", bom.MISSING),
+            row("Old", bom.BELOW, "0.9"),
+            row("Behind", bom.OK, "1.1"),
+            row("Ahead", bom.UNTESTED, "1.3"),
+            row("Same", bom.OK, "1.2"),
+        ]
+        found = bom.updates(items, rows, system="windows")
+        self.assertEqual(
+            [(u["id"], u["need"], u["command"]) for u in found],
+            [
+                ("gone", "needed", "npm i -g gone@1.2"),
+                ("old", "needed", "npm update -g old"),
+                ("behind", "optional", "npm i -g behind@1.2"),
+                ("ahead", "newer", "npm i -g ahead@1.2"),
+            ],
+        )
+
+    def test_unpinned_programs_follow_their_vendor(self):
+        items = [
+            item("python", install={"windows": "winget install python"}),
+            item("git", install={}),
+            item("near", install={"windows": "npm i -g near@1.25"}),  # 1.2 inside 1.25 is no pin of 1.2
+        ]
+        rows = [row("Python", bom.OK, "1.1"), row("Git", bom.UNTESTED, "1.3"), row("Near", bom.OK, "1.1")]
+        self.assertEqual(bom.updates(items, rows, system="windows"), [], "no pinned line: not raised")
+
+    def test_unticked_layer_and_unverified_versions_are_left_out(self):
+        items = [item("pi", layer="swarm", install={"all": "npm i -g pi@1.2"}), item("odd", install={"all": "x@1.2"})]
+        rows = [row("Pi", bom.MISSING), row("Odd", bom.CANNOT_COMPARE, "1.2rc1")]
+        self.assertEqual(bom.updates(items, rows, layers=("core",), system="linux"), [])
+
+    def test_lines_name_the_reason_and_end_with_the_rule_for_the_agent(self):
+        found = [
+            {"name": "Pi", "installed": "-", "tested": "1.2", "need": "needed", "command": "npm i -g pi@1.2"},
+            {"name": "Herdr", "installed": "1.3", "tested": "1.2", "need": "newer", "command": "x@1.2"},
+            {"name": "Tool", "installed": "1.1", "tested": "1.2", "need": "optional", "command": "", "note": "by hand"},
+        ]
+        lines = bom.update_lines(found)
+        self.assertEqual(lines[0], "1. Pi not installed (tested 1.2): needed, below the minimum this release supports")
+        self.assertEqual(lines[1], "   npm i -g pi@1.2")
+        self.assertEqual(
+            lines[2],
+            "2. Herdr 1.3 (tested 1.2): newer than this release was tested with; keep it, this is information only",
+        )
+        self.assertEqual(lines[3], "   only if something breaks, the tested version: x@1.2")
+        self.assertEqual(lines[5], "   by hand")
+        self.assertIn("only after they say yes, one program at a time", lines[-1])
+        self.assertEqual(
+            bom.update_lines([]), ["Every program this project uses matches what this release was tested with."]
+        )
+
+
 class ListedVersion(unittest.TestCase):
     """Pi extensions: `pi list` names what the settings ask for; the version is read from the package itself."""
 
@@ -422,6 +486,20 @@ class Main(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(data["steps"][0]["id"], "git")
         self.assertEqual(next(i for i in data["items"] if i["id"] == "git")["status"], bom.MISSING)
+
+    def test_updates_only_lists_programs_and_exits_1_when_one_is_needed(self):
+        code, out = self.run_main(["--updates", "--layers", "core"], {"backlog": ("/bin/backlog", True, "1.0.0")})
+        self.assertEqual(code, 1)
+        self.assertIn("1. Backlog.md 1.0.0 (tested ", out)
+        self.assertIn(": needed, below the minimum", out)
+        self.assertNotIn("To do on ", out)
+        self.assertIn("Check again: python ", out)
+        self.assertTrue(out.rstrip().endswith("--updates --layers core"), "the rerun keeps the layers")
+
+        found = {"backlog": ("/bin/backlog", True, "1.52.0"), "python": ("/bin/python", True, "3.11.0")}
+        code, out = self.run_main(["--updates", "--layers", "core", "--json"], found)
+        self.assertEqual(code, 0)
+        self.assertEqual([(u["id"], u["need"]) for u in json.loads(out)["updates"]], [("backlog", "optional")])
 
     def test_missing_bom_exit_2(self):
         with patch.object(bom, "BOM", Path("no-such-folder/bom.toml")), patch("sys.stderr"):

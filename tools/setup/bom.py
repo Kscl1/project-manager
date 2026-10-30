@@ -7,6 +7,9 @@ the TUI runs a step only after the user presses Enter on it.
 usage: python tools/setup/bom.py [--layers core,map,swarm] [--project FOLDER] [--json]
        the check table and the To do list for this machine (and the project's files with --project);
        exit 0 when nothing is left, 1 when steps or notes are left
+       python tools/setup/bom.py --updates [--layers ...] [--json]
+       only the programs to raise with the user after a release (pm_init --upgrade prints it); exit 1 when one
+       is needed
 """
 
 import argparse
@@ -339,6 +342,73 @@ def init_step(project, layers, ids):
     }
 
 
+def updates(items, rows, layers=DEFAULT_LAYERS, system=None):
+    """The programs of the ticked layers to raise with the user after a release: needed, optional or newer.
+
+    Needed: missing or below the minimum. Optional: older than this release's tested version, only when the install
+    line pins that version (Backlog.md, Pi, its extensions); Python, Git or Node.js follow their vendor and are left
+    out. Newer: above the tested version of a pinned item; the pinned line goes back to the tested one.
+    """
+    system = system or this_os()
+    found = []
+    for item, row in zip(items, rows):
+        if item["kind"] != "command" or item["layer"] not in layers:
+            continue
+        installed, minimum, tested, result = row[1], row[2], row[3], row[4]
+        install, upgrade = item.get("install", {}), item.get("upgrade", {})
+        command = install.get(system) or install.get("all") or ""
+        pinned = re.search(rf"(?<![\d.]){re.escape(tested)}(?![\d.]*\d)", command) is not None  # not 1.2 in 1.25
+        if result in (MISSING, BELOW):
+            need = "needed"
+            command = upgrade.get(system, command) if result == BELOW else command
+        elif result == OK and pinned and compare(installed, tested) < 0:
+            need = "optional"
+        elif result == UNTESTED and pinned:
+            need = "newer"
+        else:
+            continue
+        found.append(
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "installed": installed,
+                "minimum": minimum,
+                "tested": tested,
+                "need": need,
+                "command": command,
+                "note": item.get("note", ""),
+            }
+        )
+    return found
+
+
+def update_lines(found):
+    """Plain lines for an agent to explain to the user, one program each, then what to do with them."""
+    if not found:
+        return ["Every program this project uses matches what this release was tested with."]
+    why = {
+        "needed": "needed, below the minimum this release supports",
+        "optional": "optional, works but is older than this release was tested with",
+        "newer": "newer than this release was tested with; keep it, this is information only",
+    }
+    lines = []
+    for number, update in enumerate(found, 1):
+        version = "not installed" if update["installed"] == "-" else update["installed"]
+        lines.append(f"{number}. {update['name']} {version} (tested {update['tested']}): {why[update['need']]}")
+        if update["need"] == "newer":
+            lines.append(f"   only if something breaks, the tested version: {update['command']}")
+        elif update["command"]:
+            lines.append(f"   {update['command']}")
+        else:
+            lines.append(f"   {update.get('note') or 'no install command for this system; install it by hand'}")
+    lines.append(
+        "For the agent: tell the user what each line means for them in one sentence; a program such as Backlog.md "
+        "or Pi is installed once for the whole machine, so an update also reaches their other projects. Run a "
+        "command only after they say yes, one program at a time, then check again. A newer program is only reported."
+    )
+    return lines
+
+
 def merge_list(project):
     """The '- item: how' lines pm_init left in the project for /pm-setup."""
     try:
@@ -563,6 +633,9 @@ def main(argv=None, run=probe):
     )
     parser.add_argument("--json", action="store_true", help="print one JSON object instead of text")
     parser.add_argument("--project", help="the project folder: also check its project files")
+    parser.add_argument(
+        "--updates", action="store_true", help="only the programs to raise with the user after a release (updates())"
+    )
     args = parser.parse_args(argv)
     layers = tuple(layer.strip() for layer in args.layers.split(",") if layer.strip())
     try:
@@ -575,6 +648,16 @@ def main(argv=None, run=probe):
         print(error, file=sys.stderr)
         return 2
     project = Path(args.project).resolve() if args.project else None
+    if args.updates:  # only the ticked layers' programs are run, so the list after an upgrade comes quickly
+        items = [item for item in items if item["layer"] in layers and item["kind"] == "command"]
+        found = updates(items, check_all(items, run), layers)
+        if args.json:
+            print(json.dumps({"os": this_os(), "layers": layers, "updates": found}, indent=1))
+        else:
+            print("\n".join(update_lines(found)))
+            if found:
+                print(f"Check again: python {Path(__file__).resolve()} --updates --layers {','.join(layers)}")
+        return 1 if any(update["need"] == "needed" for update in found) else 0
     rows = check_all(items, run, project)
     steps, notes = plan(items, rows, layers, project=project)
     after = [AFTER[layer] for layer in layers if layer in AFTER]
