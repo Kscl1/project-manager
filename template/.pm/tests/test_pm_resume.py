@@ -399,7 +399,7 @@ class ResumeSummaryTest(unittest.TestCase):
             self.assertNotIn(absent, out)
         self.assertIn("- (no task closed on 2025-07-01)", self.run_tool("--did", "2025-07-01").stdout)
 
-    def test_did_reads_the_explicit_utc_stamps_of_backlog_1_55_as_local_days(self):
+    def write_closed_late(self):
         # 20:00 UTC on 4 June is 5 June at UTC+9, in the old form and in the 'T...Z' form Backlog writes since 1.55.
         for task_id, stamp in (("TASK-1", "2025-06-04T20:00:00Z"), ("TASK-2", "2025-06-04 20:00")):
             path = write_task(self.root, task_id, f"Closed {task_id}", "Done")
@@ -407,10 +407,22 @@ class ResumeSummaryTest(unittest.TestCase):
             text += "\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\nNext: none.\n"
             path.write_text(text + "<!-- SECTION:FINAL_SUMMARY:END -->\n", encoding="utf-8")
 
+    def test_did_reads_the_explicit_utc_stamps_of_backlog_1_55_as_local_days(self):
+        self.write_closed_late()
+
         out = self.run_tool("--did", "2025-06-05", env={**os.environ, "TZ": "JST-9"}).stdout
 
         self.assertIn("- TASK-1 · Closed TASK-1: Done.", out)
         self.assertIn("- TASK-2 · Closed TASK-2: Done.", out)
+
+    def test_recently_closed_shows_the_local_day_not_the_utc_day(self):
+        self.commit_subjects(["setup"])
+        self.write_closed_late()
+
+        out = self.run_tool(env={**os.environ, "TZ": "JST-9"}).stdout
+
+        self.assertIn("- TASK-1 · Closed TASK-1 (2025-06-05)", out)
+        self.assertIn("- TASK-2 · Closed TASK-2 (2025-06-05)", out)
 
     def test_commits_lists_one_tasks_commits_and_models(self):
         first = self.commit_with("feat: one", "Refs: TASK-1\nAssisted-by: Model A (high)", "2025-06-01")

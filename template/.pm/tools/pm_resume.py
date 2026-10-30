@@ -141,7 +141,7 @@ def closed_lines(tasks):
     done.sort(key=lambda task: (task["updated"][:16].replace("T", " "), task_order(task)), reverse=True)
     lines = []
     for task in done[:CLOSED_SHOWN]:
-        lines.append(f"- {task['id']} · {task['title']} ({task['updated'][:10] or '?'})")
+        lines.append(f"- {task['id']} · {task['title']} ({local_day(task['updated']) or '?'})")
         first, rest = task["summary"][0], task["summary"][1:]
         lines.append(f"  {shorten(first, 300)}")
         lines.extend(f"  {shorten(line, 200)}" for line in rest if SUMMARY_LINE.match(line))
