@@ -40,7 +40,7 @@ Python 3.11 ya da daha yenisi ve Git gerekir. `python --version` ya da `git --ve
 project-manager'ı projenin **yanına**, projeyi içeren klasöre indir, asla projenin içine değil:
 
 ```bash
-git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.6 https://github.com/Kscl1/project-manager.git
 ```
 
 Git sürüme geçmeden önce `warning: refs/tags/... is not a commit!` yazabilir: bir sürüm etiketi için bu beklenir, klon sağlamdır.

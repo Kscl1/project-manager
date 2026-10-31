@@ -29,7 +29,7 @@ The agent asks which project and which layers, checks your machine, installs on 
 Requires **Python 3.11+** and **Git** in a Git repository (`git init`). Clone `project-manager` **next to** your project and run the setup TUI:
 
 ```bash
-git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.6 https://github.com/Kscl1/project-manager.git
 cd project-manager
 python -m venv tools/setup/.venv
 

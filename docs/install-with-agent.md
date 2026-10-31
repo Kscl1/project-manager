@@ -40,7 +40,7 @@ It needs Python 3.11 or newer and Git. If `python --version` or `git --version` 
 Clone project-manager **next to** the project, in the folder that holds it, never inside it:
 
 ```bash
-git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.6 https://github.com/Kscl1/project-manager.git
 ```
 
 Git may print `warning: refs/tags/... is not a commit!` before it lands on the release: that is expected for a release tag, and the clone is fine.

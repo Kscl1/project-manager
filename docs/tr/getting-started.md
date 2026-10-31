@@ -34,12 +34,12 @@ Projen bir Git deposu olmalıdır. Yeni bir projeyse klasörünü oluştur ve i�
 Projenin bulunduğu üst klasörde, project-manager deposunu kendi projenin içine değil, **yanına** klonla. Ardından TUI için ayrı bir sanal ortam oluştur (Python kütüphanelerini sistemin geri kalanından ayrı tutan bir klasör):
 
 ```bash
-git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.6 https://github.com/Kscl1/project-manager.git
 cd project-manager
 python -m venv tools/setup/.venv
 ```
 
-`--branch v0.1.0-alpha.5` seçeneği en son `main` dalını değil, yayımlanmış sürümü kurar. Git bu durumda "detached HEAD" uyarısı verir. Bu beklenen bir durumdur; klonun bir geliştirme dalı yerine sabit bir sürüm üzerinde durduğunu gösterir. Daha yeni sürümler [Releases](https://github.com/Kscl1/project-manager/releases) sayfasında listelenir.
+`--branch v0.1.0-alpha.6` seçeneği en son `main` dalını değil, yayımlanmış sürümü kurar. Git bu durumda "detached HEAD" uyarısı verir. Bu beklenen bir durumdur; klonun bir geliştirme dalı yerine sabit bir sürüm üzerinde durduğunu gösterir. Daha yeni sürümler [Releases](https://github.com/Kscl1/project-manager/releases) sayfasında listelenir.
 
 Ardından gerekli kütüphaneleri yükle ve kurulum ekranını kendi proje klasörünle başlat.
 

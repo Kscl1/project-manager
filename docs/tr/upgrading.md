@@ -13,7 +13,7 @@ Bir proje birbirinden bağımsız birkaç katmandan oluşur. project-manager kay
 
 ## 1. Kaynak sürümü seç
 
-Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.1.0-alpha.5` sürümünü kurar. Yükseltme yaparken aşağıdaki `NEW_TAG` yerine gerçek ve daha yeni bir sürüm etiketi (`tag`) yaz; `NEW_TAG` ifadesini olduğu gibi yazma.
+Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.1.0-alpha.6` sürümünü kurar. Yükseltme yaparken aşağıdaki `NEW_TAG` yerine gerçek ve daha yeni bir sürüm etiketi (`tag`) yaz; `NEW_TAG` ifadesini olduğu gibi yazma.
 
 ```bash
 git status --short
