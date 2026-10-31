@@ -25,6 +25,9 @@ CONTEXT     Living docs (both kinds):
               Backlog hygiene: open every open task's file (not just the list), then check: open tasks untouched for 14+ days; open tasks whose acceptance criteria are already met; live blocks whose Next/Evidence contradict git; tasks pointing to archived or missing tasks.
               .pm/models.md: rows that contradict the model decisions.
               .pm/lessons.md: lessons marked as a proposal (öneri) for 7+ days without an owner decision.
+              .pm/tool-owned.txt, if it exists: pm_check skips the files it lists, because their own tool keeps them
+              current. Flag a listed file that has not changed for 60+ days while the code it describes did, as a hint
+              to look, not an error.
             Sources of truth, strongest first:
               1. Code and files on disk (ls, rg, reading .pm/tools/*.py, backlog.config.yml)
               2. git history (git log --oneline, git show <sha> --stat)
