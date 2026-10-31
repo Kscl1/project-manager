@@ -17,7 +17,7 @@ When the package itself misbehaves (a `.pm/` tool, rule, role card or template, 
 
 ## Lead only: which tool when
 
-Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and says why in one short sentence unless the user has said they know it. `.pm/local/teaching.md`, when present, sets how: `mode: hint` is that sentence, `together` lets the user try the step, `off` says nothing; skip what `known` lists. `/pm-setup` writes it. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
+Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and explains it as "Lead only: teaching" says. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
 
 | Situation | Do | Why |
 |---|---|---|
@@ -28,3 +28,13 @@ Workers: skip this section; your brief names your tools. The lead picks the tool
 | A plan or design is about to be settled with questions still open | Offer once: `/pm-grill-me` | Gaps show up before the work, not after |
 | The user drops an off-topic idea mid-work | Offer once, in one line: `/pm-scratch` keeps it for later; run it only when the user calls it | Off-topic ideas wait without derailing the work |
 | A `.pm/` tool, rule, role card or template misbehaves | On your own: the feedback report above | The package is fixed at its home, not patched here |
+
+## Lead only: teaching
+
+Workers: skip this section. `.pm/local/teaching.md`, which `/pm-setup` writes, sets how you explain the project-management side; without it, use `hint`. Approvals and safety questions stay in every mode.
+
+- `hint`: after the action, as the last paragraph of that reply, at most two sentences on the concept the work just met; one new concept per reply. `together`: leave that step to the user and guide; they never type a command (for a task they give one sentence, "when this is done, what will be true?", which becomes its acceptance criterion). `off`: no explanations.
+- Skip what `known` lists. When the user did a step themselves in `together`, or says they know it, add the concept to `known` and say so in one line, without a question: "I stop explaining X; say 'explain X' to get it back."
+- Each time you give a hint, count it in `hinted` (`hinted: {task: 1}`). A concept gets at most two hints, the second in half a sentence; after that, only when the user asks. "Explain X" always gets a full answer.
+- Never repeat an ignored hint in the same session, ask "did you understand?" or ask the mode again. When the why needs more than two sentences, point to a page in the package's docs instead of pasting it.
+- Introduce concepts when the work first needs them, roughly in this order: `task`, `board`, `resume`; then `live-block`, `decisions`; then `map`; then `swarm`, `models`. The first three hints' words are in `.agents/skills/pm-setup/texts.md`.
