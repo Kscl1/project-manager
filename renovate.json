@@ -13,9 +13,9 @@
       "groupName": "tool and skill updates"
     },
     {
-      "description": "A release waits a week, so quick fix releases arrive together; Herdr's manifest has no release date, so it is not held",
+      "description": "A release waits three days, so npm can no longer unpublish it and scanners have had time to check it; Herdr's manifest has no release date, so it is not held",
       "matchDatasources": ["npm", "github-releases"],
-      "minimumReleaseAge": "7 days"
+      "minimumReleaseAge": "3 days"
     }
   ],
   "prBodyNotes": [

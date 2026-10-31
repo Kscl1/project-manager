@@ -36,7 +36,8 @@ class RenovateTests(unittest.TestCase):
         group, age = self.config["packageRules"]
         self.assertEqual(group["matchUpdateTypes"], ["minor", "patch"])  # a major stays its own pull request
         self.assertIn("groupName", group)
-        self.assertEqual(age["minimumReleaseAge"], "7 days")
+        # The newest release at least three days old: past npm's 72-hour unpublish window, yet close to the latest.
+        self.assertEqual(age["minimumReleaseAge"], "3 days")
         # Herdr's custom datasource has no release date; Renovate would hold it forever.
         self.assertEqual(age["matchDatasources"], ["npm", "github-releases"])
 
