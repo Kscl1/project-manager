@@ -219,9 +219,9 @@ layer = "swarm"
 check = ["pi", "list", "--no-approve"]  # the user's own Pi packages; --no-approve skips any project's, and its trust question
 package = "npm:pi-mcp-adapter"
 min = "2.36.0"
-tested = "5.4.0"
-install.windows = "pi install npm:pi-mcp-adapter@5.4.0"
-install.linux = "pi install npm:pi-mcp-adapter@5.4.0"
+tested = "7.0.0"
+install.windows = "pi install npm:pi-mcp-adapter@7.0.0"
+install.linux = "pi install npm:pi-mcp-adapter@7.0.0"
 note = "Gives Pi workers the project's MCP servers from .mcp.json, such as Context7. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
 
 [[item]]
@@ -232,7 +232,7 @@ layer = "swarm"
 check = ["pi", "list", "--no-approve"]
 package = "npm:pi-web-access"
 min = "0.35.0"
-tested = "0.42.0"
+tested = "0.45.0"
 install.windows = "pi install npm:pi-web-access@0.45.0"
 install.linux = "pi install npm:pi-web-access@0.45.0"
 note = "Web search and page reading for Pi workers. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."

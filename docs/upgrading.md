@@ -75,6 +75,8 @@ Add `evren` only if you use that optional layer. Exit 1 can mean remaining steps
 | Python, Git, Node.js, Claude Code | Follow the OS/vendor's supported upgrade path; these commands are not all version-pinned. | Keep the vendor-supported previous installer/runtime and configuration backup. Do not remove an interpreter your tools still need. Auto-updating tools may need vendor-specific controls. |
 | Optional bridge/app clones | Follow that tool's own release instructions; record the old commit and dependency environment. | Restore that clone's previous supported ref/environment without touching project records. A moving `git pull` is not a reproducible release pin. |
 
+**pi-mcp-adapter 5.x to 7.0.** Two major releases change the adapter's own settings; the project's `.mcp.json` works as before. Check your own Pi config (`~/.pi/agent/mcp.json`, a project's `.pi/mcp.json`) only if you set these yourself: `mcpScript` and its `settings.scriptMode`, `scriptSkill` and `settings.jev` budget keys are gone (use Pi's `codemode` instead); `settings.jev` becomes `settings.semanticSearch`, and `settings.jev: false` no longer turns semantic search off (set `settings.semanticSearch` to `false`); a System One key does nothing, semantic search uses Pi's own logins. An old key loads with a notice that names the file. The upstream changelog has the details.
+
 For Herdr, discovery of a new release is **not** proof it works with the runner. Before moving the `tested` value, run a small visible worker with **Pi and Claude Code separately**, verify pane/status/output/evidence and retain results. Do not use this guide's automated package tests as a substitute. No agent workers are launched by the inventory command.
 
 ## 4. Vendored skills
