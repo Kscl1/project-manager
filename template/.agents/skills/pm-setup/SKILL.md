@@ -90,6 +90,6 @@ After the checklist, or earlier if the user wants to start work and the rest can
 1. Run `python .pm/tools/pm_check.py`. Show its result; fix only approved in-scope problems and run it again. A clean check means consistent, not that the setup works.
 2. From the Epic's children, show what was changed and checked, what was declined and what is still open, with task IDs.
 3. If `handover.md` exists, mark what this session settled; open problems stay under their heading.
-4. If the install chat made a branch (`handover.md` names it, usually `pm-setup`), offer to merge it into the branch it was made from: show `git switch <old branch>` and `git merge pm-setup`, run them only on a yes, never push. To undo instead, the same file's `## Undo` says how.
-5. Close the Epic only when its children are done, with evidence and a `Doc impact:` line. No commit unless the user asks.
+4. Close the Epic only when its children are done, with evidence and a `Doc impact:` line.
+5. This session changed records and the first task's files. Show `git status` and the diff, and commit them only on a yes. If the install chat made a branch (`handover.md` names it, usually `pm-setup`), offer to merge it into the branch it was made from once `git status` is clean: show `git switch <old branch>` and `git merge pm-setup`, run them only on a yes, never push. To undo instead, the same file's `## Undo` says how.
 6. End with the resume hint from `texts.md` (unless the mode is off), then the next session's prompt, ready to paste: how to open this folder, and "continue" in the project language.
