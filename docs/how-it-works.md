@@ -8,7 +8,7 @@ description: From a request to checked work, with records kept in your repositor
 1. **You describe the goal.** The lead agent opens a task with acceptance criteria before doing the work. Larger goals become an Epic with small, scoped tasks.
 2. **The lead checks the context.** It reads the current task, the relevant project records and the code, then chooses the smallest useful change.
 3. **Work happens in the repository.** The lead can do a small job itself. With the optional swarm layer, it gives a worker a brief, an isolated Git worktree and a visible terminal pane.
-4. **Evidence comes back.** Build output, tests and lint check the change. A reviewer from a different model family examines the brief, diff and report; passing automation alone is not approval.
+4. **Evidence comes back.** Build output, tests and lint check the change. A reviewer from a different model family examines the brief, diff and report (a project with only one model uses a fresh session of it and says so); passing automation alone is not approval.
 5. **You approve the result.** The lead reads the diff, updates the records and reports what passed and what remains. You decide when to merge.
 
 ## The parts together
@@ -51,7 +51,7 @@ The diagram's worker roles belong to the optional swarm. The core works with a l
 | Lead | Frame the task, keep the live records current, write scoped briefs and verify the evidence. Any capable agent can fill this role. |
 | Worker | Complete one scoped brief; do not expand the job or edit the lead's records. |
 | Test-writer or researcher | Test from the brief or gather cited sources, rather than assume the implementation is right. |
-| Reviewer | Read the brief, diff and evidence with fresh context, from a different model family than the author. |
+| Reviewer | Read the brief, diff and evidence with fresh context, from a different model family than the author (one-model projects: a fresh session, recorded as same-family). |
 
 ## What runs where?
 

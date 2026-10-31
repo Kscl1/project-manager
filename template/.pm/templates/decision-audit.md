@@ -1,6 +1,6 @@
 # Brief: decision audit
 
-The weekly partner of `doc-audit.md`: a second cheap worker, from a different model family than the doc auditor, checks whether the recorded decisions and the project's practice still agree. The worker reads and reports; it never edits. The lead verifies every finding; a finding that changes something the owner decided, or that the two leads disagree on, goes to the owner.
+The weekly partner of `doc-audit.md`: a second cheap worker, from a different model family than the doc auditor (in a project with one model family, a fresh session of that model; lead card, step 7), checks whether the recorded decisions and the project's practice still agree. The worker reads and reports; it never edits. The lead verifies every finding; a finding that changes something the owner decided, or that the two leads disagree on, goes to the owner.
 
 Fill `<date>`, copy the lead's notes that live outside git (if any) into `.pm/local/audits/weekly-<date>/memory/`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief.
 

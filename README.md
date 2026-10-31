@@ -19,7 +19,7 @@ It is neither a harness nor a framework. It combines existing open tools with pl
 Open your coding agent in the folder that holds your project and paste this:
 
 ```text
-Install project-manager into my project. Follow https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md step by step, ask me before every change, and stop where it says to stop.
+Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md (download it with curl if your web tool only gives a summary), follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
 The agent asks which project and which layers, checks your machine, installs on a new `pm-setup` branch and leaves a hand-over note; nothing changes without your yes. Then you open the project in a new session and type `/pm-setup`. What it follows: [Install with your agent](docs/install-with-agent.md) ([Türkçe](docs/tr/install-with-agent.md)).
