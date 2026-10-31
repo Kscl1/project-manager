@@ -220,8 +220,8 @@ check = ["pi", "list", "--no-approve"]  # the user's own Pi packages; --no-appro
 package = "npm:pi-mcp-adapter"
 min = "2.36.0"
 tested = "5.4.0"
-install.windows = "pi install npm:pi-mcp-adapter@5.4.0"
-install.linux = "pi install npm:pi-mcp-adapter@5.4.0"
+install.windows = "pi install npm:pi-mcp-adapter@6.0.0"
+install.linux = "pi install npm:pi-mcp-adapter@6.0.0"
 note = "Gives Pi workers the project's MCP servers from .mcp.json, such as Context7. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
 
 [[item]]
