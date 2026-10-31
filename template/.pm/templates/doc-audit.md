@@ -5,7 +5,7 @@ The lead gives this brief to a cheap worker model. The worker reads, compares an
 Two kinds, same brief:
 
 - **delivery:** before a delivery closes. Audits only the living docs and decision cites the delivered change touched; the lead lists them in the brief.
-- **weekly:** when `pm_board --resume` says the weekly check is due, or any time the owner or lead asks (for example after a heavy day). Audits the living docs plus the extra scope below. A second worker from another model family runs `decision-audit.md` at the same time.
+- **weekly:** when `pm_board --resume` says the weekly check is due, or any time the owner or lead asks (for example after a heavy day). Audits the living docs plus the extra scope below. A second worker from another model family (in a project with one model family, a fresh session of that model; lead card, step 7) runs `decision-audit.md` at the same time.
 
 Fill `<kind>` and `<date>`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief and the line "Kind: <kind>. Date: <date>. Do the task in the attached brief." Ask it to write the report in small edits.
 
