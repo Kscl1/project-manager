@@ -233,8 +233,8 @@ check = ["pi", "list", "--no-approve"]
 package = "npm:pi-web-access"
 min = "0.35.0"
 tested = "0.42.0"
-install.windows = "pi install npm:pi-web-access@0.42.0"
-install.linux = "pi install npm:pi-web-access@0.42.0"
+install.windows = "pi install npm:pi-web-access@0.45.0"
+install.linux = "pi install npm:pi-web-access@0.45.0"
 note = "Web search and page reading for Pi workers. Setup checks your user-level Pi packages, not a project's own .pi/settings.json."
 
 [[item]]
