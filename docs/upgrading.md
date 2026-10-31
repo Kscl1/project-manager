@@ -13,7 +13,7 @@ A project has several independent layers. Updating the project-manager checkout 
 
 ## 1. Choose a source release
 
-These commands run **in the project-manager source clone**, not in your project. The getting-started guide installs `v0.1.0-alpha.4`. For an upgrade, replace `NEW_TAG` below with a real newer release tag; do not type the placeholder literally.
+These commands run **in the project-manager source clone**, not in your project. The getting-started guide installs `v0.1.0-alpha.5`. For an upgrade, replace `NEW_TAG` below with a real newer release tag; do not type the placeholder literally.
 
 ```bash
 git status --short

@@ -39,7 +39,7 @@ Python 3.11 ya da daha yenisi ve Git gerekir. `python --version` ya da `git --ve
 project-manager'ı projenin **yanına**, projeyi içeren klasöre indir, asla projenin içine değil:
 
 ```bash
-git clone --branch v0.1.0-alpha.4 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
 ```
 
 Orada zaten bir `project-manager` klasörü varsa kontrol et: `git -C project-manager describe --tags --exact-match` yukarıdaki sürümü yazmalı, `git -C project-manager status --porcelain` hiçbir şey yazmamalı. Sürüm farklıysa ve klasör temizse `git -C project-manager fetch --tags` ve `git -C project-manager switch --detach <sürüm>` öner; klasörde kendi değişiklikleri varsa dokunma: dur ve sor. Aşağıda `<pm>` bu klasör, `<project>` proje klasörüdür; yol boşluk içerebileceği için ikisini de her komutta tırnak içine al.

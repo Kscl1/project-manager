@@ -39,7 +39,7 @@ It needs Python 3.11 or newer and Git. If `python --version` or `git --version` 
 Clone project-manager **next to** the project, in the folder that holds it, never inside it:
 
 ```bash
-git clone --branch v0.1.0-alpha.4 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
 ```
 
 If a `project-manager` folder is already there, check it: `git -C project-manager describe --tags --exact-match` must print the release above and `git -C project-manager status --porcelain` must print nothing. If the release differs and the folder is clean, offer `git -C project-manager fetch --tags` and `git -C project-manager switch --detach <release>`; if it has changes of its own, do not touch it: stop and ask. Below, `<pm>` is that folder and `<project>` the project folder; quote both in every command, because a path may contain spaces.
