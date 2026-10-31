@@ -239,14 +239,30 @@ class FeedbackTest(unittest.TestCase):
         self.assertIn(report.as_posix(), out)
         self.assertEqual(self.gh.calls, [])
 
-    def test_send_redacts_an_edited_report_again(self):
+    def test_apostrophes_in_prose_stay(self):
+        private = pm_feedback.private_strings(self.root)
+        prose = "it is the design system's single file, read whole by that tool's parser; users' files don't move."
+        self.assertEqual(pm_feedback.redact(prose, self.root, private), prose)
+        for quoted in ("prompt was 'write the invoice exporter now'", "(it's the prompt we sent)"):
+            text = pm_feedback.redact(quoted.replace("(", "('").replace(")", "')"), self.root, private)
+            self.assertIn("<text>", text)
+        self.assertEqual(pm_feedback.redact("KeyError: 'status'", self.root, private), "KeyError: 'status'")
+
+    def test_yes_never_sends_text_the_owner_did_not_see(self):
         report, _ = self.write_report()
         with report.open("a", encoding="utf-8") as extra:
             extra.write(f"\nadded by hand: {TASK_TITLE} {GITHUB_TOKEN} {self.root / 'src' / 'billing'}\n")
+        code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing sent", out)
+        self.assertEqual(self.gh.calls, [])
+        shown = report.read_text(encoding="utf-8")
+        self.assertClean(shown)  # the file now holds the redacted text, ready to show again
         self.run_tool("--send", str(report), "--yes")
         self.assertEqual(len(self.gh.calls), 1)
         args, body = self.gh.calls[0]
-        self.assertClean(" ".join(args) + body)
+        title, _, rest = shown.partition("\n")
+        self.assertEqual((args[args.index("--title") + 1], body), (title.lstrip("# ").strip(), rest.strip() + "\n"))
 
 
 if __name__ == "__main__":
