@@ -117,7 +117,7 @@ Tell the user in a few lines what is installed and what is open. Then give them 
 > - Claude Code in a terminal: `cd "<project>"`, then `claude`. Claude Desktop: Code, then choose the folder.
 > - Pi: `cd "<project>"`, then `pi`.
 >
-> Claude Code first asks whether you trust the folder: it is your project, so choose "Yes, I trust this folder". It may also ask whether to turn on the project's servers for current documentation and diagrams (Context7, LikeC4): allow them.
+> Claude Code first asks whether you trust the folder: it is your project, so choose "Yes, I trust this folder". It may also ask whether to turn on the project's servers for current documentation and diagrams (Context7, LikeC4): allow them. Their reading tools are allowed in the project's settings; anything that writes still asks. Context7 sends its queries to its own server, so they never hold secrets.
 >
 > Then type `/pm-setup` (in Pi `/skill:pm-setup`, in Codex `$pm-setup`).
 

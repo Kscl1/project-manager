@@ -117,7 +117,7 @@ Kullanıcıya birkaç satırla neyin kurulduğunu ve neyin açık kaldığını 
 > - Terminalde Claude Code: `cd "<project>"`, sonra `claude`. Claude Desktop: Code, sonra klasörü seç.
 > - Pi: `cd "<project>"`, sonra `pi`.
 >
-> Claude Code önce klasöre güvenip güvenmediğini sorar: bu senin projen, "Yes, I trust this folder" seç. Projenin güncel belge ve şema sunucularını (Context7, LikeC4) açmak için de sorabilir: izin ver.
+> Claude Code önce klasöre güvenip güvenmediğini sorar: bu senin projen, "Yes, I trust this folder" seç. Projenin güncel belge ve şema sunucularını (Context7, LikeC4) açmak için de sorabilir: izin ver. Okuyan araçlarına projenin ayarlarında izin verilmiştir; yazan her şey yine sorar. Context7 sorgularını kendi sunucusuna gönderir, bu yüzden sorgulara gizli bilgi yazılmaz.
 >
 > Sonra `/pm-setup` yaz (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
 
