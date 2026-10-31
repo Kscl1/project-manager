@@ -31,7 +31,7 @@ Bunları tek tek, her seçenek için tek cümleyle sor:
 3. **Harita** (varsayılan evet): projenin mimarisini gösteren, ajanın okuyup güncel tuttuğu şemalar. Node.js gerektirir.
 4. **Sürü** (varsayılan hayır): kullanıcının izleyebildiği terminal panellerinde çalışan yardımcı ajanlar. Pi ve Herdr gerektirir; sonradan da eklenebileceğini söyle.
 
-Katmanlar `core`, seçildiyse `map` ve `swarm`'dır. Aşağıda `<layers>` olarak kullan, örneğin `core,map`.
+Katmanlar `core`, seçildiyse `map`, `swarm` ve `evren`'dir; `evren`'i yalnız EVREN hesabı olan kullanıcıya öner. Aşağıda `<layers>` olarak kullan, örneğin `core,map`.
 
 ### 2. Python'u ve Git'i kontrol et, project-manager'ı indir
 
