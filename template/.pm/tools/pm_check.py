@@ -10,6 +10,7 @@ an open task keeps its live Next and Evidence lines short, so the resume summary
 and an owner ask that offers lettered options (`Needs owner: pick A or B`) has each option written out.
 A file path written in backticks must exist: in a living doc any repo path, in a decision in force a path into
 a repository next to this one (`../repo/file`). A deleted file passes when its deleting commit is named beside it.
+A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
 
 A clean result means the docs are consistent, not that they are correct.
 """
@@ -60,6 +61,8 @@ STUDY_SECTIONS = (
     "Sınırlar",
     "Okuma haritası",
 )
+# Files another tool writes in its own format (a design system's DESIGN.md, say): one repo path per line, # comments.
+TOOL_OWNED = ROOT / ".pm" / "tool-owned.txt"
 SKIP_DIRS = {".git", "node_modules", ".worktrees", "__pycache__"}
 # Local runs, worktrees and Backlog's own task archive are not docs. A docs archive is checked like any doc.
 SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", "archive"), ("backlog", "archive"))
@@ -438,7 +441,8 @@ def check_file(path, decisions):
 
     if len(lines) > LINE_LIMIT and not name.startswith(NO_LINE_LIMIT) and not vendored(name):
         problems.append(
-            f"{name}: {len(lines)} lines, limit is {LINE_LIMIT}\n    → split by topic and keep this file as an index"
+            f"{name}: {len(lines)} lines, limit is {LINE_LIMIT}\n    → split by topic and keep this file as an index;"
+            " if another tool writes it in its own format, list it in .pm/tool-owned.txt"
         )
     if DECISION_DIR and path.parent == DECISION_DIR and DECISION_FILE.match(path.stem):
         problems += check_repo_paths(name, path, lines, siblings_only=True)
@@ -836,12 +840,19 @@ def git_visible():
     return {ROOT / name for name in listed.split("\0") if name}
 
 
+def tool_owned():
+    """The files listed in .pm/tool-owned.txt: their tool keeps them current, so they are not checked here."""
+    lines = TOOL_OWNED.read_text(encoding="utf-8").splitlines() if TOOL_OWNED.is_file() else []
+    return {ROOT / line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
+
+
 def markdown_files():
-    """Docs to check: every .md file except skipped folders and files git ignores (they are not docs)."""
+    """Docs to check: every .md file except skipped folders, tool-owned files and files git ignores (not docs)."""
     visible = git_visible()
+    owned = tool_owned()
     for path in sorted(ROOT.rglob("*.md")):
         parts = path.relative_to(ROOT).parts
-        if SKIP_DIRS.intersection(parts) or any(parts[: len(p)] == p for p in SKIP_PREFIXES):
+        if SKIP_DIRS.intersection(parts) or any(parts[: len(p)] == p for p in SKIP_PREFIXES) or path in owned:
             continue
         if visible is None or path in visible:
             yield path

@@ -9,6 +9,7 @@ The report has five fields (.pm/templates/feedback.md): package version, harness
 and at most 20 lines of the error. Everything passes the redaction below.
 The second form shows the report again and opens an issue in the package's home repo with `gh issue create`.
 Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
+With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text back and stops.
 
 Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
 task and decision titles of two or more words, project and user names, paths outside the package's own files, e-mail
@@ -52,7 +53,8 @@ ABS_PATH = re.compile(r"(?:\b[A-Za-z]:[\\/]|\\\\|(?<![\w.~>])/(?=[\w.~-]+/))" + 
 BACKLOG_FILE = re.compile(r"[\w./\\-]*backlog[\\/][^\n]*?\.md\b")  # Backlog file names carry the task title
 REL_PATH = re.compile(r"(?<![\w.<>/\\-])(?!" + PACKAGE_DIR + r")[\w.-]+(?:[\\/][\w.-]+)+")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-QUOTED = re.compile(r"\"[^\"\n]*\"|'[^'\n]*'")
+# a single quote opens and closes only away from letters: system's and tool's on one line are not a quotation
+QUOTED = re.compile(r"\"[^\"\n]*\"|(?<!\w)'(?:[^'\n]|'(?=\w))*'(?!\w)")
 
 
 def front_title(path):
@@ -175,9 +177,15 @@ def build(root, command, error, harness, title):
 
 def send(root, report, yes, repo):
     """Open the issue only on an explicit yes. Returns the exit code."""
-    text = redact(report.read_text(encoding="utf-8"), root, private_strings(root))  # again: the file may be edited
+    shown = report.read_text(encoding="utf-8")
+    text = redact(shown, root, private_strings(root))  # again: the file may be edited
     title, _, body = text.partition("\n")
     print(text)
+    if yes and text != shown:  # the owner said yes to the file, so send only the file as it was shown
+        report.write_text(text, encoding="utf-8", newline="\n")
+        print(f"Redaction changed the report the owner saw; nothing sent. {report.as_posix()} now holds the text")
+        print("that would be sent: show it to the owner again and ask again.")
+        return 1
     if not yes:
         try:
             print(f"It becomes a public issue in the package's home repo (github.com/{repo}); anyone can read it.")
@@ -192,7 +200,8 @@ def send(root, report, yes, repo):
         return 1
     title = title.lstrip("# ").strip()
     command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
-    return subprocess.run(command, input=body.strip() + "\n", text=True).returncode
+    # utf-8, not the locale's code page: on Windows that is cp1252, which cannot write pm_check's arrows
+    return subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
 
 
 def main(argv=None):
@@ -224,4 +233,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")  # --error-file -: piped pm_check output is utf-8
     sys.exit(main())

@@ -613,6 +613,21 @@ class LineLimitTest(RepoTestCase):
         self.assertNotIn("pm-copied", result.stdout)
         self.assertIn(".agents/skills/pm-own/SKILL.md: 301 lines", result.stdout)
 
+    def test_tool_owned_files_are_not_checked(self):
+        # Issue #66: a design tool's DESIGN.md is one file by format, and its frontmatter alone passed the limit.
+        long = "\n".join(f"line {i}" for i in range(301)) + "\n"
+        self.write("DESIGN.md", long + "[gone](nope.md)\n")
+        self.write("docs/design/tokens.md", long)
+        self.write("other.md", long)
+        self.write(".pm/tool-owned.txt", "# written by the design tool\nDESIGN.md\n\n  docs/design/tokens.md\n")
+
+        result = self.run_check()
+
+        self.assertNotIn("DESIGN.md", result.stdout)
+        self.assertNotIn("tokens.md", result.stdout)
+        self.assertIn("other.md: 301 lines", result.stdout)
+        self.assertIn("list it in .pm/tool-owned.txt", result.stdout)
+
     def test_long_research_doc_and_decision_log_exempt(self):
         body = "\n".join(f"line {i}" for i in range(301)) + "\n"
         self.write("research/big.md", body)

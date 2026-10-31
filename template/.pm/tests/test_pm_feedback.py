@@ -11,6 +11,7 @@ Standard library only.
 import importlib.util
 import io
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -108,6 +109,7 @@ class Recorder:
     def __call__(self, args, *rest, **kwargs):
         if list(args[:2]) == ["gh", "issue"]:
             self.calls.append((list(args), kwargs.get("input", "")))
+            self.encoding = kwargs.get("encoding")
             return subprocess.CompletedProcess(args, 0)
         return self.real(args, *rest, **kwargs)
 
@@ -209,6 +211,25 @@ class FeedbackTest(unittest.TestCase):
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
 
+    def test_gh_gets_utf8_whatever_the_locale(self):
+        self.error_file.write_text("DESIGN.md: 538 lines\n    → split by topic", encoding="utf-8")
+        report, _ = self.write_report()
+        self.run_tool("--send", str(report), "--yes")
+        self.assertIn("→ split by topic", self.gh.calls[0][1])
+        self.assertEqual(self.gh.encoding, "utf-8")  # not the locale's code page (cp1252 on Windows)
+
+    def test_error_from_stdin_is_read_as_utf8(self):
+        env = {**pm_feedback.os.environ, "PYTHONIOENCODING": "cp1252", "PATH": str(Path(sys.executable).parent)}
+        done = self.gh.real(
+            [sys.executable, str(SCRIPT), "--root", str(self.root), "--command", "pm_check", "--error-file", "-"],
+            input="DESIGN.md: 538 lines\n    → split by topic\n".encode("utf-8"),
+            capture_output=True,
+            env=env,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("→ split by topic", report.read_text(encoding="utf-8"))
+
     def test_missing_gh_sends_nothing_and_says_so(self):
         report, _ = self.write_report()
         with mock.patch.object(pm_feedback.shutil, "which", lambda name: None):
@@ -218,14 +239,30 @@ class FeedbackTest(unittest.TestCase):
         self.assertIn(report.as_posix(), out)
         self.assertEqual(self.gh.calls, [])
 
-    def test_send_redacts_an_edited_report_again(self):
+    def test_apostrophes_in_prose_stay(self):
+        private = pm_feedback.private_strings(self.root)
+        prose = "it is the design system's single file, read whole by that tool's parser; users' files don't move."
+        self.assertEqual(pm_feedback.redact(prose, self.root, private), prose)
+        for quoted in ("prompt was 'write the invoice exporter now'", "(it's the prompt we sent)"):
+            text = pm_feedback.redact(quoted.replace("(", "('").replace(")", "')"), self.root, private)
+            self.assertIn("<text>", text)
+        self.assertEqual(pm_feedback.redact("KeyError: 'status'", self.root, private), "KeyError: 'status'")
+
+    def test_yes_never_sends_text_the_owner_did_not_see(self):
         report, _ = self.write_report()
         with report.open("a", encoding="utf-8") as extra:
             extra.write(f"\nadded by hand: {TASK_TITLE} {GITHUB_TOKEN} {self.root / 'src' / 'billing'}\n")
+        code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("nothing sent", out)
+        self.assertEqual(self.gh.calls, [])
+        shown = report.read_text(encoding="utf-8")
+        self.assertClean(shown)  # the file now holds the redacted text, ready to show again
         self.run_tool("--send", str(report), "--yes")
         self.assertEqual(len(self.gh.calls), 1)
         args, body = self.gh.calls[0]
-        self.assertClean(" ".join(args) + body)
+        title, _, rest = shown.partition("\n")
+        self.assertEqual((args[args.index("--title") + 1], body), (title.lstrip("# ").strip(), rest.strip() + "\n"))
 
 
 if __name__ == "__main__":
