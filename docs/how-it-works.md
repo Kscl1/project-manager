@@ -29,7 +29,7 @@ flowchart TB
         Worker["Worker (Pi, own Git worktree)"]
         TestWriter["Test-writer (from brief alone)"]
         Researcher["Researcher (cited sources)"]
-        Reviewer["Reviewer (different model family)"]
+        Reviewer["Reviewer (another model family, or a clean session)"]
     end
 
     Owner <-->|"intent & approvals"| Lead

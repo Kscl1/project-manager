@@ -29,7 +29,7 @@ flowchart TB
         Worker["İşçi ajan (Pi, kendi Git worktree alanı)"]
         TestWriter["Test yazıcı (yalnızca görev özetinden)"]
         Researcher["Araştırmacı (kaynak göstererek)"]
-        Reviewer["İnceleyici (farklı model ailesi)"]
+        Reviewer["İnceleyici (başka model ailesi ya da temiz oturum)"]
     end
 
     Owner <-->|"niyet ve onaylar"| Lead
