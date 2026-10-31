@@ -702,6 +702,21 @@ class Project(unittest.TestCase):
         with patch("sys.stderr"):
             self.assertEqual(bom.main(["--project", str(self.project / "nope")]), 2)
 
+    def test_main_record_for_the_agent_path(self):
+        found = lambda check, **_: ("/bin/x", True, "999.0")  # noqa: E731
+        with patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(bom.main(["--record"]), 2)  # nothing to record into
+        self.assertIn("--record needs --project", err.getvalue())
+        with patch("sys.stdout", new_callable=io.StringIO), patch("sys.stderr", new_callable=io.StringIO) as err:
+            bom.main(["--project", str(self.project), "--record"], found)
+        self.assertIn("not written", err.getvalue())  # before pm_init: no .pm/, no record
+        self.assertIsNone(bom.read_record(self.project))
+        (self.project / ".pm").mkdir()
+        with patch("sys.stdout", new_callable=io.StringIO) as out, patch("sys.stderr", new_callable=io.StringIO):
+            bom.main(["--project", str(self.project), "--layers", "core,map", "--record", "--json"], found)
+        json.loads(out.getvalue())  # the note goes to stderr, so --json stays one object
+        self.assertEqual(bom.read_record(self.project)["layers"], ["core", "map"])
+
 
 class UserScan(unittest.TestCase):
     """Names of what the user already has; never the configuration behind them."""

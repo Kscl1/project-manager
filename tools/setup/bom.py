@@ -6,7 +6,8 @@ the TUI runs a step only after the user presses Enter on it.
 
 usage: python tools/setup/bom.py [--layers core,map,swarm] [--project FOLDER] [--json]
        the check table and the To do list for this machine (and the project's files with --project);
-       exit 0 when nothing is left, 1 when steps or notes are left
+       exit 0 when nothing is left, 1 when steps or notes are left; --record with --project also writes
+       .pm/local/setup.json, as the TUI's Done screen does (the agent install path, docs/install-with-agent.md)
        python tools/setup/bom.py --updates [--layers ...] [--json]
        only the programs to raise with the user after a release (pm_init --upgrade prints it); exit 1 when one
        is needed
@@ -20,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -637,6 +639,11 @@ def main(argv=None, run=probe):
     parser.add_argument(
         "--updates", action="store_true", help="only the programs to raise with the user after a release (updates())"
     )
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="with --project, once .pm/ is there: write .pm/local/setup.json as the TUI does",
+    )
     args = parser.parse_args(argv)
     layers = tuple(layer.strip() for layer in args.layers.split(",") if layer.strip())
     try:
@@ -644,6 +651,8 @@ def main(argv=None, run=probe):
             raise ValueError(f"--layers takes {', '.join(LAYERS)}")
         if args.project and not Path(args.project).is_dir():
             raise ValueError(f"--project: {args.project} is not a folder")
+        if args.record and not args.project:
+            raise ValueError("--record needs --project")
         items = load()
     except (ValueError, OSError) as error:  # a bad entry, or bom.toml missing or unreadable
         print(error, file=sys.stderr)
@@ -665,6 +674,12 @@ def main(argv=None, run=probe):
     steps, notes = plan(items, rows, layers, project=project)
     after = [AFTER[layer] for layer in layers if layer in AFTER]
     alike = similar(items, user_scan(), layers)  # information only: never a reason to stop
+    if args.record:  # the agent install path (docs/install-with-agent.md) has no Done screen to write it
+        saved = write_record(project, layers, alike, time.strftime("%Y-%m-%d"))
+        print(
+            f"{RECORD.as_posix()}: {'written' if saved else 'not written, .pm/ is not in the project yet'}",
+            file=sys.stderr,
+        )
     if args.json:
         keys = ("name", "installed", "minimum", "tested", "status", "path")
         table = [{"id": item["id"], "layer": item["layer"], **dict(zip(keys, row))} for item, row in zip(items, rows)]
