@@ -192,7 +192,8 @@ def send(root, report, yes, repo):
         return 1
     title = title.lstrip("# ").strip()
     command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
-    return subprocess.run(command, input=body.strip() + "\n", text=True).returncode
+    # utf-8, not the locale's code page: on Windows that is cp1252, which cannot write pm_check's arrows
+    return subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
 
 
 def main(argv=None):
@@ -224,4 +225,5 @@ def main(argv=None):
 
 if __name__ == "__main__":
     sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdin.reconfigure(encoding="utf-8", errors="replace")  # --error-file -: piped pm_check output is utf-8
     sys.exit(main())

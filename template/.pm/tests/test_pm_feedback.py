@@ -11,6 +11,7 @@ Standard library only.
 import importlib.util
 import io
 import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -108,6 +109,7 @@ class Recorder:
     def __call__(self, args, *rest, **kwargs):
         if list(args[:2]) == ["gh", "issue"]:
             self.calls.append((list(args), kwargs.get("input", "")))
+            self.encoding = kwargs.get("encoding")
             return subprocess.CompletedProcess(args, 0)
         return self.real(args, *rest, **kwargs)
 
@@ -208,6 +210,25 @@ class FeedbackTest(unittest.TestCase):
         self.assertIn("### Error excerpt", body)
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
+
+    def test_gh_gets_utf8_whatever_the_locale(self):
+        self.error_file.write_text("DESIGN.md: 538 lines\n    → split by topic", encoding="utf-8")
+        report, _ = self.write_report()
+        self.run_tool("--send", str(report), "--yes")
+        self.assertIn("→ split by topic", self.gh.calls[0][1])
+        self.assertEqual(self.gh.encoding, "utf-8")  # not the locale's code page (cp1252 on Windows)
+
+    def test_error_from_stdin_is_read_as_utf8(self):
+        env = {**pm_feedback.os.environ, "PYTHONIOENCODING": "cp1252", "PATH": str(Path(sys.executable).parent)}
+        done = self.gh.real(
+            [sys.executable, str(SCRIPT), "--root", str(self.root), "--command", "pm_check", "--error-file", "-"],
+            input="DESIGN.md: 538 lines\n    → split by topic\n".encode("utf-8"),
+            capture_output=True,
+            env=env,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr.decode("utf-8", "replace"))
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("→ split by topic", report.read_text(encoding="utf-8"))
 
     def test_missing_gh_sends_nothing_and_says_so(self):
         report, _ = self.write_report()
