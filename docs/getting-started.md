@@ -5,7 +5,7 @@ description: Install the work-system package in your project, then fit it with y
 
 project-manager keeps your tasks, decisions and working rules next to your code, so your coding agent plans and checks work the same way every session.
 
-There are two ways in: the **setup TUI** (recommended), a guided screen in your terminal, or **by hand**, working down the layers below. Either way, you finish by running `/pm-setup` in your project, where your agent fits the package to the project with you.
+There are three ways in: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the layers below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you.
 
 ## Before you start
 
@@ -127,11 +127,11 @@ Open your project, not the project-manager folder, in Claude Code:
 - **Windows:** press `o` on the Done screen, or open [Claude Desktop](https://code.claude.com/docs/en/desktop-quickstart), choose Code and select the project folder. Desktop is a separate install and its Code tab needs a paid Claude plan; the terminal works too. If Desktop asks you to sign in first, it forgets the project: sign in, then press `o` again.
 - **Linux:** `cd ~/projects/my-project`, then `claude`.
 
-Type `/pm-setup` and press Enter. Your agent opens a setup Epic in Backlog (a parent task with one child per question) and asks about one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes.
+Type `/pm-setup` and press Enter. If an install chat left a hand-over note (`.pm/local/handover.md`), your agent reads it first. It opens with three sentences on what `.pm` is and asks how you want the project-management side explained (below). Then it opens a setup Epic in Backlog (a parent task with its steps as children) and goes through what it finds, one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes. It ends with one small real task from your project and a prompt for your next session.
 
 Already have MCP servers, plugins, skills or apps? See [Make your own tools useful](own-tools.md). `/pm-setup` checks one at a time, keeps your existing setup and, with approval, adds a short “which tool when” rule plus a real smoke check.
 
-At the end it asks how you want the tools explained: **short hints** (the default), **try together**, or **off**. Change it any time in chat ("stop teaching", "I already know Backlog").
+How it explains: **short hint** (the default: one sentence the first time something new comes up, at most twice for the same thing), **try together** (it leaves the step to you and guides; you never type a command) or **off** (no explanations; it still asks before changing your files). The first real task is done together unless you choose off. Change it any time in chat: "stop teaching", "explain tasks", "I already know Backlog".
 
 ## Updating later
 

@@ -5,7 +5,7 @@ description: Çalışma sistemi paketini projene kur, ardından ajanınla birlik
 
 project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtlarını (teknik seçimlerin nedenlerini) ve çalışma kurallarını kodunun yanında tutar. Böylece kodlama ajanın (kod okuyup yazan yapay zekâ aracın) her oturumda (çalışma sohbetinde) işi aynı yöntemle planlar ve kontrol eder.
 
-Kuruluma iki yoldan başlayabilirsin: terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz — önerilen yol)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar.
+Kuruluma üç yoldan başlayabilirsin: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar.
 
 ## Başlamadan önce
 
@@ -127,11 +127,11 @@ Claude Code'da project-manager klasörünü değil, **kendi projeni** aç:
 - **Windows:** Done ekranında `o` tuşuna bas ya da [Claude Desktop](https://code.claude.com/docs/en/desktop-quickstart) uygulamasını açıp Code sekmesinden proje klasörünü seç. Desktop ayrı kurulur ve Code sekmesi ücretli bir Claude planı gerektirir; terminal üzerinden de çalışabilirsin. Desktop önce giriş yapmanı isterse seçtiğin projeyi unutur: giriş yap, ardından tekrar `o` tuşuna bas.
 - **Linux:** `cd ~/projects/my-project` komutunu, ardından `claude` komutunu çalıştır.
 
-`/pm-setup` yazıp Enter'a bas. Ajanın Backlog içinde bir kurulum Epic'i (her soru için bir alt görev barındıran üst görev) açar ve konuları tek tek sorar: mevcut ajan kuralların, Git kancaların, CI (kod gönderildiğinde testleri otomatik çalıştıran sürekli entegrasyon akışı), testlerin, görev listelerin, kurulumun seninle birleştirmek üzere bıraktığı dosyalar, projenin amacı (proje tüzüğü / `charter`) ve elindeki yapay zekâ modelleri. Sen onay vermeden hiçbir şey değiştirilmez.
+`/pm-setup` yazıp Enter'a bas. Kurulum sohbeti bir devir notu (`.pm/local/handover.md`) bıraktıysa ajan önce onu okur. Üç cümleyle `.pm`'in ne olduğunu anlatır ve proje yönetimi tarafını nasıl anlatmasını istediğini sorar (aşağıda). Sonra Backlog içinde bir kurulum Epic'i (adımlarını alt görev olarak tutan üst görev) açar ve bulduklarını tek tek sorar: mevcut ajan kuralların, Git kancaların, CI (kod gönderildiğinde testleri otomatik çalıştıran sürekli entegrasyon akışı), testlerin, görev listelerin, kurulumun seninle birleştirmek üzere bıraktığı dosyalar, projenin amacı (proje tüzüğü / `charter`) ve elindeki yapay zekâ modelleri. Sen onay vermeden hiçbir şey değiştirilmez. Kurulum, projenden küçük ve gerçek bir işle ve sonraki oturum için hazır bir promptla biter.
 
 Zaten kullandığın MCP sunucuları, eklentiler (`plugin`), beceriler veya uygulamalar var mı? [Kendi araçlarını işe yarar kıl](own-tools.md) sayfasına bak. `/pm-setup` bunları tek tek ele alır, mevcut kurulumunu korur ve onay verirsen kısa bir “hangi araç ne zaman” kuralı ile gerçek bir duman testi (`smoke check`, aracın gerçekten çalıştığını gösteren küçük bir deneme) ekler.
 
-En sonda araçların sana nasıl açıklanmasını istediğini sorar: **kısa ipuçları** (varsayılan), **birlikte deneyelim** veya **kapalı**. Bunu sohbette istediğin zaman değiştirebilirsin ("öğretmeyi bırak", "Backlog'u zaten biliyorum").
+Nasıl anlattığı: **kısa ipucu** (varsayılan: yeni bir şey ilk kez çıktığında tek cümle, aynı şey için en fazla iki kez), **birlikte dene** (adımı sana bırakır, yol gösterir; hiç komut yazmazsın) ya da **kapalı** (açıklama yok; dosyalarını değiştirmeden önce yine sorar). Kapalı'yı seçmezsen ilk gerçek iş birlikte yapılır. Sohbette istediğin an değiştirebilirsin: "anlatmayı bırak", "görevleri açıkla", "Backlog'u zaten biliyorum".
 
 ## Sonradan güncelleme
 
