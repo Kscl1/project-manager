@@ -32,19 +32,9 @@ Bunları tek tek, her seçenek için tek cümleyle sor:
 
 Katmanlar `core`, seçildiyse `map` ve `swarm`'dır. Aşağıda `<layers>` olarak kullan, örneğin `core,map`.
 
-### 2. Projeyi güvenle değiştirilebilir yap
+### 2. Python'u ve Git'i kontrol et, project-manager'ı indir
 
-Proje klasöründe:
-
-1. `git rev-parse --is-inside-work-tree`. Hata verirse projenin henüz Git geçmişi yoktur: evet gelirse `git init` çalıştır, sonra `git status --short` çıktısını göster ve `.gitignore`'un gizli bilgileri ve büyük klasörleri (`.env`, `node_modules`) dışarıda tuttuğunu kontrol et. İkinci bir evetle `git add -A` ve `git commit -m "chore: first commit before project-manager"` çalıştır.
-2. `git status --porcelain`. Değişiklik listelerse göster ve iki yol sun: commit'lemek ya da `git stash push -u -m "before project-manager"` ile kenara koymak. İkisi de istenmezse burada dur.
-3. Şu anki dalı (`git branch --show-current`) ve `git config core.hooksPath` bir şey yazıyor mu, not et. Sonra evet gelirse `git switch -c pm-setup`.
-
-Kullanıcıya buradan sonra projede olan her şeyi nasıl geri alacağını söyle: `git switch <eski dal>`, sonra `git branch -D pm-setup`; `.pm` klasörü hâlâ duruyorsa sil; `core.hooksPath` önceden boşsa `git config --unset core.hooksPath`; kenara konan değişiklikler `git stash pop` ile geri gelir. Makineye kurulan programlar (4. adım) kalır; onlar için [Yükseltme ve geri alma](upgrading.md) sayfasına bak.
-
-### 3. project-manager'ı indir
-
-Python 3.11 ya da daha yenisi ve Git gerekir. `python --version` ya da `git --version` hata verirse kullanıcıya [Başlangıç](getting-started.md) sayfasındaki ilk bölümün komutlarını ver, evetle çalıştır; program hâlâ bulunmuyorsa yeni bir terminal açmasını iste.
+Python 3.11 ya da daha yenisi ve Git gerekir. `python --version` ya da `git --version` hata verirse kullanıcıya [Başlangıç](getting-started.md) sayfasındaki ilk bölümün komutlarını ver, evetle çalıştır; program hâlâ bulunmuyorsa yeni bir terminal açmasını iste. İkisi de çalışmadan devam etme.
 
 project-manager'ı projenin **yanına**, projeyi içeren klasöre indir, asla projenin içine değil:
 
@@ -52,12 +42,23 @@ project-manager'ı projenin **yanına**, projeyi içeren klasöre indir, asla pr
 git clone --branch v0.1.0-alpha.4 https://github.com/Kscl1/project-manager.git
 ```
 
-Orada zaten bir `project-manager` klasörü varsa onu kullan ve kullanıcıya hangi sürüm olduğunu söyle (`git -C project-manager describe --tags`). Aşağıda `<pm>` bu klasör, `<project>` proje klasörüdür.
+Orada zaten bir `project-manager` klasörü varsa kontrol et: `git -C project-manager describe --tags --exact-match` yukarıdaki sürümü yazmalı, `git -C project-manager status --porcelain` hiçbir şey yazmamalı. Sürüm farklıysa ve klasör temizse `git -C project-manager fetch --tags` ve `git -C project-manager switch --detach <sürüm>` öner; klasörde kendi değişiklikleri varsa dokunma: dur ve sor. Aşağıda `<pm>` bu klasör, `<project>` proje klasörüdür; yol boşluk içerebileceği için ikisini de her komutta tırnak içine al.
+
+### 3. Projeyi güvenle değiştirilebilir yap
+
+Proje klasöründe:
+
+1. `.pm/` zaten varsa project-manager kuruludur: dur ve kullanıcıyı [Yükseltme ve geri alma](upgrading.md) sayfasına ya da o klasörde yeni bir oturumda `/pm-setup`'a yönlendir.
+2. `git rev-parse --show-toplevel`. Hata verirse projenin henüz Git geçmişi yoktur: evet gelirse `git init` çalıştır, sonra `git status --short` çıktısını göster ve `.gitignore`'un gizli bilgileri ve büyük klasörleri (`.env`, `node_modules`) dışarıda tuttuğunu kontrol et. İkinci bir evetle `git add -A` ve `git commit -m "chore: first commit before project-manager"` çalıştır. Başka bir klasör yazarsa seçilen klasör başka bir deponun içindedir: dur ve hangi klasörün proje olduğunu sor.
+3. `git status --porcelain`. Değişiklik listelerse göster ve iki yol sun: commit'lemek ya da `git stash push -u -m "before project-manager"` ile kenara koymak. İkisi de istenmezse burada dur.
+4. Şu anki dalı (`git branch --show-current`) ve `git config core.hooksPath` bir şey yazıyor mu, not et. Sonra evet gelirse `git switch -c pm-setup`.
+
+Kullanıcıya, kurulum dalda commit'lendikten sonra (5. adım) projede olan her şeyi nasıl geri alacağını söyle: `git switch <eski dal>`, sonra `git branch -D pm-setup`; `.pm` klasörü hâlâ duruyorsa sil (önceden yoktu, içinde kullanıcının bir şeyi olamaz); `core.hooksPath` önceden boşsa `git config --unset core.hooksPath`; kenara konan değişiklikler `git stash pop` ile geri gelir. Makineye kurulan programlar (4. adım) kalır; onlar için [Yükseltme ve geri alma](upgrading.md) sayfasına bak.
 
 ### 4. Makineyi kontrol et
 
 ```bash
-python <pm>/tools/setup/bom.py --layers <layers> --project <project>
+python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>"
 ```
 
 Hiçbir şey kurmaz. Neyin kurulu olduğunu ve her adım için tek komutluk bir yapılacaklar listesi yazar. `.pm` proje dosyalarının adımını 5. adıma bırak. Diğer her adımda programın ne işe yaradığını tek cümleyle söyle, komutu göster ve evetle çalıştır; atlanan adım listene girer. `Note:` ile başlayan satırları yalnız kullanıcı yapabilir; ona söyle. Her adımdan sonra kontrolü yeniden çalıştır, ta ki yalnız proje dosyaları kalana kadar.
@@ -65,7 +66,7 @@ Hiçbir şey kurmaz. Neyin kurulu olduğunu ve her adım için tek komutluk bir 
 ### 5. Paketi kur
 
 ```bash
-python <pm>/template/.pm/tools/pm_init.py <project> --check --lang <code>
+python "<pm>/template/.pm/tools/pm_init.py" "<project>" --check --lang <code>
 ```
 
 Seçildiyse `--map` ve `--swarm` ekle. Hiçbir şey yazmaz. Çıkış 0 çakışma yok demektir; 3, projenin kendi ajan kuralları, hook'ları ya da ayarları olduğu demektir: bunlar korunur ve `/pm-setup` kullanıcıyla birleştirsin diye listelenir; başka bir çıkışta dur ve hatayı yaz. Planı birkaç sade satırla anlat, evet gelirse aynı komutu `--check` olmadan çalıştır (3 çıkışından sonra `--keep-existing` ekle).
@@ -73,10 +74,10 @@ Seçildiyse `--map` ve `--swarm` ekle. Hiçbir şey yazmaz. Çıkış 0 çakış
 Sonra kurulumu `/pm-setup` için kaydet:
 
 ```bash
-python <pm>/tools/setup/bom.py --layers <layers> --project <project> --record
+python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>" --record
 ```
 
-Evet gelirse kurulan dosyaları `pm-setup` dalında commit'le: `git add -A` ve `git commit -m "chore: install project-manager"`. Paketin commit kontrolü çalışır; geçmezse atlatma, hatayı yaz.
+Evet gelirse kurulan dosyaları `pm-setup` dalında commit'le: `git add -A` ve `git commit -m "chore: install project-manager"`. Yukarıdaki geri alma bu commit sayesinde çalışır. Paketin commit kontrolü çalışır; geçmezse atlatma, hatayı yaz. Kullanıcı hayır derse devir dosyasının Undo bölümüne `pm_init --check`'in listelediği dosyaların elle silinmesi gerektiğini yaz.
 
 ### 6. Devir dosyasını yaz
 

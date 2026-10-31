@@ -32,19 +32,9 @@ Ask these, one at a time, with one sentence on each choice:
 
 The layers are `core`, plus `map` and `swarm` when chosen. Use them below as `<layers>`, for example `core,map`.
 
-### 2. Make the project safe to change
+### 2. Check Python and Git, and get project-manager
 
-In the project folder:
-
-1. `git rev-parse --is-inside-work-tree`. If it fails, the project has no Git history yet: on a yes run `git init`, then show `git status --short` and check that `.gitignore` keeps out secrets and large folders (`.env`, `node_modules`). On a second yes run `git add -A` and `git commit -m "chore: first commit before project-manager"`.
-2. `git status --porcelain`. If it lists changes, show them and offer two ways: commit them, or put them aside with `git stash push -u -m "before project-manager"`. With neither, stop here.
-3. Note the current branch (`git branch --show-current`) and whether `git config core.hooksPath` prints anything. Then, on a yes, `git switch -c pm-setup`.
-
-Tell the user how to undo everything that happens in the project from here: `git switch <old branch>`, then `git branch -D pm-setup`; if a `.pm` folder is still there, delete it; if `core.hooksPath` was empty before, `git config --unset core.hooksPath`; a stash comes back with `git stash pop`. Programs installed on the machine (step 4) stay; [Upgrade and roll back](upgrading.md) covers them.
-
-### 3. Get project-manager
-
-It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found.
+It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found. Go on only when both work.
 
 Clone project-manager **next to** the project, in the folder that holds it, never inside it:
 
@@ -52,12 +42,23 @@ Clone project-manager **next to** the project, in the folder that holds it, neve
 git clone --branch v0.1.0-alpha.4 https://github.com/Kscl1/project-manager.git
 ```
 
-If a `project-manager` folder is already there, use it and tell the user its release (`git -C project-manager describe --tags`). Below, `<pm>` is that folder and `<project>` the project folder.
+If a `project-manager` folder is already there, check it: `git -C project-manager describe --tags --exact-match` must print the release above and `git -C project-manager status --porcelain` must print nothing. If the release differs and the folder is clean, offer `git -C project-manager fetch --tags` and `git -C project-manager switch --detach <release>`; if it has changes of its own, do not touch it: stop and ask. Below, `<pm>` is that folder and `<project>` the project folder; quote both in every command, because a path may contain spaces.
+
+### 3. Make the project safe to change
+
+In the project folder:
+
+1. If `.pm/` is already there, project-manager is installed: stop, and point the user to [Upgrade and roll back](upgrading.md), or to `/pm-setup` in a new session in that folder.
+2. `git rev-parse --show-toplevel`. If it fails, the project has no Git history yet: on a yes run `git init`, then show `git status --short` and check that `.gitignore` keeps out secrets and large folders (`.env`, `node_modules`). On a second yes run `git add -A` and `git commit -m "chore: first commit before project-manager"`. If it prints a different folder, the chosen folder sits inside another repository: stop and ask which folder is the project.
+3. `git status --porcelain`. If it lists changes, show them and offer two ways: commit them, or put them aside with `git stash push -u -m "before project-manager"`. With neither, stop here.
+4. Note the current branch (`git branch --show-current`) and whether `git config core.hooksPath` prints anything. Then, on a yes, `git switch -c pm-setup`.
+
+Tell the user how to undo everything that happens in the project from here, once the install is committed on the branch (step 5): `git switch <old branch>`, then `git branch -D pm-setup`; delete the `.pm` folder if it is still there (it did not exist before, so nothing of theirs is in it); if `core.hooksPath` was empty before, `git config --unset core.hooksPath`; a stash comes back with `git stash pop`. Programs installed on the machine (step 4) stay; [Upgrade and roll back](upgrading.md) covers them.
 
 ### 4. Check the machine
 
 ```bash
-python <pm>/tools/setup/bom.py --layers <layers> --project <project>
+python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>"
 ```
 
 It installs nothing. It prints what is installed and a To do list, one command per step. Leave the step for the `.pm` project files to step 5. For every other step, say what the program is for in one sentence, show the command and run it on a yes; a skipped step goes on your list. Lines that start with `Note:` are things only the user can do; tell them. Run the check again after each step, until only the project files are left.
@@ -65,7 +66,7 @@ It installs nothing. It prints what is installed and a To do list, one command p
 ### 5. Install the package
 
 ```bash
-python <pm>/template/.pm/tools/pm_init.py <project> --check --lang <code>
+python "<pm>/template/.pm/tools/pm_init.py" "<project>" --check --lang <code>
 ```
 
 Add `--map` and `--swarm` when chosen. It writes nothing. Exit 0 means no conflicts; exit 3 means the project already has its own agent rules, hooks or settings, which are kept and listed for `/pm-setup` to merge with the user; any other exit, stop and write the error down. Explain the plan in a few plain lines, then on a yes run the same command without `--check` (add `--keep-existing` after exit 3).
@@ -73,10 +74,10 @@ Add `--map` and `--swarm` when chosen. It writes nothing. Exit 0 means no confli
 Then record the setup for `/pm-setup`:
 
 ```bash
-python <pm>/tools/setup/bom.py --layers <layers> --project <project> --record
+python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>" --record
 ```
 
-On a yes, commit the installed files on the `pm-setup` branch: `git add -A` and `git commit -m "chore: install project-manager"`. The package's commit hook runs; if it fails, do not bypass it: write the error down.
+Commit the installed files on the `pm-setup` branch, on a yes: `git add -A` and `git commit -m "chore: install project-manager"`. This commit is what makes the undo above work. The package's commit hook runs; if it fails, do not bypass it: write the error down. If the user says no, write under Undo in the hand-over file that the files `pm_init --check` listed must be removed by hand.
 
 ### 6. Write the hand-over file
 
