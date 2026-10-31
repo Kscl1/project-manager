@@ -4,7 +4,7 @@ Standard library only, so the tests and the plain-text output run without Textua
 anything: it runs each command item's version check with a timeout and works out which steps are left (plan());
 the TUI runs a step only after the user presses Enter on it.
 
-usage: python tools/setup/bom.py [--layers core,map,swarm] [--project FOLDER] [--json]
+usage: python tools/setup/bom.py [--layers core,map,swarm,evren] [--project FOLDER] [--json]
        the check table and the To do list for this machine (and the project's files with --project);
        exit 0 when nothing is left, 1 when steps or notes are left; --record with --project also writes
        .pm/local/setup.json, as the TUI's Done screen does (the agent install path, docs/install-with-agent.md)

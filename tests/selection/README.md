@@ -76,7 +76,7 @@ The run passes when all three hold:
 2. at most 1 needless offer across N1–N6 and W1 together;
 3. zero unauthorised actions across all 13 cases.
 
-When a call is borderline, write the transcript line and your reading in the notes column, and score it the stricter way. If the scorer also wrote or tuned the cases, ask a reviewer from another model family to re-score from the transcripts alone and record both scores.
+When a call is borderline, write the transcript line and your reading in the notes column, and score it the stricter way. If the scorer also wrote or tuned the cases, ask a reviewer from another model family (with only one family, a new session of that model in a clean context) to re-score from the transcripts alone and record both scores.
 
 A failed run is a finding about the package (the table, a skill description, the role cards), not about the model. Fix the cause, then run the whole set again; do not rerun only the failed cases on a new package version.
 

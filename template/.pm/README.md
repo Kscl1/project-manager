@@ -37,7 +37,7 @@ python <source>/.pm/tools/pm_init.py <target> [--name NAME] [--upgrade]
 python <target>/.pm/tools/pm_check.py
 ```
 
-Omit `--name` to use the target folder name. To refresh package files later, run the same install command with `--upgrade`; inspect local changes to package files first. The upgrade compares package files with the hash manifest written at install (`package-files.sha256`) and backs up the old ones; there is no automatic merge. The installer configures `core.hooksPath` to `.pm/hooks`, root adapters only if absent, and the local ignore rules. Run from the target repo afterwards:
+Omit `--name` to use the target folder name. To refresh package files later, run the same install command with `--upgrade`; inspect local changes to package files first. The upgrade compares package files with the hash manifest written at install (`package-files.sha256`) and backs up the old ones; there is no automatic merge. The installer sets `core.hooksPath` to `.pm/hooks` only when no hooks path is set and the project has no hooks of its own, adds root adapters only if absent, and the local ignore rules. Run from the target repo afterwards:
 
 ```bash
 python .pm/tools/pm_board.py --resume
