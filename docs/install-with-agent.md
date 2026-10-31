@@ -6,7 +6,7 @@ description: The steps a coding agent follows to install project-manager into yo
 You do not have to install project-manager by hand. Open your coding agent (Claude Code, Codex, Pi or another) in the folder that holds your project, and paste this:
 
 ```text
-Install project-manager into my project. Follow https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md step by step, ask me before every change, and stop where it says to stop.
+Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md (download it with curl if your web tool only gives a summary), follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
 The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead.
@@ -20,6 +20,7 @@ You install project-manager into the user's project. Follow these steps in order
 - Do not edit the project's code and do not create example files. Do not run `/pm-setup` here.
 - Keep a list as you go: what you installed, what the user skipped, and every error with its command. It goes into the hand-over file in step 6.
 - Stop after step 7.
+- Write commit messages in the project language after the type, for example `chore: <install project-manager, in that language>`; the type stays English.
 
 ### 1. Ask
 
@@ -42,6 +43,8 @@ Clone project-manager **next to** the project, in the folder that holds it, neve
 git clone --branch v0.1.0-alpha.5 https://github.com/Kscl1/project-manager.git
 ```
 
+Git may print `warning: refs/tags/... is not a commit!` before it lands on the release: that is expected for a release tag, and the clone is fine.
+
 If a `project-manager` folder is already there, check it: `git -C project-manager describe --tags --exact-match` must print the release above and `git -C project-manager status --porcelain` must print nothing. If the release differs and the folder is clean, offer `git -C project-manager fetch --tags` and `git -C project-manager switch --detach <release>`; if it has changes of its own, do not touch it: stop and ask. Below, `<pm>` is that folder and `<project>` the project folder; quote both in every command, because a path may contain spaces.
 
 ### 3. Make the project safe to change
@@ -49,7 +52,7 @@ If a `project-manager` folder is already there, check it: `git -C project-manage
 In the project folder:
 
 1. If `.pm/` is already there, project-manager is installed: stop, and point the user to [Upgrade and roll back](upgrading.md), or to `/pm-setup` in a new session in that folder.
-2. `git rev-parse --show-toplevel`. If it fails, the project has no Git history yet: on a yes run `git init`, then show `git status --short` and check that `.gitignore` keeps out secrets and large folders (`.env`, `node_modules`). On a second yes run `git add -A` and `git commit -m "chore: first commit before project-manager"`. If it prints a different folder, the chosen folder sits inside another repository: stop and ask which folder is the project.
+2. `git rev-parse --show-toplevel`. If it fails, the project has no Git history yet: on a yes run `git init`, then show `git status --short` and check that `.gitignore` keeps out secrets and large folders (`.env`, `node_modules`). On a second yes run `git add -A` and `git commit` with a message such as "chore: first commit before project-manager" in the project language. If it prints a different folder, the chosen folder sits inside another repository: stop and ask which folder is the project.
 3. `git status --porcelain`. If it lists changes, show them and offer two ways: commit them, or put them aside with `git stash push -u -m "before project-manager"`. With neither, stop here.
 4. Note the current branch (`git branch --show-current`) and whether `git config core.hooksPath` prints anything. Then, on a yes, `git switch -c pm-setup`.
 
@@ -61,7 +64,7 @@ Tell the user how to undo everything that happens in the project from here, once
 python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>"
 ```
 
-It installs nothing. It prints what is installed and a To do list, one command per step. Leave the step for the `.pm` project files to step 5. For every other step, say what the program is for in one sentence, show the command and run it on a yes; a skipped step goes on your list. Lines that start with `Note:` are things only the user can do; tell them. Run the check again after each step, until only the project files are left.
+It installs nothing. It prints what is installed and a To do list, one command per step; exit 1 only means steps are left, 2 means a wrong argument. Leave the step for the `.pm` project files to step 5. For every other step, say what the program is for in one sentence, show the command and run it on a yes; a skipped step goes on your list. Lines that start with `Note:` are things only the user can do; tell them. Run the check again after each step, until only the project files are left.
 
 ### 5. Install the package
 
@@ -77,7 +80,7 @@ Then record the setup for `/pm-setup`:
 python "<pm>/tools/setup/bom.py" --layers <layers> --project "<project>" --record
 ```
 
-Commit the installed files on the `pm-setup` branch, on a yes: `git add -A` and `git commit -m "chore: install project-manager"`. This commit is what makes the undo above work. The package's commit hook runs; if it fails, do not bypass it: write the error down. If the user says no, write under Undo in the hand-over file that the files `pm_init --check` listed must be removed by hand.
+Commit the installed files on the `pm-setup` branch, on a yes: `git add -A` and `git commit` with a message such as "chore: install project-manager" in the project language. This commit is what makes the undo above work. The package's commit hook runs; if it fails, do not bypass it: write the error down. If the user says no, write under Undo in the hand-over file that the files `pm_init --check` listed must be removed by hand.
 
 ### 6. Write the hand-over file
 
@@ -113,6 +116,8 @@ Tell the user in a few lines what is installed and what is open. Then give them 
 > Open your project folder itself in a new session, not this one: the agent reads a project's settings, hooks and skills only from the folder it starts in.
 > - Claude Code in a terminal: `cd "<project>"`, then `claude`. Claude Desktop: Code, then choose the folder.
 > - Pi: `cd "<project>"`, then `pi`.
+>
+> Claude Code first asks whether you trust the folder: it is your project, so choose "Yes, I trust this folder". It may also ask whether to turn on the project's servers for current documentation and diagrams (Context7, LikeC4): allow them.
 >
 > Then type `/pm-setup` (in Pi `/skill:pm-setup`, in Codex `$pm-setup`).
 
