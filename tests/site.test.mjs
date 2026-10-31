@@ -28,6 +28,12 @@ test('English and Turkish pages build at the project Pages base', () => {
     assert.match(html(name), /pm-setup/);
     assert.match(html(name), /tools\/setup\/app\.py/);
   }
+  // The agent install page clones the release too, and its prompt points the agent at the page in the same language.
+  for (const [name, source] of [['install-with-agent', 'docs/install-with-agent.md'], ['tr/install-with-agent', 'docs/tr/install-with-agent.md']]) {
+    assert.ok(html(name).includes(`--branch ${release}`), `${name} installs ${release}, the README's release`);
+    assert.ok(html(name).includes(`raw.githubusercontent.com/Kscl1/project-manager/main/${source}`), `${name} prompt names ${source}`);
+    assert.match(html(name), /handover\.md/);
+  }
 });
 
 const pages = readdirSync('docs').filter((name) => name.endsWith('.md')).map((name) => name.slice(0, -'.md'.length));

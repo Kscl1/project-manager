@@ -14,25 +14,17 @@ A shared, file-based workspace where you and coding agents from different model 
 
 It is neither a harness nor a framework. It combines existing open tools with plain Markdown records and standard-library Python checks.
 
-## How the parts fit together
-
-See [How it works](docs/how-it-works.md) for the workflow, roles, architecture diagram and what runs where.
-
-- [Introduction](docs/index.md): what it is and who it is for.
-- [Getting started](docs/getting-started.md): the guided setup and manual path.
-- [Türkçe giriş](docs/tr/index.md) · [Türkçe başlangıç](docs/tr/getting-started.md).
-- [Working principles](template/.pm/principles.md): the rules behind the workflow.
-
-## Layers
-
-| Layer           | Default              | Contents                                                                                                            |
-| --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
-| **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
-| **Swarm** | Opt-in (`--swarm`) | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
-| **EVREN** | Opt-in, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi ([details](docs/getting-started.md#evren-layer-optional)). |
-
 ## Install
+
+Open your coding agent in the folder that holds your project and paste this:
+
+```text
+Install project-manager into my project. Follow https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md step by step, ask me before every change, and stop where it says to stop.
+```
+
+The agent asks which project and which layers, checks your machine, installs on a new `pm-setup` branch and leaves a hand-over note; nothing changes without your yes. Then you open the project in a new session and type `/pm-setup`. What it follows: [Install with your agent](docs/install-with-agent.md) ([Türkçe](docs/tr/install-with-agent.md)).
+
+### Or by yourself, with the setup TUI
 
 Requires **Python 3.11+** and **Git** in a Git repository (`git init`). Clone `project-manager` **next to** your project and run the setup TUI:
 
@@ -53,6 +45,24 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 - **Safe by default:** `Check` is read-only, each install step waits for `y`, and existing project files are never overwritten.
 - **Next step:** Open your project in your coding agent and run `/pm-setup`.
 - **Full guide and manual path:** See [`docs/getting-started.md`](docs/getting-started.md).
+
+## How the parts fit together
+
+See [How it works](docs/how-it-works.md) for the workflow, roles, architecture diagram and what runs where.
+
+- [Introduction](docs/index.md): what it is and who it is for.
+- [Getting started](docs/getting-started.md): the guided setup and manual path.
+- [Türkçe giriş](docs/tr/index.md) · [Türkçe başlangıç](docs/tr/getting-started.md).
+- [Working principles](template/.pm/principles.md): the rules behind the workflow.
+
+## Layers
+
+| Layer           | Default              | Contents                                                                                                            |
+| --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
+| **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
+| **Swarm** | Opt-in (`--swarm`) | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
+| **EVREN** | Opt-in, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi ([details](docs/getting-started.md#evren-layer-optional)). |
 
 ## Status
 
