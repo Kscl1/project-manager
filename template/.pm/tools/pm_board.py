@@ -286,14 +286,14 @@ def criteria_lines(task, when_empty):
 
 
 def continue_lines(active):
-    """The newest Active task to continue, then the other Active tasks by age."""
+    """The newest Active task to continue, then the other Active tasks newest first."""
     lines = [f"{len(active)} tasks are Active; continue the newest one."] if len(active) > 1 else []
     chosen = active[0]
     lines.append(f"Continue: {chosen['title']} ({chosen['id']})")
     lines.append(f"Next: {chosen['next'] or NOT_SET}")
     lines.extend(criteria_lines(chosen, "Acceptance criteria: none unchecked"))
     if len(active) > 1:
-        lines.append("Also Active (newest first; leave them until this one is Done):")
+        lines.append("Also Active (newest first; leave them for now):")
         lines.extend(f"- {task['title']} ({task['id']}){updated_note(task)}" for task in active[1:])
     return lines
 
