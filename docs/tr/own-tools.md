@@ -5,11 +5,11 @@ description: Zaten kullandığın MCP sunucularını, eklentileri, becerileri ve
 
 Zaten kullandığın MCP sunucularını (`MCP server`, ajanın dış araçlara bağlanmasını sağlayan servisler), eklentileri (`plugin`), becerileri (`skill`, ajana belirli bir işi nasıl yapacağını öğreten komut paketleri) ve uygulamaları olduğu gibi koru. project-manager'ın bunları kendi içinde sunması veya sahiplenmesi gerekmez. Bir aracı kurmak onu yalnızca erişilebilir yapar; lider ajana (`lead`, işi yöneten ana kodlama ajanı) **onu ne zaman kullanacağını** söyleyen kısa bir kural ve gerçek bir duman testi (`smoke check`, aracın gerçekten çalıştığını doğrulayan küçük bir deneme) ise onu işe yarar kılar.
 
-İşe `/pm-setup` (veya kendi ajanındaki karşılığı) ile başla. Bu komutun mevcut araçlar adımı yalnızca aşağıdaki örnekler için değil, her araç için çalışır. Araçları tek tek ele al; bir şey kurmadan, ayar değiştirmeden veya özel veri alabilecek bir servisi çağırmadan önce mutlaka izin iste.
+İşe `/pm-setup` (veya kendi ajanındaki karşılığı) ile başla. Mevcut araçlar adımı yalnızca aşağıdaki örnekler için değil, her araç için çalışır. Modeller, araçlar ve harita normalde kurulum Epic'inin dışında tek bir sonraki kurulum görevi içinde bekler. Bunları daha önce isteyebilirsin; ilk gerçek iş için gereken bir araç da erken ele alınabilir. Araçları tek tek ele al; bir şey kurmadan, ayar değiştirmeden veya özel veri alabilecek bir servisi çağırmadan önce izin iste.
 
 ## Başka bir katalog değil, küçük bir yöntem
 
-Her araç için lider ajana kurulum `Epic`'i (alt görevleri barındıran üst görev) altında bir alt görev açtır ya da var olanı kullandır ve şunları kaydet:
+Her araç için işi sonraki kurulum görevi içinde veya onun bir alt görevi içinde kaydet. Araç erken ele alınırsa yine aynı yere kaydet; yalnızca kalan işi ertele. Şunları kaydet:
 
 1. **İşi ve tetikleyicisi.** Projedeki hangi soruyu yanıtlıyor? Lider ajan bu araca ne zaman başvurmalı, ne zaman başvurmamalı? "Her zaman bu aracı kullan" gibi genel ifadeler yerine somut bir durum seç.
 2. **Zaten ne var?** Kimlik bilgisi depolarını (parola ve anahtar kasalarını) açmadan projenin ve ajanın mevcut kurulumunu incele. Araç yalnızca bu projede mi (`project-local`) yoksa kullanıcı genelinde mi (`user-global`) kurulu? Hangi ajan onu görebiliyor? Kurulum ekranının (`TUI`) `similar` listesi tam bir döküm değil, yalnızca bir başlangıç noktasıdır. Daha geniş kullanıcı ayarlarını taramadan önce izin iste.

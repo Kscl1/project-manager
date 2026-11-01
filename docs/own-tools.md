@@ -5,11 +5,11 @@ description: Keep the MCP servers, plugins, skills and apps you already use, and
 
 Keep the MCP servers, plugins, skills and apps you already use. project-manager does not need to ship or own them. Installation makes a tool available; a short rule telling the lead **when to use it**, and a real smoke check, make it useful.
 
-Start with `/pm-setup` (or your agent's equivalent). Its existing-tools step works for any tool, not just the examples below. Do one tool at a time, with permission before installing, changing configuration or calling a service that could receive private data.
+Start with `/pm-setup` (or your agent's equivalent). Its existing-tools step works for any tool, not just the examples below. Models, tools and the map normally wait in one later setup task outside the setup Epic. You can ask for them sooner; a tool needed for the first real task can also be handled early. Do one tool at a time, with permission before installing, changing configuration or calling a service that could receive private data.
 
 ## A small method, not another catalogue
 
-For each tool, have the lead create/reuse a child task under the setup Epic and record:
+For each tool, have the lead record the work in the later setup task or one of its children. If a tool is handled early, record it there too; defer only what remains. Record:
 
 1. **Job and trigger.** What project question does it answer? When should the lead reach for it, and when should it not? Prefer a concrete situation over “always use this tool.”
 2. **What exists already.** Inspect the project's and agent's existing setup without opening credential stores. Is it project-local or user-global? Which agent can see it? The setup TUI's `similar` list is a starting point, not a complete inventory. Ask before scanning broader user configuration.

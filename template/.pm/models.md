@@ -7,11 +7,11 @@ Which model fills which role in this project. This file names roles and what eac
 | Role | Needs |
 |---|---|
 | lead | Strong planning and review; reads large context; writes briefs, integrates; may write code itself when that is cheaper. |
-| peer lead | Equal to the lead and from a different model family (none in a project with one model family): takes its own job or package, runs its own helpers, cross-reviews; disagreements go to the owner. |
+| peer lead | Equal to the lead and from a different model family (none in a project with one model family): takes its own job or package and runs its own helpers. A peer lead's package follows the risk rule in the lead card, step 7; disagreements go to the owner. |
 | worker (scoped, cheap) | Reliable tool calling on a small brief; low cost per run; follows the stop condition in the brief. |
 | worker (hard or subtle) | Deeper reasoning at a higher thinking level; used when a cheap worker failed or the leaf is tricky. |
 | researcher | Reads and cites sources; marks unverified claims. |
-| reviewer | Always a different family from the author; a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family). |
+| reviewer | Always a different family from the author; a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family). Which changes need a reviewer: lead card, step 7. |
 | test-writer | Works in parallel with the coder; no family rule. |
 
 Which data may go to which provider is a separate project decision; record it as a decision in `.pm/decisions/` (index: `.pm/decisions.md`).
@@ -30,4 +30,4 @@ Do not set a repeated-command or token budget from a model name alone; the brief
 
 1. Record the model, harness, provider, actual thinking level and dated evidence. Label unrun candidates as such.
 2. Run candidates on the same scoped brief, acceptance checks and timebox. Compare pass rate, cost and rework.
-3. Add the row only after reviewing results. The lead chooses the worker; the reviewer must be from another family, or a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family).
+3. Add the row only after reviewing results. The lead chooses the worker and applies the risk rule in the lead card, step 7. When independent review is required, the reviewer must be from another family, or a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family). Otherwise record `Review: lead self-check`.
