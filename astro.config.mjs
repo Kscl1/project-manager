@@ -26,7 +26,7 @@ export default defineConfig({
       // Each page by slug: Starlight links the reader's language and uses that page's title. Its own default menu
       // nests translated pages under docs/tr, because the pages live outside src/content/docs. A new page goes here;
       // the site test fails when a page is missing from the menu.
-      sidebar: ['index', 'how-it-works', 'install-with-agent', 'getting-started', 'own-tools', 'upgrading'],
+      sidebar: ['index', 'how-it-works', 'install-with-agent', 'getting-started', 'optional-layers', 'own-tools', 'upgrading'],
     }),
   ],
 });
