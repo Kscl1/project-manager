@@ -1,5 +1,6 @@
 """Guard the shipped review and audit instructions against conflicting policies."""
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -25,6 +26,53 @@ class ReviewPolicyTest(unittest.TestCase):
             self.assertIn(phrase, step)
         self.assertNotIn("Never review your own code", step)
         self.assertNotIn("also gets cross-review", step)
+
+    def test_self_check_handoff_finds_project_work_beyond_recent_setup_children(self):
+        spec = importlib.util.spec_from_file_location("pm_resume_review_policy", PM / "tools/pm_resume.py")
+        resume = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(resume)
+        summary = resume.final_summary(
+            [
+                "## Final Summary",
+                "Owner said: Fix the project.",
+                "Found: It works.",
+                "Next: none.",
+                "Review: lead self-check (tests and diff)",
+            ]
+        )
+        project = {
+            "id": "TASK-1",
+            "title": "Project fix",
+            "status": "Done",
+            "updated": "2026-01-01",
+            "summary": summary,
+        }
+        children = [
+            {
+                "id": f"TASK-{i + 2}",
+                "title": f"Setup child {i}",
+                "status": "Done",
+                "updated": f"2026-01-{i + 2:02}",
+                "summary": ["Setup done."],
+            }
+            for i in range(resume.CLOSED_SHOWN + 2)
+        ]
+        recent = "\n".join(resume.closed_lines([project, *children]))
+        self.assertIn("Setup child", recent)
+        self.assertNotIn("Project fix", recent)
+        self.assertIn("Review: lead self-check (tests and diff)", project["summary"])
+
+        step = text("roles/lead.md").split("\n7. ", 1)[1].split("\n8. ", 1)[0]
+        for phrase in (
+            "`Review: lead self-check (<what was checked>)` as one of its first lines",
+            "`backlog task list -s Done --plain`",
+            "closed since the last session",
+            "open every full summary with `backlog task <id> --plain`",
+            "even when more than three tasks closed",
+            "all Done summaries if the last session's end is unclear",
+            "say in one line if you disagree with a self-check",
+        ):
+            self.assertIn(phrase, step)
 
     def test_charter_records_only_work_actually_done(self):
         charter = text("templates/charter.md")
