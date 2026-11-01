@@ -704,6 +704,21 @@ class PmInitTest(unittest.TestCase):
         staged = subprocess.run([GIT, "diff", "--cached", "--name-only"], cwd=self.root, capture_output=True, text=True)
         self.assertEqual(len(staged.stdout.split()), len(written))
 
+    def test_a_fresh_install_with_a_language_counts_each_file_once(self):
+        # --lang writes AGENTS.md and .claude/settings.json, and the plan names both again for the language itself;
+        # the summary counts files on disk, so each of them is one.
+        before, folders_before = self.snapshot()[0], self.empty_folders()
+
+        result = self.run_init(self.root, "--lang", "tr")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        folders = self.empty_folders() - folders_before
+        self.assertIn("AGENTS.md", written)
+        self.assertIn(".claude/settings.json", written)
+        self.assertIn(f"Added {len(written)} files and {len(folders)} empty folders.", result.stdout)
+        self.assertIn("Language: tr", self.agents_text())
+
     def test_an_added_folder_counts_every_file_in_it(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = self.snapshot()[0]

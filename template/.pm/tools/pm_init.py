@@ -860,12 +860,22 @@ def listed(parts):
     return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
+def written_files(entries, added):
+    """How many distinct files these lines write: a file the plan names twice (AGENTS.md, then its language line) is
+    one file, and a copied folder still counts every file in it."""
+    files = {}
+    for change in entries:
+        if change.added == added:
+            files[change.path] = max(files.get(change.path, 0), change.files)
+    return sum(files.values())
+
+
 def result_lines(target, entries, conflicts, merge):
     """The few lines a real install prints instead of the whole plan: what it added or changed, what it kept of the
     user's, and where the rest waits. --check still prints the plan itself. The counts are files, not plan lines: a
     copied folder counts every file in it, so the number is one a person can check on disk."""
-    added = sum(change.files for change in entries if change.added)
-    changed = sum(change.files for change in entries if not change.added)
+    added = written_files(entries, added=True)
+    changed = written_files(entries, added=False)
     folders = sum(1 for change in entries if change.action == "create")
     settings = sum(1 for change in entries if not change.files and change.action in {"set", "stage"})
     lines = []
