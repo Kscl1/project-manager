@@ -1,6 +1,6 @@
 ---
 name: pm-setup
-description: Integrate .pm into the user's project through conversation, after an install chat, the setup TUI or the user has installed the package. Opens with three fixed sentences and asks how the user wants the project-management side explained, walks the project's existing agent rules, hooks, CI, tests, task lists and the installer's merge-by-hand list, records the answers in a Backlog setup Epic, and ends with one small real task from the project. Run only when the user calls it.
+description: Integrate .pm into the user's project through conversation, after an install chat, the setup TUI or the user has installed the package. Opens with three fixed sentences and asks how the user wants the project-management side explained, walks the project's existing agent rules, hooks, CI, tests, task lists and the installer's merge-by-hand list, reads the project back and drafts its charter with the user, records the answers in a Backlog setup Epic, ends with one small real task from the project, and leaves models, own tools and the map for one later task. Run only when the user calls it.
 disable-model-invocation: true
 ---
 
@@ -33,6 +33,17 @@ Reply in the user's language. Assume they know their project, not AI or project-
    On a repeat run keep the file and its lists: say the current mode in one line and ask again only if the user wants to change it.
 3. From here on, explain as the root `AGENTS.md` section "Lead only: teaching" says: one hint after the action, `known` and `hinted` kept current, the first hints' words from `texts.md`.
 
+## Step 2: read the project back
+
+Before any setup question, read the project without changing anything: its README, the top-level folders and main entry points, the test command if it is obvious, and `git log --oneline -15`. Then send one message, in the project language and plain words:
+
+- three sentences on what the project is and does, as you understood it;
+- a draft of the charter's four answers, one line each: why the project exists, for whom, what is out of scope, what result counts as success;
+- one sentence that everything happens on the work branch the install made (`handover.md` names it) and Git keeps the old version, so nothing is lost;
+- one question: is this right? Correct anything, or say yes.
+
+Ask nothing the files already answer. On the reply, create the setup Epic (below) and write `.pm/charter.md` from `.pm/templates/charter.md` with the corrected answers, in its first child: status Draft, the user's intent confirmed, every review gate the template names left pending.
+
 ## Standards to keep
 
 Adapt the workflow to the project, not these rules. When one clashes with the project, explain it and offer a compatible option instead of dropping it silently.
@@ -46,8 +57,8 @@ Adapt the workflow to the project, not these rules. When one clashes with the pr
 
 ## Track the conversation
 
-- Check that Backlog uses this project's `.pm/backlog/`. If a kept `backlog.config.yml` or a `backlog/` folder points elsewhere, settle that with the user first; never write into the wrong tracker. Steps 0 and 1 are the only work before a task exists.
-- Reuse the setup Epic on a repeat run. Otherwise create it: `backlog task create "Set up project-manager" --type epic --ac "Every setup checklist answer and outcome is recorded in a child task" --ac "The final check result and the remaining work are reported"`. Use the ID it returns. The Epic and its children are setup bookkeeping: create them without a hint; the task hint and the task moment belong to the first real task.
+- Check that Backlog uses this project's `.pm/backlog/`. If a kept `backlog.config.yml` or a `backlog/` folder points elsewhere, settle that with the user first; never write into the wrong tracker. Steps 0, 1 and the reading in Step 2 are the only work before a task exists.
+- Reuse the setup Epic on a repeat run. Otherwise create it: `backlog task create "Set up project-manager" --type epic --ac "The project is read back and the user confirmed or corrected the charter draft" --ac "Checklist items 1-6 are settled, each answer recorded in a child task" --ac "One small real task from the project is done" --ac "Models, own tools and the map wait in one Ready task with a Review by line, or were done on the user's request"`. Use the ID it returns. The Epic and its children are setup bookkeeping: create them without a hint; the task hint and the task moment belong to the first real task.
 - Before working on a checklist item, create or reuse its child: `backlog task create "<item>" -p <epic-id> --ac "The user's answer and the approved outcome are recorded with evidence"`.
 - First read what items 1-6 need, without changing anything. When none of them has anything to merge (no agent rules of the project's own, no hooks, CI or task lists to connect, an empty merge-by-hand list), record all six in one child, `Existing setup`, show the user what you found as a short list and ask once; one child per item only for the items that need work.
 - Ask about one item at a time and wait for the answer. Use what the files already show, so the user need not recite their setup. Offer one recommendation with its trade-off; ask only what needs their judgment.
@@ -56,7 +67,9 @@ Adapt the workflow to the project, not these rules. When one clashes with the pr
 
 ## Walk the checklist
 
-One child task per item (or one `Existing setup` child for items 1-6, above); split a large item if needed. Do not ask the whole list at once.
+Do items 1-6 now: one child task per item (or one `Existing setup` child for items 1-6, above); split a large item if needed. Item 7 is done in Step 2. Do not ask the whole list at once.
+
+Items 8-10 (models, the user's own tools, the map) wait, unless the user asks for the full setup now or a tool in `setup.json`'s `similar` list is needed for the first real task. Put them in one Ready task outside the Epic: `backlog task create "Finish the setup: models, own tools, map" --ac "Each of items 8-10 of the pm-setup checklist is done, declined or deferred, with its answer recorded"`, list the charter's pending review gate in it, and give it the live block line `Review by: <today + 14 days> · <owner> · after the third real task`. Say once in the finish summary that it waits and when it comes back.
 
 1. **Agent instructions.** Read `AGENTS.md`, `CLAUDE.md`, `.cursorrules` and `.github/copilot-instructions.md` when present. Ask which rules still apply. Show a small merge that keeps the project's rules and makes the 'Start here' and both 'Lead only' sections of `.pm/templates/root/AGENTS.md` reachable. Never erase another agent's instructions or replace a real `CLAUDE.md` with `@AGENTS.md`.
 2. **Git hooks.** Read `core.hooksPath`, `.git/hooks` and any husky, pre-commit or lefthook setup. Ask which checks must keep running. Show how they and `.pm/hooks` can both run, through the project's hook manager when there is one; change the hook path only on a yes and check that both sets run. An unsolved clash stays open, never bypassed.
@@ -64,7 +77,7 @@ One child task per item (or one `Existing setup` child for items 1-6, above); sp
 4. **Tests.** Find the project's test commands. With permission run a small one and record the exact command and result. The package's tests do not prove the user's product works.
 5. **Task lists.** Look for TODO files and issue-tracker links; ask where current work lives. Offer a small move or links, never a silent bulk import, and keep one authoritative home.
 6. **Merge by hand.** Walk every line of `.pm/local/merge-by-hand.md`, one at a time. For `.claude/settings.json` the hooks to add are in `.pm/templates/root/claude-settings.json`; for `.mcp.json` the line gives the server's JSON. Add only that entry, keep every other key, check that the JSON still parses, and show the diff before writing.
-7. **Charter.** If `.pm/charter.md` is missing, build it from `.pm/templates/charter.md`, in small questions: why the project exists, for whom, what is out of scope, what result counts as success. Fill its links from real project paths. Leave review gates the template names as pending; never mark them passed.
+7. **Charter.** Done in Step 2. If the user skipped it there and `.pm/charter.md` is missing, build it from `.pm/templates/charter.md`, in small questions: why the project exists, for whom, what is out of scope, what result counts as success. Fill its links from real project paths. Leave review gates the template names as pending; never mark them passed; the later task holds them.
 8. **Models.** Go through `.pm/models.md` with the user: which roles they need and which accounts or tools they already have. Do not ask them to buy anything or store a credential. A role nobody can fill stays recorded as open.
 9. **Your existing tools.** Start with each `similar` line in `setup.json`, then ask whether the user has other MCP servers, plugins, skills or apps they want to use. Do one tool at a time, with a child task per tool (create or reuse).
    - Record the tool's job and trigger, its current client and scope, and its official setup source.
@@ -90,6 +103,6 @@ After the checklist, or earlier if the user wants to start work and the rest can
 1. Run `python .pm/tools/pm_check.py`. Show its result; fix only approved in-scope problems and run it again. A clean check means consistent, not that the setup works.
 2. From the Epic's children, show what was changed and checked, what was declined and what is still open, with task IDs.
 3. If `handover.md` exists, mark what this session settled; open problems stay under their heading.
-4. Close the Epic only when its children are done, with evidence and a `Doc impact:` line.
+4. Close the Epic when its criteria hold (the read-back confirmed, items 1-6 settled, the first real task done), with evidence and a `Doc impact:` line; the later task is not one of its children and stays Ready.
 5. This session changed records and the first task's files. Show `git status` and the diff, and commit them only on a yes. If the install chat made a branch (`handover.md` names it, usually `pm-setup`), offer to merge it into the branch it was made from once `git status` is clean: show `git switch <old branch>` and `git merge pm-setup`, run them only on a yes, never push. To undo instead, the same file's `## Undo` says how.
-6. End with the resume hint from `texts.md` (unless the mode is off), then the next session's prompt, ready to paste: how to open this folder, and "continue" in the project language.
+6. End with the resume hint (unless the mode is off) and the "what you can say" line from `texts.md`, then the next session's prompt, ready to paste: how to open this folder, and "continue" in the project language.

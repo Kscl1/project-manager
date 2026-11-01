@@ -51,8 +51,8 @@ Each comes after the action, as the last paragraph of the reply that did it.
 
 Before the first task is created:
 
-- EN: We open a task for this: one file that says what we are doing and what counts as done. Give me one sentence: when this is done, what will be true? I open the task with it.
-- TR: Bu iş için bir görev açacağız: ne yaptığımızı ve işin ne zaman bitmiş sayılacağını yazan tek bir dosya. Tek bir cümleyle söyle: bu iş bittiğinde ne değişmiş ya da çalışıyor olacak? Görevi o cümleyle açacağım.
+- EN: We open a task for this: one file that says what we are doing and what counts as done, like the setup task I opened earlier. Give me one sentence: when this is done, what will be true? I open the task with it.
+- TR: Bu iş için bir görev açacağız: ne yaptığımızı ve işin ne zaman bitmiş sayılacağını yazan tek bir dosya; az önce açtığım kurulum görevi gibi. Tek bir cümleyle söyle: bu iş bittiğinde ne değişmiş ya da çalışıyor olacak? Görevi o cümleyle açacağım.
 
 After it is created with that sentence as its acceptance criterion, show the ID and the line, then:
 
