@@ -1867,10 +1867,13 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         per_model, per_job = pm_run.usage_tally(jobs, state)
         self.assertEqual(
             per_job["a"],
-            {"tokens": 2000, "turns": 4, "cost": 0.5, "known": True, "turns_known": True},
+            {"tokens": 2000, "turns": 4, "cost": 0.5, "known": True, "turns_known": True, "counted": 2, "partial": 0},
             "both attempts were paid for",
         )
-        self.assertEqual(per_job["b"], {"tokens": 1100, "turns": 0, "cost": 0.0, "known": False, "turns_known": False})
+        self.assertEqual(
+            per_job["b"],
+            {"tokens": 1100, "turns": 0, "cost": 0.0, "known": False, "turns_known": False, "counted": 1, "partial": 0},
+        )
         self.assertEqual(sorted(per_model), ["big-b", "cheap-a"])
         with patch("builtins.print") as printed:
             pm_run.Run(self.run_dir).print_totals(per_model)
@@ -1885,6 +1888,73 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         )
         self.assertIn(f"{'total':<24}{'3.1k':>10}{'-':>10}{'-':>10}", text)
         self.assertNotIn(THE_NOTE, text, "a total without money says nothing about API prices")
+        self.assertNotIn("+?", text, "every attempt reported usage: no sum is marked partial")
+        self.assertNotIn(pm_run.NO_USAGE, text)
+
+    def totals_text(self, per_model):
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).print_totals(per_model)
+        return "\n".join(call.args[0] for call in printed.call_args_list)
+
+    def test_a_missing_usage_record_makes_the_job_model_and_total_partial(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {"a": {"state": "verified", "attempts": [{"usage": used}, {"why": "log not found"}]}}
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertEqual(per_job["a"]["counted"], 1, "one attempt reported usage")
+        self.assertEqual(per_job["a"]["partial"], 1, "one attempt was paid for without a usage record")
+        self.assertEqual(per_job["a"]["tokens"], 115, "the known sum stays, it is only marked")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'cheap-a':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}", text)
+        self.assertIn(f"{'total':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}", text, "a partial sum is not the whole")
+        self.assertEqual(text.count(pm_run.NO_USAGE), 1, "the note appears once, under the totals")
+        self.assertTrue(text.rstrip().endswith(pm_run.NO_USAGE), "the note sits under the total line")
+
+    def test_status_marks_a_job_row_partial_when_an_attempt_reported_no_usage(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {"a": {"state": "verified", "attempts": [{"usage": used}, {"why": "log not found"}]}}
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).status(jobs, state)
+        text = "\n".join(call.args[0] for call in printed.call_args_list)
+        self.assertRegex(text, r"(?m)^a +verified +2 +115\+\? +1\+\? +\$0\.03\+\? ", "the job row says it is partial")
+
+    def test_a_mixed_harness_run_does_not_show_the_pi_sum_as_the_grand_total(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [
+            {"id": "a", "model": "pi-model", "harness": "pi"},
+            {"id": "b", "model": "claude-model", "harness": "claude"},
+        ]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}]},
+            "b": {"state": "verified", "attempts": [{"why": "Claude's log is not read"}]},
+        }
+        per_model, _ = pm_run.usage_tally(jobs, state)
+        self.assertIn("claude-model", per_model, "a model whose attempts reported no usage still gets a row")
+        self.assertEqual(per_model["claude-model"]["partial"], 1)
+        self.assertEqual(per_model["pi-model"]["partial"], 0, "the Pi attempts themselves all reported usage")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'pi-model':<24}{'115':>10}{'1':>10}{'$0.03':>10}", text)
+        self.assertIn(f"{'claude-model':<24}{'-':>10}{'-':>10}{'-':>10}", text, "nothing is known: dashes, no mark")
+        total = next(line for line in text.splitlines() if line.startswith("total"))
+        self.assertTrue(total.startswith(f"{'total':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}"), total)
+        self.assertEqual(text.count(pm_run.NO_USAGE), 1)
+
+    def test_a_removed_job_without_usage_still_counts_against_the_total(self):
+        used = {"input": 900, "output": 100, "total_tokens": 1000, "turns": 2, "cost_usd": 0.25}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}]},
+            "gone": {"state": "verified", "attempts": [{"model": "big-b", "why": "log not found"}]},
+        }
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertIn("gone", per_job, "a job removed from jobs.json still counts: its attempts were paid for")
+        self.assertEqual(per_job["gone"]["counted"], 0)
+        self.assertIn("big-b", per_model, "its model keeps a row instead of disappearing")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'big-b':<24}{'-':>10}{'-':>10}{'-':>10}", text)
+        total = next(line for line in text.splitlines() if line.startswith("total"))
+        self.assertTrue(total.startswith(f"{'total':<24}{'1.0k+?':>10}{'2+?':>10}{'$0.25+?':>10}"), total)
 
     def test_status_shows_tokens_turns_and_the_api_estimate_for_a_job_and_the_same_total_per_model(self):
         self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
@@ -1896,6 +1966,8 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         self.assertRegex(out, r"(?m)^a +verified +1 +115 +1 +\$0\.12 +", "one row: tokens, turns, estimate")
         self.assertRegex(out, r"(?m)^ok +115 +1 +\$0\.12$")
         self.assertRegex(out, rf"(?m)^total +115 +1 +\$0\.12 +{re.escape(THE_NOTE)}$")
+        self.assertNotIn("+?", out, "every attempt reported usage: the sums are the whole")
+        self.assertNotIn(pm_run.NO_USAGE, out)
 
     def test_status_heads_the_money_column_api_estimate_and_says_the_note_once(self):
         self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
@@ -1914,6 +1986,16 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         out = self.run_pm("--status").stdout
         self.assertRegex(out, r"(?m)^total +- +- +-$")
         self.assertNotIn(THE_NOTE, out)
+
+    def test_a_run_whose_only_attempts_reported_no_usage_shows_dashes_not_a_partial_sum(self):
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertNotIn("usage", self.receipts()["a"]["attempts"][0], "no session log, so nothing was reported")
+        out = self.run_pm("--status").stdout
+        self.assertIn(f"{'ok':<24}{'-':>10}{'-':>10}{'-':>10}", out, "a row where nothing is known stays a dash")
+        self.assertRegex(out, r"(?m)^total +- +- +-$")
+        self.assertNotIn("+?", out)
+        self.assertNotIn(pm_run.NO_USAGE, out, "no sum carries the mark, so the note would explain nothing")
 
 
 class LockedFileTest(unittest.TestCase):

@@ -38,6 +38,9 @@ the attempt's Pi session log wrote after the attempt started; a message without 
 log that is not found leaves usage out altogether (never a guess). Usage is counted in tokens and turns, and money is
 only what those tokens would cost at API prices (the column is headed "API est."), because most workers run on flat
 plans or free models. Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an attempt:
+its job row, its model row and the grand total keep the known sum and end in `+?`, and one line under the totals
+says what that means, so a partial sum is never read as the whole.
 `--status` shows tokens and turns per job, then one line per model and a grand total; the end of the loop prints the
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
@@ -391,11 +394,52 @@ def short_cost(money):
     return f"${money:.4f}" if 0 < money < 0.01 else f"${money:.2f}"
 
 
+PARTIAL = "+?"  # ends a sum that some attempts did not report at all; the note under the totals explains it
+NO_USAGE = "+? = some attempts reported no usage"
+
+
+def usage_cells(row):
+    """The three printed cells (tokens, turns, money) of one tally row; "-" when nothing is known.
+
+    A partial sum (an attempt reported no usage at all, for example a log that was not found) keeps the known value
+    and ends in "+?", so a partial sum is never read as the whole. A figure that no counted attempt reported stays
+    "-" on its own: an older receipt without turns, or a usage without cost.total.
+    """
+    if not row or not row["counted"]:
+        return "-", "-", "-"
+    mark = PARTIAL if row["partial"] else ""
+    tokens = short_tokens(row["tokens"]) + mark
+    turns = short_turns(row["turns"]) + mark if row["turns_known"] else "-"
+    cost = short_cost(row["cost"]) + mark if row["known"] else "-"
+    return tokens, turns, cost
+
+
+def empty_row():
+    """A tally row that has counted nothing yet; `counted` 0 keeps it printed as "-"."""
+    return {"tokens": 0, "turns": 0, "cost": 0.0, "known": True, "turns_known": True, "counted": 0, "partial": 0}
+
+
+def summed_rows(rows):
+    """One tally row added up from `rows`; an empty tally keeps counted 0, so it prints "-" and not "0"."""
+    total = empty_row()
+    for row in rows:
+        total["tokens"] += row["tokens"]
+        total["turns"] += row["turns"]
+        total["cost"] += row["cost"]
+        total["known"] = total["known"] and row["known"]
+        total["turns_known"] = total["turns_known"] and row["turns_known"]
+        total["counted"] += row["counted"]
+        total["partial"] += row["partial"]
+    return total
+
+
 def usage_tally(jobs, state):
     """Tokens, turns and cost per model and per job id, over every attempt in the receipts.
 
-    A row's turns or cost are unknown when any attempt that counted for it did not report them, so a partial sum is
-    never shown as the truth. A job that is no longer in jobs.json still counts: its attempts were paid for too.
+    An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an
+    attempt: it makes its rows partial, so the known sum is never shown as the whole. `counted` says how many
+    attempts reported usage, and a row with none prints "-". A job that is no longer in jobs.json still counts: its
+    attempts were paid for too.
     """
     models = {job["id"]: job.get("model") for job in jobs}
     per_model, per_job = {}, {}
@@ -404,11 +448,13 @@ def usage_tally(jobs, state):
             continue
         for attempt in s.get("attempts", []):
             usage = attempt.get("usage")
-            if not isinstance(usage, dict):
-                continue
             model = attempt.get("model") or models.get(jid) or "unknown model"
             for key, bucket in ((model, per_model), (jid, per_job)):
-                row = bucket.setdefault(key, {"tokens": 0, "turns": 0, "cost": 0.0, "known": True, "turns_known": True})
+                row = bucket.setdefault(key, empty_row())
+                if not isinstance(usage, dict):  # no usage record: the row keeps its sum but is marked partial
+                    row["partial"] += 1
+                    continue
+                row["counted"] += 1
                 row["tokens"] += usage.get("total_tokens") or 0
                 if usage.get("turns") is None:  # a receipt written before turns were counted
                     row["turns_known"] = False
@@ -1255,10 +1301,7 @@ class Run:
 
         def used(jid):
             """The job's tokens, turns and API-price estimate as three printed columns; "-" where none was recorded."""
-            row = per_job.get(jid)
-            tokens = short_tokens(row["tokens"] if row else None)
-            turns = short_turns(row["turns"] if row and row["turns_known"] else None)
-            cost = short_cost(row["cost"] if row and row["known"] else None)
+            tokens, turns, cost = usage_cells(per_job.get(jid))
             return f"{tokens:>10}{turns:>10}{cost:>10}"
 
         print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
@@ -1309,30 +1352,23 @@ class Run:
         print("failures: " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
 
     def print_totals(self, per_model):
-        """One line per model and the grand total; a turn count or cost any attempt did not report stays "-".
+        """One line per model and the grand total; a sum that an attempt did not report ends in "+?".
 
-        The money is what the tokens would cost at API prices, so the total line says so once, after it, rather than
-        repeating the note on every row.
+        Those attempts (no log found, or a harness that reports no usage) make their model row and the grand total
+        partial, so a known sum is never shown as the whole; one line under the totals explains the mark. A figure
+        that no counted attempt reported stays "-". The money is what the tokens would cost at API prices, so the
+        total line says so once, after it, rather than repeating the note on every row.
         """
         print(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}")
         for model in sorted(per_model):
-            row = per_model[model]
-            print(
-                f"{model:<24}{short_tokens(row['tokens']):>10}"
-                f"{short_turns(row['turns'] if row['turns_known'] else None):>10}"
-                f"{short_cost(row['cost'] if row['known'] else None):>10}"
-            )
-        tokens = sum(row["tokens"] for row in per_model.values())
-        turns = sum(row["turns"] for row in per_model.values())
-        known = per_model and all(row["known"] for row in per_model.values())
-        turns_known = per_model and all(row["turns_known"] for row in per_model.values())
-        cost = sum(row["cost"] for row in per_model.values()) if known else None
-        note = f"  {API_NOTE}" if cost is not None else ""
-        print(
-            f"{'total':<24}{short_tokens(tokens if per_model else None):>10}"
-            f"{short_turns(turns if turns_known else None):>10}{short_cost(cost):>10}"
-            f"{note}"
-        )
+            tokens, turns, cost = usage_cells(per_model[model])
+            print(f"{model:<24}{tokens:>10}{turns:>10}{cost:>10}")
+        total = summed_rows(per_model.values())
+        tokens, turns, cost = usage_cells(total)
+        note = f"  {API_NOTE}" if cost != "-" else ""
+        print(f"{'total':<24}{tokens:>10}{turns:>10}{cost:>10}{note}")
+        if total["counted"] and total["partial"]:
+            print(NO_USAGE)
 
     def request_stop(self, jobs, state, job_id):
         """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""
