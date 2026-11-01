@@ -13,12 +13,12 @@ Bir proje birbirinden bağımsız birkaç katmandan oluşur. Commit, dal ya da k
 
 ## 1. Kaynak sürümü seç
 
-Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.1.0-alpha.6` sürümünü kurar. Yükseltme yaparken aşağıdaki `NEW_TAG` yerine gerçek ve daha yeni bir sürüm etiketi (`tag`) yaz; `NEW_TAG` ifadesini olduğu gibi yazma.
+Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.1.0-alpha.6` sürümünü kurar. Yükseltme yaparken aşağıdaki `<new-tag>` yerine gerçek ve daha yeni bir sürüm etiketi (`tag`) yaz.
 
 ```bash
 git status --short
 git fetch --tags origin
-git checkout --detach NEW_TAG
+git checkout --detach <new-tag>
 git describe --tags --always
 ```
 
@@ -75,21 +75,15 @@ python tools/setup/bom.py --project ../my-project --layers core,map,swarm
 | Python, Git, Node.js, Claude Code | İşletim sisteminin veya üreticinin desteklediği yükseltme yolunu izle; bu komutların hepsi belirli bir sürüme sabitlenmemiştir. | Üreticinin desteklediği önceki kurucuyu/çalışma ortamını (`runtime`) ve ayar yedeğini sakla. Araçlarının hâlâ ihtiyaç duyduğu bir yorumlayıcıyı (`interpreter`, örneğin eski Python sürümü) kaldırma. Otomatik güncellenen araçlar için üreticiye özel ayarlar gerekebilir. |
 | İsteğe bağlı köprü/uygulama klonları | İlgili aracın kendi sürüm talimatlarını izle; eski `commit` kimliğini ve bağımlılık ortamını kaydet. | Proje kayıtlarına dokunmadan o klonun önceki desteklenen sürüm etiketini (`ref`) ve ortamını geri yükle. Sürekli değişen bir `git pull` tekrarlanabilir bir sürüm sabitlemesi değildir. |
 
-**pi-mcp-adapter 5.x'ten 7.0'a.** İki büyük sürüm, eklentinin kendi ayarlarını değiştirir; projenin `.mcp.json` dosyası eskisi gibi çalışır. Kendi Pi ayarına (`~/.pi/agent/mcp.json`, bir projenin `.pi/mcp.json` dosyası) yalnızca bunları kendin yazdıysan bak: `mcpScript` ile onun `settings.scriptMode`, `scriptSkill` ve `settings.jev` bütçe anahtarları kalktı (yerine Pi'nin `codemode`'unu kullan); `settings.jev` artık `settings.semanticSearch` oldu ve `settings.jev: false` anlamsal aramayı artık kapatmaz (`settings.semanticSearch` değerini `false` yap); System One anahtarı bir işe yaramaz, anlamsal arama Pi'nin kendi girişlerini kullanır. Eski bir anahtar yüklenir ve dosyanın adını veren bir uyarı gösterilir. Ayrıntılar ana kaynağın değişiklik günlüğünde (`changelog`).
-
 Herdr için yeni bir sürümün çıkmış olması, çalıştırıcı (`runner`) ile sorunsuz çalıştığının kanıtı **değildir**. `tested` değerini ileri taşımadan önce **Pi ve Claude Code ile ayrı ayrı** ekranda görünen küçük birer işçi ajan çalıştır; bölme, durum, çıktı ve kanıt adımlarını doğrula ve sonuçları sakla. Bu rehberdeki otomatik paket testlerini bunun yerine kullanma. Döküm komutu (`bom.py`) hiçbir işçi ajan başlatmaz.
 
-## 4. Pakete dahil edilmiş (`vendored`) beceriler
-
-Paketle birlikte gelen üçüncü taraf beceriler (`vendored skills`, dış bir kaynaktan kopyalanıp paketin içine dahil edilmiş beceriler), paket dosyaları olarak sürümlendirilir. Bu becerilerin `SKILL.md` dosyasındaki kaynak notu; alındıkları asıl ana kaynak (`upstream`) commit'ini, lisansını ve burada yapılan değişiklikleri belirtir. Bir projenin normal güncelleme yolu, `.agents/skills/pm-*` klasörünün üzerine dışarıdan bir beceri kurucusuyla yazmak değil, incelenmiş sürümün `pm_init.py --upgrade` komutunu çalıştırmaktır.
-
-Ana kaynaktaki yeni bir sürüm adayını inceleyen paket sorumluları (`maintainers`) için:
-
-1. Referans verilen dosyalar ve lisans dahil olmak üzere eski kaynak commit ile önerilen yeni commit'i karşılaştır.
-2. İstenen değişiklikleri kopyala, belgelenmiş yerel değişiklikleri yeniden uygula, lisansı koru; ardından kaynak notunu ve BOM içindeki `ref` alanını gerçekten paketlenen dosyaları anlatacak şekilde güncelle. Aday (`candidate`) alanları tek başına kaynak kanıtı (`provenance`) sayılmaz.
-3. Değişen beceri için ilgili yazım (`syntax`) ve CLI kontrollerini çalıştır ve yeni sürümü yayımlamadan önce sonuçları incele. [Seçim testi (`selection test`)](https://github.com/Kscl1/project-manager/blob/main/tests/selection/README.md) her güncellemede tekrar çalıştırılmaz; ilk beta sürümü gibi bir aşama değişikliğinden hemen önce çalıştırılır.
+## Kendi üçüncü taraf becerilerin
 
 Kullanıcının **kendi** kurduğu üçüncü taraf beceriler için, o becerinin kendi kurucusunu ve sürüm sabitlemesini kullan ve önceki kopyasını yedekte tut. Bunlar `.pm` tarafından yönetilmez; [kendi araçların](own-tools.md) sayfasına bak.
+
+## Bakımı yapanlar için
+
+Pakete dahil edilmiş becerilerin incelenmesi, Renovate ilkesi ve `pi-mcp-adapter` 5.x'ten 7.0'a geçiş notları, paketi geliştirenler ya da bağımlılıklarını izleyenler içindir. Bu notlar katkı rehberine taşındı: [Bakımı yapanlar](https://github.com/Kscl1/project-manager/blob/main/CONTRIBUTING.md#maintainers).
 
 ## Kayıtları kaybetmeden eski sürüme geri al (`rollback`)
 
@@ -112,19 +106,3 @@ Kullanıcının **kendi** kurduğu üçüncü taraf beceriler için, o becerinin
 ### Ne prova edildi?
 
 2026-10-18 tarihinde yapılan bir geliştirici provasında; `v0.1.0-alpha.1` sürümünden yerel kurulum, `185f9ca` commit'indeki `main` dalına yükseltme ve Map ile Swarm katmanları açıkken tekrar etiketli sürüme geri alma adımları denendi. Provada yönetilen dosyalar, bilerek düzenlenmiş bir paket aracı ve yükseltmeden sonra eklenen bir görev dahil proje kayıtlarının korunması kontrol edildi. Bu bir geliştirici provasıdır; bağımsız bir kullanıcının kabul testi veya genel araçların yükseltildiğinin kanıtı değildir. Hiçbir sürüm veya araç uyumluluğunu garanti etmez.
-
-## Renovate: önce keşif, sonra insan incelemesi
-
-[renovate.json](https://github.com/Kscl1/project-manager/blob/main/renovate.json) dosyası tek başına hiçbir şey yapmaz. Proje sorumlusu Renovate uygulamasını kurup etkinleştirene (veya Renovate'i başka bir yerde açıkça çalıştırana) kadar devre dışı kalır. Otomatik birleştirme (`automerge`) kapalıdır. Yalnızca malzeme listesi (BOM) için tanımlanan düzenli ifade yöneticileri (`regex managers`, metin kalıplarıyla sürüm numaralarını bulan kurallar) açıktır:
-
-- Kurulum komutlarındaki gerçek npm sürüm sabitlemeleri: Backlog.md, Pi, LikeC4 ve Pi uzantıları.
-- Herdr'ın herkese açık en son sürüm bildiriminden (`manifest`) alınan `upstream_version` adayı. Bu bir kurulum sabitlemesi değildir; `tested` veya `min` değerlerini değiştiremez.
-- Pakete dahil edilmiş (`vendored`) grilling becerileri için, ana kaynağın yayımladığı sürümlerden gelen `upstream_version` adayları. Bunlar yeni bir sürüm çıktığını haber verir; beceri dosyalarını, kaynak notlarını veya BOM içindeki gerçek `ref` değerini değiştirmez.
-
-Her izleme yalnız yayımlanmış sürümleri takip eder, daldaki tek tek commit'leri değil; yani önerilen bir güncelleme, ana kaynağın yeni bir sürüm çıkardığı anlamına gelir.
-
-Renovate pull request'leri yalnızca cumartesi günleri (UTC) açar; böylece haftalık incelemeye hazır olurlar. Küçük (`minor`) ve yama (`patch`) güncellemelerinin hepsi tek bir toplu pull request'te gelir; büyük sürüm (`major`) bir şeyi bozabileceği için kendi pull request'iyle gelir. Her cumartesinin pull request'i en az üç günlük en yeni sürümü getirir: npm artık onu geri çekemez, güvenlik tarayıcıları da onu inceleyecek zamanı bulmuştur. Herdr'ın sürüm dosyasında yayım tarihi olmadığı için onun adayı bekletilmez. Renovate'in kendi güvenlik güncellemeleri bu takvime ve sınırlara takılmaz.
-
-Önerilen bir güncelleme **değişiklikleri yalnızca keşfeder; onları onaylamaz**. Ana kaynaktaki gerçek kod farkını (`diff`) incele, ilgili belge ve çalışma zamanı sürüm sabitlemelerini eşitle, gerekli duman ve seçim kontrollerini çalıştır; ancak ondan sonra uyumluluk kanıtlarını bilinçli olarak güncelle ve yeni sürümü yayımla. En düşük (`min`) ve test edilmiş (`tested`) alanları düzenli ifade eşleşmelerinin dışındadır. Diğer bağımlılıklar, sürümü sabitlenmemiş sunucular ve kullanıcının kendi araçları bu sınırlı yapılandırma tarafından izlenmez. BOM dışında yazılı olan LikeC4 sürümü de izlenmez: `template/.pm/templates/root/mcp-map.json` içindeki MCP sunucu argümanları (`@likec4/mcp@1.60.0`), `pm-setup` becerisindeki `npx likec4@1.60.0 validate` satırı ve README ile başlangıç rehberinin İngilizce ve Türkçe (`docs/tr/getting-started.md`) sürümlerindeki `npx likec4@1.60.0 start` örnekleri. Bir Renovate güncellemesi `tools/setup/bom.toml` içindeki LikeC4 sürümünü değiştirdiğinde, bu yerleri de aynı pull request içinde elle güncelle ve pakete dahil `pm-likec4-dsl` becerisini o sürümden güncelle (4. bölüm). Bu becerinin ayrı bir izlemesi yoktur: LikeC4'ün ana dalı, özellikleri sürüm çıkmadan önce belgeler.
-
-Yapılandırma değişikliklerini `npx --yes --package renovate -- renovate-config-validator` komutuyla doğrula. [Düzenli ifade sınır testleri (`regex boundary tests`)](https://github.com/Kscl1/project-manager/blob/main/tests/test_renovate.py) ayrıca uyumluluk ve kaynak kanıtı alanlarını korur. Renovate'in [regex manager](https://docs.renovatebot.com/modules/manager/regex/) ve [custom datasource](https://docs.renovatebot.com/modules/datasource/custom/) belgelerine göz atabilirsin.
