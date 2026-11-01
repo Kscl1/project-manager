@@ -4,6 +4,7 @@ Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --staged       check only docs staged for commit (the pre-commit hook)
        python .pm/tools/pm_check.py --stale        list docs whose described code changed since review (never blocks)
        python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
+       python .pm/tools/pm_check.py --help         print these modes and exit
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
 an open task names at least one acceptance criterion, keeps its live Next and Evidence lines short,
@@ -16,6 +17,7 @@ A file another tool writes in its own format is listed in .pm/tool-owned.txt and
 A clean result means the docs are consistent, not that they are correct.
 """
 
+import argparse
 import functools
 import os
 import re
@@ -952,8 +954,22 @@ def is_record(path):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(
+        description="Check that the repo's docs and task files are consistent. No dependencies, no model. "
+        "With no option it checks every doc.",
+        epilog="Exit code 1 when a problem is found, so hooks and CI can block on it. "
+        "A clean result means the docs are consistent, not that they are correct.",
+    )
+    parser.add_argument(
+        "--staged", action="store_true", help="check only the docs staged for commit (the pre-commit hook)"
+    )
+    parser.add_argument(
+        "--stale", action="store_true", help="list docs whose described code changed since review (never blocks)"
+    )
+    parser.add_argument("--write-index", action="store_true", help="rewrite the generated part of the decision index")
+    args = parser.parse_args()
 
-    if "--stale" in sys.argv:
+    if args.stale:
         docs = list(markdown_files())
         covered = [
             path for path in docs if read_frontmatter(path.read_text(encoding="utf-8").splitlines()).get("describes")
@@ -967,7 +983,7 @@ def main():
         )
         return 0
 
-    if "--write-index" in sys.argv:
+    if args.write_index:
         if decision_files():
             write_index()
         write_catalogue()
@@ -977,7 +993,7 @@ def main():
     problems += check_index()
     problems += check_worklogs()
     problems += check_catalogue()
-    files = staged_markdown_files() if "--staged" in sys.argv else markdown_files()
+    files = staged_markdown_files() if args.staged else markdown_files()
     language = project_language()
     for path in files:
         problems += check_file(path, decisions)

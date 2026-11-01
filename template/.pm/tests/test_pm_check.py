@@ -1249,5 +1249,21 @@ class AuditOutcomesTest(RepoTestCase):
                 self.assert_problem("exactly one non-empty 'Audit report:' line")
 
 
+class HelpTest(RepoTestCase):
+    def test_help_names_every_mode_and_exits_zero(self):
+        result = self.run_check("--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        flat = " ".join(result.stdout.split())
+        self.assertIn("usage: pm_check.py", flat)
+        self.assertIn("With no option it checks every doc", flat)
+        for mode in ("--staged", "--stale", "--write-index"):
+            self.assertIn(mode, flat)
+        self.assertNotIn("No problems found", flat)
+
+    def test_short_help_flag_prints_the_same(self):
+        self.assertEqual(self.run_check("-h").stdout, self.run_check("--help").stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
