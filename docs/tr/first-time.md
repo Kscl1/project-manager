@@ -11,7 +11,7 @@ Bir proje, bilgisayarındaki bir klasördür; örneğin `C:\projects\sitem` ya d
 
 ## Yardımcı
 
-Yardımcı, klasörü de kullanabilen bir yapay zekâ programıdır: Claude Code, Codex, Pi ya da başka biri. Telefonda olduğu gibi günlük dille yazarsın; izin verildiğinde dosyaları düzenler ve kontrolleri çalıştırır. Girdiğin bir site değildir, bilgisayarında çalışır; arkasındaki hizmet işlediği içerik için ücret alabilir.
+Yardımcı, klasörü de kullanabilen bir yapay zekâ programıdır: Claude Code, Codex, Pi ya da başka biri. Telefonda olduğu gibi günlük dille yazarsın; izin verildiğinde dosyaları düzenler ve kontrolleri çalıştırır. Tarayıcıda açtığın bir site değildir, bilgisayarında çalışır; arkasındaki hizmet işlediği içerik için ücret alabilir.
 
 ## İzin
 
