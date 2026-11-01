@@ -390,6 +390,65 @@ class PmInitTest(unittest.TestCase):
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7", "likec4"})
 
+    def test_launch_file_opens_the_board_without_a_terminal(self):
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        launch = json.loads((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"))
+        self.assertEqual(launch["version"], "0.0.1")
+        self.assertEqual(
+            launch["configurations"],
+            [
+                {
+                    "name": "board",
+                    "runtimeExecutable": "backlog",
+                    "runtimeArgs": ["browser", "--no-open", "--port", "6420"],
+                    "port": 6420,
+                }
+            ],
+        )
+        config = (self.root / "backlog.config.yml").read_text(encoding="utf-8")
+        self.assertIn("default_port: 6420", config, "the preview and the board config name the same port")
+
+    def test_map_adds_its_preview_with_the_pinned_likec4(self):
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        launch = json.loads((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"))
+        self.assertEqual([config["name"] for config in launch["configurations"]], ["board", "map"])
+        # One pin for the map: the preview starts the LikeC4 the MCP server in templates/root/mcp-map.json names.
+        server = json.loads((PM_INIT.parent.parent / "templates" / "root" / "mcp-map.json").read_text(encoding="utf-8"))
+        pinned = server["mcpServers"]["likec4"]["args"][1].rsplit("@", 1)[1]
+        map_config = launch["configurations"][1]
+        self.assertEqual(map_config["runtimeExecutable"], "npx")
+        self.assertEqual(map_config["runtimeArgs"], ["-y", f"likec4@{pinned}", "start", "--port", "5173"])
+        self.assertEqual(map_config["port"], 5173)
+
+    def test_own_launch_file_is_kept_and_the_missing_previews_are_listed(self):
+        (self.root / ".claude").mkdir()
+        own = '{"version": "0.0.1", "configurations": [{"name": "mine"}]}\n'
+        (self.root / ".claude" / "launch.json").write_text(own, encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"), own)
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .claude/launch.json: add the board preview:", kept)
+        self.assertIn("- .claude/launch.json: add the map preview:", kept)
+        self.assertIn('"runtimeExecutable": "backlog"', kept, "the line carries the JSON to paste")
+        self.assertIn("Merge by hand: 2 items, listed in .pm/local/merge-by-hand.md.", result.stdout)
+
+    def test_upgrade_never_touches_the_launch_file(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        path = self.root / ".claude" / "launch.json"
+        path.write_text('{"version": "0.0.1", "configurations": [{"name": "mine"}]}\n', encoding="utf-8")
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["configurations"], [{"name": "mine"}])
+
     def test_a_real_install_prints_a_short_result_and_the_next_steps(self):
         planned = self.run_init(self.root, "--check")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
@@ -412,7 +471,8 @@ class PmInitTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Nothing to change: the package and your files are as they are.", result.stdout)
-        self.assertIn("Kept 5 files of yours:", result.stdout)
+        self.assertIn("Kept 6 files of yours:", result.stdout)
+        self.assertIn(".claude/launch.json", result.stdout)
         self.assertNotIn("Merge by hand:", result.stdout)
 
     def test_map_skill_comes_with_map_and_then_stays(self):
@@ -781,6 +841,7 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Plan for", result.stdout)
         self.assertIn(".mcp.json", result.stdout)
+        self.assertIn(".claude/launch.json", result.stdout)
         self.assertEqual([p.name for p in self.root.iterdir()], [".git"])
 
 

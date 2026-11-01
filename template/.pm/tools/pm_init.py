@@ -13,7 +13,9 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   --swarm, then is upgraded like the other package files until deleted.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
-  run pm_board --resume when a session starts and after a compaction) and .mcp.json (Context7; LikeC4 with --map).
+  run pm_board --resume when a session starts and after a compaction), .mcp.json (Context7; LikeC4 with --map) and
+  .claude/launch.json, which Claude Desktop opens in a preview pane: the board, and the map with --map, so the
+  board needs no terminal.
   A user's own copy is never edited: what it lacks goes to the "Merge by hand" list.
 - A real install prints a few lines when it is done (what it added or changed, what it kept of the user's, what to
   merge by hand) and then what to do next; --check prints the whole plan and the conflicts instead. A first install
@@ -74,6 +76,11 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
+# Claude Desktop opens each entry of .claude/launch.json in its own preview pane; templates/root/launch.json holds
+# that file's version and its entries.
+# LikeC4's release, the pin in tools/setup/bom.toml: the map preview starts this exact version, so a person who
+# follows it sees what this package was tested with. Move it together with the MCP server in templates/root/mcp-map.json.
+LIKEC4_VERSION = "1.60.0"
 # Claude Code's language setting takes a language name, not a code; an unknown code is written as it is.
 LANG_NAMES = {
     "ar": "arabic", "az": "azerbaijani", "de": "german", "en": "english", "es": "spanish", "fa": "persian",
@@ -465,6 +472,36 @@ def mcp_action(target, map_layer):
     return ("merge", missing) if missing else ("keep", {})
 
 
+def root_launch(name):
+    """One root launch template, parsed, with the LikeC4 pin filled in."""
+    text = (ROOT_TEMPLATES / name).read_text(encoding="utf-8").replace("<version>", LIKEC4_VERSION)
+    return json.loads(text)
+
+
+def wanted_launch(map_layer):
+    """Claude Desktop's preview file as the root templates hold it: the board, and the map with --map."""
+    launch = root_launch("launch.json")
+    if map_layer:
+        launch["configurations"] += root_launch("launch-map.json")["configurations"]
+    return launch
+
+
+def launch_action(target, map_layer):
+    """(write | keep | merge, the file to write or the configurations to add). An existing file is never rewritten."""
+    path, want = target / ".claude" / "launch.json", wanted_launch(map_layer)
+    if not path.exists():
+        return "write", want
+    data = read_json(path)
+    have = data.get("configurations") if isinstance(data, dict) else None
+    names = (
+        {item["name"] for item in have if isinstance(item, dict) and "name" in item}
+        if isinstance(have, list)
+        else set()
+    )
+    missing = [config for config in want["configurations"] if config["name"] not in names]
+    return ("merge", missing) if missing else ("keep", [])
+
+
 def missing_lines(target, name, wanted):
     path = target / name
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -541,6 +578,11 @@ def merge_items(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "merge":
         items += [(".mcp.json", f"add the {name} server: {json.dumps(config)}") for name, config in servers.items()]
+    action, missing = launch_action(target, args.map)
+    if action == "merge":
+        items += [
+            (".claude/launch.json", f"add the {config['name']} preview: {json.dumps(config)}") for config in missing
+        ]
     lang_merge = language_plan(target, args.lang)[1] if args.lang else []
     return [f"- {item}: {how}" for item, how in items] + lang_merge
 
@@ -622,6 +664,11 @@ def plan(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "write":
         entries.append(("write", target / ".mcp.json", ", ".join(servers)))
+    action, launch = launch_action(target, args.map)
+    if action == "write":
+        entries.append(
+            ("write", target / ".claude" / "launch.json", ", ".join(c["name"] for c in launch["configurations"]))
+        )
     if args.lang:
         entries += [("set", path, note) for path, note in language_plan(target, args.lang)[0]]
     if not version_is_current(target):
@@ -640,7 +687,7 @@ def shown(target, path):
 
 
 # The user's own files the installer would write if they were missing, so a run that found them names them as kept.
-YOURS = ["AGENTS.md", "CLAUDE.md", "backlog.config.yml", ".claude/settings.json", ".mcp.json"]
+YOURS = ["AGENTS.md", "CLAUDE.md", "backlog.config.yml", ".claude/settings.json", ".mcp.json", ".claude/launch.json"]
 
 
 def counted(count, word):
@@ -790,6 +837,9 @@ def main(argv=None):
     if action == "write":
         text = json.dumps({"mcpServers": servers}, indent=2) + "\n"
         write_once(target / ".mcp.json", text=text)
+    action, launch = launch_action(target, args.map)
+    if action == "write":
+        write_once(target / ".claude" / "launch.json", text=json.dumps(launch, indent=2) + "\n")
     if args.lang:
         set_language(target, args.lang)
     write_version(target)

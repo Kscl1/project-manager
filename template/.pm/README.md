@@ -22,6 +22,7 @@ The project's work system, installed inside its own repository. Start at the roo
 | Project data | `.pm/charter.md`, `decisions.md`, `decisions/`, `lessons.md` (started with the first lesson; the installer does not create it), `specs/`, `backlog/`, `worklog/` | Never overwritten. |
 
 | Root adapters | `AGENTS.md`, `CLAUDE.md`, `backlog.config.yml` | Written only when absent. Review an existing file manually. |
+| Claude Desktop previews | `.claude/launch.json`: the board, and the map with `--map` | Written only when absent. A missing entry is listed for `/pm-setup`. |
 | Machine-local | `.pm/local/`, worker `.pm-report.md` files, `.worktrees/` | Not distributed or committed. |
 
 A worklog starts with frontmatter: `type: worklog`, `title`, `date` (the date in its file name), `task` and `models` as lists, or `kayıtta yok` / `not recorded`. Once one worklog has it, `pm_check` requires it of all.
