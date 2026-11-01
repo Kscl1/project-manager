@@ -7,6 +7,7 @@ The project's work system, installed inside its own repository. Start at the roo
 | Work or task details | `backlog browser` (`.pm/backlog/tasks/` is the data) |
 | Lanes, WIP, hierarchy | `board.md` |
 | Resume an interrupted session | `python .pm/tools/pm_board.py --resume`, then the active task |
+| What to do now | `python .pm/tools/pm_board.py --next` |
 | Project intent and Epic scope | `charter.md`, then `specs/<epic>/requirements.md` |
 | Roles and delegation | `roles/lead.md`, `roles/worker.md`, `templates/brief.md`, `templates/report.md`, `templates/doc-audit.md` |
 | Model assignment and design principles | `models.md`, `principles.md` |
@@ -41,6 +42,7 @@ python <target>/.pm/tools/pm_check.py
 Omit `--name` to use the target folder name. To refresh package files later, run the same install command with `--upgrade`; inspect local changes to package files first. The upgrade compares package files with the hash manifest written at install (`package-files.sha256`) and backs up the old ones; there is no automatic merge. The installer sets `core.hooksPath` to `.pm/hooks` only when no hooks path is set and the project has no hooks of its own, adds root adapters only if absent, and the local ignore rules. Run from the target repo afterwards:
 
 ```bash
+python .pm/tools/pm_board.py --next      # the one task to work on now
 python .pm/tools/pm_board.py --resume
 python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
@@ -50,7 +52,7 @@ python -m unittest discover -s .pm/tests   # the package's own tests, standard l
 python -m unittest discover -s .pm/swarm   # with --swarm: pm_run against a fake Herdr, about 80 s
 ```
 
-Both `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor.
+`--next`, `--tree` and `--resume` must exist in your installed package version before you rely on them. Edit tasks in Backlog's browser; documents are plain Markdown, read in any editor.
 
 ## When the package misbehaves
 
