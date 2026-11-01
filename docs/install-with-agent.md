@@ -134,8 +134,8 @@ Tell the user in a few lines what is installed and what is open. Then give them 
 > **What you will see:**
 >
 > - First, a question about trusting the folder. It is your project: choose "Yes, I trust this folder".
-> - Then one question per project server (Context7, LikeC4). Allow them: they only read current docs and diagrams, anything that writes still asks, and saying no only means fewer answers. Context7 sends its queries to its own server, so they never hold secrets.
-> - Then three short questions about how much it should explain, a setup Epic on the board, and one small real task.
+> - Then one question per project server (Context7, LikeC4). Allow them: they only read current docs and diagrams, anything that writes still asks, and saying no only means fewer answers. Context7 sends the text of each query to an outside service: your assistant must not put secrets or private project text in a query, and you can say no.
+> - Then one question about how much it should explain, a read-back of your project with a short charter draft to confirm, a setup Epic on the board, and one small real task. Models, your own tools and the map wait in one later task, which you start when you want.
 > - Anywhere in between, a message about a tag that "is not a commit". It is normal during the install, and the install is fine.
 
 Stop here. Do not continue the setup in this chat.

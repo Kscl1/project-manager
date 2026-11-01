@@ -134,8 +134,8 @@ Kullanıcıya birkaç satırla nelerin kurulduğunu ve nelerin açık kaldığı
 > **Karşına neler çıkacak:**
 >
 > - Önce klasöre güvenip güvenmediğin sorulur. Bu senin projen: "Yes, I trust this folder" seçeneğini seç.
-> - Sonra her proje sunucusu için bir soru gelir (Context7, LikeC4). Bunlara izin ver: yalnızca güncel belgeleri ve şemaları okurlar, dosyaya yazan her işlem yine senden onay ister; hayır demek yalnızca daha az yanıt almak demektir. Context7 sorgularını kendi sunucusuna gönderir, bu yüzden sorgularda gizli bilgi yer almaz.
-> - Ardından ne kadar açıklama istediğinle ilgili üç kısa soru, panoda (board) bir kurulum Epic'i ve küçük, gerçek bir görev gelir.
+> - Sonra her proje sunucusu için bir soru gelir (Context7, LikeC4). Bunlara izin ver: yalnızca güncel belgeleri ve şemaları okurlar, dosyaya yazan her işlem yine senden onay ister; hayır demek yalnızca daha az yanıt almak demektir. Context7 her sorgunun metnini dışarıdaki bir servise gönderir: ajanın sorgulara gizli bilgi ya da projene ait özel metin koymaması gerekir, sen yine de hayır diyebilirsin.
+> - Ardından ne kadar açıklama istediğinle ilgili tek bir soru, projenin okunup kısa bir proje tüzüğü (charter) taslağıyla sana onaylatılması, panoda (board) bir kurulum Epic'i ve küçük, gerçek bir görev gelir. Modeller, kendi araçların ve harita ise istediğin zaman başlatacağın tek bir sonraki göreve kalır.
 > - Bu sırada bir etiketin "commit olmadığı" ("is not a commit") uyarısını görebilirsin. Kurulum sırasında bu normaldir ve kurulum sağlamdır.
 
 Burada dur. Kurulumu bu sohbette sürdürme.
