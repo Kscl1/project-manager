@@ -35,9 +35,11 @@ brief_changed: the report answers the brief the worker read, which may no longer
 Each ended attempt keeps what it used: the attempt's `usage` holds "input", "output", "cache_read", "cache_write",
 "total_tokens", "turns" (how many assistant messages were summed) and "cost_usd", summed from the assistant messages
 the attempt's Pi session log wrote after the attempt started; a message without cost.total makes cost_usd null, and a
-log that is not found leaves usage out altogether (never a guess). Claude Code's log is not read: it carries no cost and
-pm_run does not know the file for a job. `--status` shows tokens and cost per job, then one line per model and a grand
-total; the end of the loop prints the same totals.
+log that is not found leaves usage out altogether (never a guess). Usage is counted in tokens and turns, and money is
+only what those tokens would cost at API prices (the column is headed "API est."), because most workers run on flat
+plans or free models. Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+`--status` shows tokens and turns per job, then one line per model and a grand total; the end of the loop prints the
+same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch every brief must exist as a file; a missing one fails the job without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
@@ -50,7 +52,7 @@ If a blocked agy startup shows the folder trust question, the job stays pending 
 that pane; pm_run closes it and starts the job once the screen changes. A failed pane read does not count as an answer.
 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
-       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and cost, then exit
+       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and turns, then exit
        python .pm/swarm/pm_run.py <run-dir> --status --tally  also count shared failure-log events, most frequent first
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
@@ -115,6 +117,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
+# Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
+# models. Printed once, on the total line, not on every row.
+API_NOTE = "(at API prices; plans and free models cost less)"
 # pm_run stops when every job is here
 ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
 
@@ -372,6 +377,11 @@ def short_tokens(count):
     if count >= 1_000:
         return f"{count / 1_000:.1f}k"
     return str(int(count))
+
+
+def short_turns(count):
+    """Assistant messages a row summed, as itself: 47; "-" when no attempt reported a turn count."""
+    return "-" if count is None else str(int(count))
 
 
 def short_cost(money):
@@ -1244,13 +1254,14 @@ class Run:
         per_model, per_job = usage_tally(jobs, state)
 
         def used(jid):
-            """The job's tokens and cost as two printed columns; "-" where no attempt recorded them."""
+            """The job's tokens, turns and API-price estimate as three printed columns; "-" where none was recorded."""
             row = per_job.get(jid)
             tokens = short_tokens(row["tokens"] if row else None)
+            turns = short_turns(row["turns"] if row and row["turns_known"] else None)
             cost = short_cost(row["cost"] if row and row["known"] else None)
-            return f"{tokens:>10}{cost:>10}"
+            return f"{tokens:>10}{turns:>10}{cost:>10}"
 
-        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'cost':>10}  last attempt")
+        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
         for job in jobs:
             s = state.get(job["id"], {"state": "pending", "attempts": []})
             a = s["attempts"][-1] if s["attempts"] else {}
@@ -1298,17 +1309,30 @@ class Run:
         print("failures: " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
 
     def print_totals(self, per_model):
-        """One line per model and the grand total; a cost any attempt did not report stays "-"."""
-        print(f"{'model':<24}{'tokens':>10}{'cost':>10}")
+        """One line per model and the grand total; a turn count or cost any attempt did not report stays "-".
+
+        The money is what the tokens would cost at API prices, so the total line says so once, after it, rather than
+        repeating the note on every row.
+        """
+        print(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}")
         for model in sorted(per_model):
             row = per_model[model]
             print(
-                f"{model:<24}{short_tokens(row['tokens']):>10}{short_cost(row['cost'] if row['known'] else None):>10}"
+                f"{model:<24}{short_tokens(row['tokens']):>10}"
+                f"{short_turns(row['turns'] if row['turns_known'] else None):>10}"
+                f"{short_cost(row['cost'] if row['known'] else None):>10}"
             )
         tokens = sum(row["tokens"] for row in per_model.values())
+        turns = sum(row["turns"] for row in per_model.values())
         known = per_model and all(row["known"] for row in per_model.values())
+        turns_known = per_model and all(row["turns_known"] for row in per_model.values())
         cost = sum(row["cost"] for row in per_model.values()) if known else None
-        print(f"{'total':<24}{short_tokens(tokens if per_model else None):>10}{short_cost(cost):>10}")
+        note = f"  {API_NOTE}" if cost is not None else ""
+        print(
+            f"{'total':<24}{short_tokens(tokens if per_model else None):>10}"
+            f"{short_turns(turns if turns_known else None):>10}{short_cost(cost):>10}"
+            f"{note}"
+        )
 
     def request_stop(self, jobs, state, job_id):
         """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""

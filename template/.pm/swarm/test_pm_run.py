@@ -1744,6 +1744,7 @@ USED_115 = {
     "turns": 1,
     "cost_usd": 0.12,
 }
+THE_NOTE = "(at API prices; plans and free models cost less)"
 
 
 def log_stamp(seconds):
@@ -1875,24 +1876,44 @@ class UsageTest(PmRunFixture, unittest.TestCase):
             pm_run.Run(self.run_dir).print_totals(per_model)
         text = "\n".join(call.args[0] for call in printed.call_args_list)
         self.assertIn("cheap-a", text)
-        self.assertIn(f"{'cheap-a':<24}{'2.0k':>10}{'$0.50':>10}", text)
-        self.assertIn(f"{'big-b':<24}{'1.1k':>10}{'-':>10}", text, "one attempt without a cost leaves the row unknown")
-        self.assertIn(f"{'total':<24}{'3.1k':>10}{'-':>10}", text)
+        self.assertIn(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}", text)
+        self.assertIn(f"{'cheap-a':<24}{'2.0k':>10}{'4':>10}{'$0.50':>10}", text)
+        self.assertIn(
+            f"{'big-b':<24}{'1.1k':>10}{'-':>10}{'-':>10}",
+            text,
+            "one attempt without a cost or a turn count leaves the row unknown",
+        )
+        self.assertIn(f"{'total':<24}{'3.1k':>10}{'-':>10}{'-':>10}", text)
+        self.assertNotIn(THE_NOTE, text, "a total without money says nothing about API prices")
 
-    def test_status_shows_tokens_and_cost_for_a_job_and_the_same_total_per_model(self):
+    def test_status_shows_tokens_turns_and_the_api_estimate_for_a_job_and_the_same_total_per_model(self):
         self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
         self.jobs(self.job("a", "ok"))
         done = self.run_pm()
         self.assertEqual(self.receipts()["a"]["attempts"][0]["usage"], USED_115)
-        self.assertRegex(done.stdout, r"(?m)^ok +115 +\$0\.12$", "the loop prints the totals once when it ends")
+        self.assertRegex(done.stdout, r"(?m)^ok +115 +1 +\$0\.12$", "the loop prints the totals once when it ends")
         out = self.run_pm("--status").stdout
-        self.assertRegex(out, r"(?m)^a +verified +1 +115 +\$0\.12 +", "one row: tokens and money of the job")
-        self.assertRegex(out, r"(?m)^ok +115 +\$0\.12$")
-        self.assertRegex(out, r"(?m)^total +115 +\$0\.12$")
+        self.assertRegex(out, r"(?m)^a +verified +1 +115 +1 +\$0\.12 +", "one row: tokens, turns, estimate")
+        self.assertRegex(out, r"(?m)^ok +115 +1 +\$0\.12$")
+        self.assertRegex(out, rf"(?m)^total +115 +1 +\$0\.12 +{re.escape(THE_NOTE)}$")
+
+    def test_status_heads_the_money_column_api_estimate_and_says_the_note_once(self):
+        self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        out = self.run_pm("--status").stdout
+        lines = out.splitlines()
+        self.assertRegex(lines[0], r"^job\s+state\s+tries\s+tokens\s+turns\s+API est\.\s+last attempt$")
+        self.assertIn(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}", out)
+        self.assertEqual(out.count(THE_NOTE), 1, "the note belongs on the total line, not on every row")
+        total = next(line for line in lines if line.startswith("total"))
+        self.assertTrue(total.endswith(THE_NOTE), f"the total line ends with the note: {total!r}")
+        self.assertNotIn("cost", out.replace(THE_NOTE, ""), "no column is headed cost any more")
 
     def test_status_shows_a_dash_when_no_attempt_reported_usage(self):
         out = self.run_pm("--status").stdout
-        self.assertRegex(out, r"(?m)^total +- +-$")
+        self.assertRegex(out, r"(?m)^total +- +- +-$")
+        self.assertNotIn(THE_NOTE, out)
 
 
 class LockedFileTest(unittest.TestCase):
