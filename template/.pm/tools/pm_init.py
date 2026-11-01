@@ -5,9 +5,10 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--swa
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
 - Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them. A replaced folder is
-  built beside the old one as <folder>.new and only then swapped in, so a copy that fails (a lock, antivirus, a full
-  disk) leaves the project with the tools it had; the run stops with one line saying where the old copy is and the
-  command that puts it back.
+  built in a new temporary folder beside the old one, whose name cannot already exist, and only then swapped in, so
+  a copy that fails (a lock, antivirus, a full disk) leaves the project with the tools it had; no folder of the
+  project's is ever removed on the way, and the run stops with one line saying where the old copy is and the command
+  that puts it back.
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
   --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
   deleted.
@@ -48,6 +49,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -89,6 +91,8 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
+# The folder a copy is built in, beside its destination: tempfile makes the name, so it cannot already exist.
+STAGING = ".pm-init-"
 # Claude Desktop opens each entry of .claude/launch.json in its own preview pane; templates/root/launch.json holds
 # that file's version and its entries.
 # LikeC4's release, the pin in tools/setup/bom.toml: the map preview starts this exact version, so a person who
@@ -274,9 +278,21 @@ def same_files(src, dst, part):
     return not any(classify(src, dst, part, {}))
 
 
-def staged(dst):
-    """Where the new copy is built: beside the old folder, so putting it in place is one rename."""
-    return dst.parent / f"{dst.name}.new"
+def staging(dst):
+    """A new, empty folder beside the old one, holding the copy while it is made. tempfile picks a name that cannot
+    already exist, so a folder the project happens to have beside its package is never reused, cleared or replaced."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=STAGING, dir=dst.parent))
+
+
+def free_entry(entry):
+    """Where the old folder goes: the run's own backup name, or a numbered one when something already sits there.
+    Only a path that does not exist is ever moved to, so nothing of the project's is replaced."""
+    candidate, n = entry, 1
+    while candidate.exists():
+        n += 1
+        candidate = entry.with_name(f"{entry.name}-{n}")
+    return candidate
 
 
 def clear(path):
@@ -326,28 +342,33 @@ class InstallStopped(Exception):
 
 
 def copy_dir(src, dst, upgrade, backup, manifest, part):
+    """Copy or replace one package folder: build the copy in a fresh folder of its own, back the old one up, then
+    rename the copy into place. Only this run's staging folder is ever removed."""
     if dst.exists() and not upgrade:
         say("skip", dst, "exists; use --upgrade to refresh")
         return
     if dst.exists() and same_files(src, dst, part):
         say("keep", dst, "same as the package")  # no backup either: nothing would be lost
         return
-    new, entry, moved = staged(dst), backup / Path(part).parent / dst.name, False
+    entry, moved, holder = backup / Path(part).parent / dst.name, False, None
     if dst.exists():
         report_changes(src, dst, part, manifest)
     try:
-        clear(new)  # a half-made copy from a run that stopped
-        new.parent.mkdir(parents=True, exist_ok=True)
+        holder = staging(dst)
+        new = holder / dst.name
         shutil.copytree(src, new, ignore=SKIP)  # the project keeps its folder whole while this runs
         if dst.exists():
+            entry = free_entry(entry)
             entry.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(dst), str(entry))  # the old copy, kept until the new one is in place
             moved = True
             say("backup", entry)
         shutil.move(str(new), str(dst))  # one rename on the same disk, so the folder is never away for long
     except OSError as error:
-        clear_quietly(new)
+        if holder is not None:
+            clear_quietly(holder)  # only the folder this run made
         raise InstallStopped(dst, error, entry, moved) from error
+    clear_quietly(holder)  # the staging folder, empty now that the copy is in place
     say("upgrade" if upgrade else "copy", dst)
 
 

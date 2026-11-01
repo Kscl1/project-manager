@@ -24,11 +24,13 @@ def boom(*args, **kwargs):
 pm_init.shutil.copytree = boom
 """
 RENAME_FAILS = """
+import os
+
 real_move = pm_init.shutil.move
 
 
 def move(src, dst, *args, **kwargs):
-    if str(src).endswith(".new"):
+    if os.path.basename(os.path.dirname(str(src))).startswith(".pm-init-"):
         raise OSError(13, "Permission denied")
     return real_move(src, dst, *args, **kwargs)
 
@@ -73,7 +75,7 @@ class PmInitTest(unittest.TestCase):
             errors="replace",
         )
 
-    def run_with(self, patch, *args):
+    def run_with(self, patch, *args, target=None):
         """Run pm_init from a small driver that patches a stdlib call first, so a copy can fail inside a real run."""
         driver_dir = Path(tempfile.mkdtemp(prefix="pm_driver_"))
         self.addCleanup(shutil.rmtree, driver_dir, onerror=_remove_readonly)
@@ -83,7 +85,7 @@ class PmInitTest(unittest.TestCase):
             f"sys.path.insert(0, {str(PM_INIT.parent)!r})\n"
             "import pm_init\n"
             f"{patch}\n"
-            f"sys.exit(pm_init.main([{str(self.root)!r}, *{list(args)!r}]))\n",
+            f"sys.exit(pm_init.main([{str(target or self.root)!r}, *{list(args)!r}]))\n",
             encoding="utf-8",
         )
         return subprocess.run(
@@ -390,7 +392,7 @@ class PmInitTest(unittest.TestCase):
         line = self.stopped_line(result.stdout)
         self.assertIn("No space left on device", line)
         self.assertIn(str(self.root / ".pm" / "local" / "backup"), line)  # nothing to restore, but it says where
-        self.assertFalse((self.root / ".pm" / "tools.new").exists(), "a half-made copy is cleared away")
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [], "a half-made copy is cleared away")
 
     def test_a_failed_copy_on_a_first_install_removes_nothing(self):
         result = self.run_with(COPY_FAILS)
@@ -400,7 +402,30 @@ class PmInitTest(unittest.TestCase):
         self.assertIn("Nothing of the project's was removed", line)
         self.assertFalse((self.root / ".pm" / "tools").exists())
         self.assertFalse((self.root / ".pm" / "VERSION").exists())
-        self.assertFalse((self.root / ".pm" / "tools.new").exists())
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [])
+
+    def test_an_install_and_an_upgrade_keep_the_folders_the_project_called_new_and_old(self):
+        # A project may keep its own draft beside the package; the staging folder and the backup use names of their
+        # own, so neither the first install nor the upgrade reuses or clears that draft.
+        drafts = {".pm/tools.new/keep.txt": "a draft of mine\n", ".pm/tools.old/keep.txt": "an old copy\n"}
+        for relative, text in drafts.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+
+        installed = self.run_init()
+
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        tool = self.root / ".pm" / "tools" / "pm_check.py"
+        tool.write_text("old\n", encoding="utf-8")  # so the upgrade really replaces the folder
+        upgraded = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(upgraded.returncode, 0, upgraded.stdout + upgraded.stderr)
+        for relative, text in drafts.items():
+            with self.subTest(path=relative):
+                self.assertEqual((self.root / relative).read_text(encoding="utf-8"), text)
+        self.assertNotEqual(tool.read_text(encoding="utf-8"), "old\n", "the upgrade did replace the tools")
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [], "this run's staging folder is gone")
 
     def test_a_rename_that_fails_names_the_backup_and_the_command_that_restores_it(self):
         self.assertEqual(self.run_init().returncode, 0)
