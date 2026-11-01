@@ -51,7 +51,9 @@ class StartWithoutTextual(unittest.TestCase):
             )
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertNotIn("Traceback", done.stderr)
-        self.assertIn("No module named textual", done.stderr)
+        self.assertIn(
+            "this Python does not have them: No module named", done.stderr
+        )  # textual, or rich where it is absent
         self.assertIn("python -m venv tools/setup/.venv", done.stderr)
         self.assertIn("-m pip install -r tools/setup/requirements.txt", done.stderr)
         self.assertIn("tools/setup/app.py <your project folder>", done.stderr)
