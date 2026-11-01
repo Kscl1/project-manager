@@ -30,10 +30,10 @@ Ask these, one at a time, with one sentence on each choice:
 
 1. **The project folder**, as a full path. If the user is not sure, list the folders where you are and ask.
 2. **The language** for talking and for the project's records, as a code such as `tr` or `en`. Field names and status names stay English, because the tools read them.
-3. **Map** (default yes): diagrams of the project's architecture that the agent can read and keep current. It needs Node.js.
+3. **Map** (default yes): a picture of how the project's parts connect, which the agent can read and keep current. It needs Node.js. Tell the user it can be skipped now and added later.
 4. **Swarm** (default no): helper agents that run in terminal panes the user can watch. It needs Pi and Herdr; say it can be added later.
 
-The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren` only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
+The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren` (a model service some people already pay for) only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
 
 ### 2. Check Python and Git, and get project-manager
 

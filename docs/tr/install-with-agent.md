@@ -30,10 +30,10 @@ Bunları tek tek, her seçenek için tek cümleyle sor:
 
 1. **Proje klasörü**, tam yoluyla. Kullanıcı emin değilse bulunduğun yerdeki klasörleri listeleyip sor.
 2. **Dil**: konuşma ve proje kayıtlarının dili, `tr` ya da `en` gibi bir kodla. Alan adları ve durum adları İngilizce kalır, çünkü araçlar onları okur.
-3. **Harita** (varsayılan evet): projenin mimarisini gösteren, ajanın okuyup güncel tuttuğu şemalar. Node.js gerektirir.
+3. **Harita** (varsayılan evet): projenin parçalarının nasıl bağlandığını gösteren, ajanın okuyup güncel tuttuğu bir resim. Node.js gerektirir. Kullanıcıya şimdi atlayıp sonradan ekleyebileceğini söyle.
 4. **Sürü** (varsayılan hayır): kullanıcının izleyebildiği terminal panellerinde çalışan yardımcı ajanlar. Pi ve Herdr gerektirir; sonradan da eklenebileceğini söyle.
 
-Katmanlar `core`, seçildiyse `map`, `swarm` ve `evren`'dir; `evren`'i yalnız EVREN hesabı olan kullanıcıya öner. Aşağıda `<layers>` olarak kullan, örneğin `core,map`.
+Katmanlar `core`, seçildiyse `map`, `swarm` ve `evren`'dir; `evren`'i (bazı kişilerin zaten ücret ödediği bir model servisi) yalnız EVREN hesabı olan kullanıcıya öner. Aşağıda `<layers>` olarak kullan, örneğin `core,map`.
 
 ### 2. Python'u ve Git'i kontrol et, project-manager'ı indir
 
