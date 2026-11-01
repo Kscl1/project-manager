@@ -2,7 +2,7 @@
 
 Used ChatGPT or Gemini on your phone? You already know how to ask for help in plain words. Here the same words work, and the assistant can also read and change the files in the project folder you open. project-manager helps it keep the work notes for the next chat.
 
-You do not have to learn a new tool: it uses files and programs you already have. It is not another AI model or a website you visit; your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
+You do not have to learn a new tool: it uses files and programs you already have. It is not another AI model or a website you visit. Your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
 
 **Only used AI on your phone?** [Start here](docs/first-time.md) · [Türkçe](docs/tr/index.md)
 
