@@ -1,5 +1,7 @@
 # .pm
 
+You do not need to read this folder by hand; your agent does.
+
 The project's work system, installed inside its own repository. Start at the root `AGENTS.md`, then open only the file your task needs.
 
 | Need | Open |

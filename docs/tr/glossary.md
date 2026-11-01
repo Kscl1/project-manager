@@ -19,9 +19,13 @@ Yapay zekâ destekli kodlama araçlarıyla yeni mi tanışıyorsun? Diğer sayfa
 
 **Epic.** Daha küçük görevleri bir arada tutan üst görev. Hedef tek bir göreve sığmayacak kadar büyükse kullanılır; asıl yapılan işler alt görevlerdir.
 
+**Proje tüzüğü (charter).** Projenin ne için var olduğunu, kime hizmet ettiğini ve neleri yapmayacağını anlatan kısa belge. Sonraki görevlerin aynı hedefe bakmasını sağlar; ajan iş önermeden önce onu okur.
+
 **Karar (decision).** Bir seçimin ve arkasındaki gerekçenin kodun yanında tutulan kısa kaydı. Aylar sonra kimse hatırlamadığında "bu neden böyle?" sorusuna yanıt verir.
 
 **Canlı blok (live block).** Aktif bir görevde ajanın sıradaki adımı, son kanıtı ve varsa engeli yazdığı birkaç satır. Sonraki oturum ilk bu notu okur ve ona güvenmeden önce gerçek dosyalarla karşılaştırır.
+
+**İş günlüğü (worklog).** Bir iş boyunca tutulan tarihli notlar: ne denendi, ne geçti, ne açık kaldı. `.pm/worklog/` klasöründe durur; sonraki oturum, önceki oturumun ne yaptığını buradan öğrenir.
 
 **Devam etme (resume).** Oturuma, projeyi sana baştan anlattırmak yerine işin nerede kaldığını okuyarak başlamak. `python .pm/tools/pm_board.py --resume` komutu aynı tabloyu elle de ekrana basar.
 
@@ -29,7 +33,23 @@ Yapay zekâ destekli kodlama araçlarıyla yeni mi tanışıyorsun? Diğer sayfa
 
 **Dal (branch).** Commit'lerin ilerlediği ayrı bir kol; böylece ana koda dokunmadan bir değişikliği deneyebilirsin. Kurucu `pm-setup` adlı bir dalda çalışır, böylece yaptığı değişiklikleri tek komutla çöpe atabilirsin.
 
+**Birleştirme (merge).** Bir daldaki commit'leri başka bir dala aktarmak; böylece biten iş ana hatta katılır. Ne zaman birleştireceğine sen karar verirsin, ajan yalnızca hazırlar.
+
+**Fark (diff).** İki commit ya da iki dal arasında değişen satırlar; silinenler ve eklenenler olarak gösterilir. Sen ve inceleyici, her dosyayı yeniden okumadan değişikliğin tam olarak ne yaptığını böyle görürsünüz.
+
 **Git.** Bir klasörün geçmişini kaydeden program: neyin, ne zaman ve hangi commit ile değiştiğini tutar. project-manager kayıtlarını Git'te tutar; böylece yapılan her değişiklik incelenebilir.
+
+**Çalışma ağacı (worktree).** Aynı Git deposundan alınan, kendi dalında duran ikinci bir çalışma klasörü; böylece açık klasörüne dokunmadan çalışılabilir. Sürü işçilerinin her biri kendi çalışma ağacında çalışır, bu da düzenlemelerini ayrı tutar.
+
+**Kanca (hook).** Git'in belirli bir anda kendiliğinden çalıştırdığı küçük komut; örneğin bir commit'ten hemen önce. Paketin kancaları kayıtları kontrol eder; işin doğru olduğunu kanıtlayamaz.
+
+**Lider (lead).** Konuştuğun ajan: görevi çerçeveler, planı yazar ve kanıtın gerçek olduğunu kontrol eder. Sürü katmanı olmayan bir projede işi liderin kendisi yapar.
+
+**İşçi (worker).** Tek bir görev tanımını (brief) alıp yalnızca onu yapan ve sonucu geri bildiren yardımcı ajan. İşçiler yalnızca isteğe bağlı Sürü katmanıyla vardır.
+
+**Görev tanımı (brief).** Tek bir iş için kısa yazılı talimat: neyi değiştir, ne olunca bitmiş sayılır ve neye dokunma. İşçi senin bütün sohbetini değil, yalnızca bu tanımı okur.
+
+**Sürü (swarm).** Yardımcı ajanları (işçileri) izleyebildiğin terminal bölmelerinde çalıştıran isteğe bağlı katman; her işçinin kendi çalışma ağacı ve görev tanımı olur. İstediğin bölmeye girip işi devralabilirsin.
 
 **MCP sunucusu (MCP server).** Ajanının Model Context Protocol üzerinden veri sorabildiği küçük yardımcı program. Context7 kütüphane belgelerini bu yolla verir; bir MCP sunucusu yalnızca soruları yanıtlar, dosyalarını değiştirmez.
 
