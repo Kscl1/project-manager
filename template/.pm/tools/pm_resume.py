@@ -52,7 +52,7 @@ FINDING_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
 READY_SHOWN = 10
 # Optional: other GitHub repos whose open pull requests are listed too, one owner/repo per line; # starts a comment.
 PR_REPOS_FILE = ROOT / ".pm" / "pr-repos.txt"
-GH_TIMEOUT = 20
+GH_TIMEOUT = 5
 
 
 def scalar(value):
@@ -566,7 +566,10 @@ def pr_lines():
                 check=False,
             )
             pulls = json.loads(result.stdout) if result.returncode == 0 else None
-        except (OSError, subprocess.TimeoutExpired, ValueError):
+        except subprocess.TimeoutExpired:
+            lines.append(f"- ⚠️ GitHub did not answer in {GH_TIMEOUT:g} s; pull requests not listed")
+            continue
+        except (OSError, ValueError):
             pulls = None
         if not isinstance(pulls, list):
             lines.append(f"- ⚠️ Could not list the open pull requests of {name}")

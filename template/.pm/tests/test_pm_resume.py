@@ -893,6 +893,39 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("Needs owner: not set", out)
         self.assertNotIn(": ?", out, "a question mark reads as an error to a beginner")
 
+    def test_github_timeout_is_five_seconds_and_says_so_in_one_line(self):
+        import importlib.util
+
+        self.commit_subjects(["setup"])
+        (self.root / ".pm" / "pr-repos.txt").write_text("acme/widgets\n", encoding="utf-8")
+        bin_dir = self.root / "slow-bin"
+        bin_dir.mkdir()
+        script = bin_dir / "slow_gh.py"
+        script.write_text("import time\ntime.sleep(2)\nprint('[]')\n", encoding="utf-8")
+        if os.name == "nt":
+            (bin_dir / "gh.bat").write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        else:
+            wrapper = bin_dir / "gh"
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+            wrapper.chmod(0o755)
+
+        spec = importlib.util.spec_from_file_location(
+            "pm_resume_under_test", self.root / ".pm" / "tools" / "pm_resume.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
+        try:
+            self.assertEqual(module.GH_TIMEOUT, 5, "a session start waits five seconds per repo, not twenty")
+            module.GH_TIMEOUT = 0.2  # the fake gh sleeps two seconds, so the shortened limit trips
+            lines = module.pr_lines()
+        finally:
+            os.environ["PATH"] = old_path
+
+        self.assertEqual(lines, ["- ⚠️ GitHub did not answer in 0.2 s; pull requests not listed"])
+
     def test_malformed_task_file_does_not_crash(self):
         self.commit_subjects(["setup"])
         self.make_worktree("b1-resume")
