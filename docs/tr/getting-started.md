@@ -5,11 +5,11 @@ description: Çalışma sistemi paketini projene kur, ardından ajanınla birlik
 
 project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtlarını (teknik seçimlerin nedenlerini) ve çalışma kurallarını kodunun yanında tutar. Böylece kodlama ajanın (kod okuyup yazan yapay zekâ aracın) her oturumda (çalışma sohbetinde) işi aynı yöntemle planlar ve kontrol eder.
 
-Kuruluma üç yoldan başlayabilirsin: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar. Commit, beceri (skill) ya da katman gibi kelimeler [sözlükte](glossary.md).
+Kuruluma üç yoldan başlayabilirsin; ilki en kısa olanı: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki Çekirdek katman tablosunu izleyerek **elle**. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar. Commit, beceri (skill) ya da katman gibi kelimeler [sözlükte](glossary.md).
 
 ## Başlamadan önce
 
-İnternet bağlantısı, **Python 3.11 veya daha yeni bir sürüm** ve **Git** gerekir. Kurulum ekranı (TUI), üzerinde çalıştığı Python'u kendi başına kuramaz.
+İnternet bağlantısı, **Python 3.11 veya daha yeni bir sürüm** (kurulum ekranını çalıştıran program) ve **Git** (projenin geçmişini tutan program) gerekir. Kurulum ekranı (TUI), üzerinde çalıştığı Python'u kendi başına kuramaz.
 
 **Windows 11:** PowerShell'de [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/) kullanarak [Python Install Manager](https://docs.python.org/3/using/windows.html) ve [Git for Windows](https://git-scm.com/install/windows) araçlarını yükle. Ardından yeni bir terminal aç ve Python'un kendisini `py` komutuyla kur:
 
@@ -19,7 +19,9 @@ winget install --id Git.Git --exact --source winget
 py install 3.13
 ```
 
-Eski kurucular (`Python.Python.3.11` vb.), Windows'un Akıllı Uygulama Denetimi (Smart App Control) tarafından "Bad Image" hatasıyla (`0xc0e90002`) durdurulabilir. Install Manager bu engele takılmaz.
+**Windows 10:** Python'u [python.org](https://www.python.org/downloads/) adresinden, Git'i [git-scm.com](https://git-scm.com/install/windows) adresinden kur, sonra aşağıdan devam et.
+
+**macOS:** ikisini [Homebrew](https://brew.sh) ile kur: `brew install python git`.
 
 **Omarchy ve diğer Arch tabanlı sistemler:** İkisi de çoğunlukla kurulu gelir; `python --version` ve `git --version` ile kontrol et. Kurulu değilse [pacman](https://man.archlinux.org/man/pacman.8.en) kullan:
 
@@ -27,7 +29,17 @@ Eski kurucular (`Python.Python.3.11` vb.), Windows'un Akıllı Uygulama Denetimi
 sudo pacman -S --needed python git
 ```
 
-Projen bir Git deposu olmalıdır. Yeni bir projeyse klasörünü oluştur ve içinde `git init` çalıştır. Kurulumdan önce mevcut çalışmalarını Git'e kaydet (`commit`) veya yedekle.
+Git deposu, geçmişini Git'in tuttuğu bir klasördür; `git init` herhangi bir klasörü depoya çevirir. Projen böyle bir depo olmalıdır. Yeni bir projeyse klasörünü oluştur ve içinde `git init` çalıştır. Kurulumdan önce mevcut çalışmalarını Git'e kaydet (`commit`) veya yedekle.
+
+Eski bir Python kurucusu "Bad Image" hatasıyla durursa [Bir şey bozulursa](#bir-şey-bozulursa) bölümüne bak.
+
+**Windows, Claude Desktop:** uygulama ayrı kurulur ve Code sekmesi ücretli bir Claude planı gerektirir. Terminal ondan bağımsız çalışır.
+
+## Ajanınla kur
+
+Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler.
+
+İş bitince projeni yeni bir oturumda aç ve `/pm-setup` yaz; gerisi aşağıdakiyle aynıdır.
 
 ## Kurulum ekranını (TUI) çalıştır
 
@@ -56,6 +68,8 @@ Omarchy:
 tools/setup/.venv/bin/python -m pip install -r tools/setup/requirements.txt
 tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 ```
+
+Ekranın kendi etiketleri (Check, Choose, Install, Done) ve sütun adları İngilizce kalır.
 
 | Ekran | Ne olur? | Tuşlar |
 |---|---|---|
@@ -86,9 +100,11 @@ Her projenin ihtiyaç duyduğu temel katman. Elle kuruyorsan tabloyu yukarıdan 
 Son üç satırdaki bileşenler, project-manager klasöründen çalıştırılan tek bir komutla kurulur. TUI bu komutu senin yerine çalıştırır:
 
 ```bash
-python template/.pm/tools/pm_init.py ../my-project --check
-python template/.pm/tools/pm_init.py ../my-project
+python template/.pm/tools/pm_init.py ../<proje-klasörün> --check
+python template/.pm/tools/pm_init.py ../<proje-klasörün>
 ```
+
+`<proje-klasörün>` yerine kendi proje klasörünün adını yaz.
 
 `--check` seçeneği yazacağı her şeyi listeler ama hiçbir dosya yazmaz. Projende zaten kendi ajan talimatların, Backlog.md veya Git kancaların varsa kurucu durur. Mevcut dosyalarını koruyarak kurmak için komutu `--keep-existing` ile tekrar çalıştır. Komutu ikinci kez çalıştırmak hiçbir şeyi değiştirmez.
 
@@ -121,4 +137,4 @@ Sürüm etiketiyle yükseltme, araçların ve becerilerin ayrı güncellenmesi v
 
 `.pm` paketinin kendisiyle ilgili bir sorun yaşarsan projende `/pm-feedback` komutunu çalıştır. Bu komut yalnızca teşhis bilgisi içeren bir rapor hazırlar ve önce sana gösterir. Yalnızca sen onay verirsen GitHub üzerinde bir sorun kaydı (`issue`) açar; bunun için GitHub'ın `gh` komut satırı aracında (CLI) oturum açılmış olması gerekir. Kurulum henüz beceriler (`skill`) yüklenmeden önce hata verirse bunun yerine TUI'deki `a` tuşunu kullan.
 
-**Windows, Akıllı Uygulama Denetimi (Smart App Control).** Şimdiye kadar gerçek bir bilgisayarda değil, yalnızca Windows Sandbox içinde görüldü: Akıllı Uygulama Denetimi açıkken Git for Windows'un imzasız DLL (kütüphane) dosyalarını engellediği için `git` komutu "Bad Image" hatasıyla (`0xc0e90002`) durur. Git kurucusu yine de kurulumun başarılı olduğunu söyler ama Git'i kimlik doğrulama yardımcısı (`credential helper`, tarayıcıda giriş penceresi açıp hesabı hatırlayan bileşen) olmadan bırakır. Bu yüzden `git clone` komutu giriş penceresi açmak yerine terminalde GitHub kullanıcı adı sorar. `git config --system credential.helper` komutuyla kontrol et (ekrana `manager` yazmalıdır). Hiçbir şey yazmıyorsa Git'i bir kez yeniden kur, ama ancak `git --version` yeniden çalıştıktan sonra (yani Akıllı Uygulama Denetimi Git'i artık engellemiyorken): `winget install --id Git.Git --exact --source winget --force`. Akıllı Uygulama Denetimi bir Windows güvenlik ayarıdır (Windows Güvenliği, Uygulama ve tarayıcı denetimi); kapatıp kapatmamaya kendin karar ver.
+**Windows, Akıllı Uygulama Denetimi (Smart App Control).** Şimdiye kadar gerçek bir bilgisayarda değil, yalnızca Windows Sandbox içinde görüldü: Akıllı Uygulama Denetimi açıkken Git for Windows'un imzasız DLL (kütüphane) dosyalarını engellediği için `git` komutu "Bad Image" hatasıyla (`0xc0e90002`) durur. Git kurucusu yine de kurulumun başarılı olduğunu söyler ama Git'i kimlik doğrulama yardımcısı (`credential helper`, tarayıcıda giriş penceresi açıp hesabı hatırlayan bileşen) olmadan bırakır. Bu yüzden `git clone` komutu giriş penceresi açmak yerine terminalde GitHub kullanıcı adı sorar. `git config --system credential.helper` komutuyla kontrol et (ekrana `manager` yazmalıdır). Hiçbir şey yazmıyorsa Git'i bir kez yeniden kur, ama ancak `git --version` yeniden çalıştıktan sonra (yani Akıllı Uygulama Denetimi Git'i artık engellemiyorken): `winget install --id Git.Git --exact --source winget --force`. Akıllı Uygulama Denetimi bir Windows güvenlik ayarıdır (Windows Güvenliği, Uygulama ve tarayıcı denetimi); değiştirmeden önce güvendiğin birine sor.
