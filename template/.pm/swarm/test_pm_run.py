@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -59,6 +60,11 @@ def finished():
     return "word " * 60 + "\n<!-- done -->\n"
 
 def status(agent):
+    if not agent["prompts"] and agent.get("prompt_rejected"):
+        return "idle"
+    if not agent["prompts"] and agent.get("startup_states"):
+        states = agent["startup_states"]
+        return states.pop(0) if len(states) > 1 else states[0]
     if not agent["prompts"] or agent["behaviour"] == "lost" and len(agent["prompts"]) == 1:
         return "idle"
     if agent["behaviour"] == "ask":
@@ -86,15 +92,26 @@ if cmd == ["tab", "create"]:
     reply({"type": "tab_created", "tab": {"tab_id": f"{ws['workspace_id']}:t{n}"}, "root_pane": {"pane_id": ws["panes"][-1]}})
 if cmd == ["agent", "start"]:
     name, behaviour = args[2], opt("--model")
+    if os.environ.get("FAKE_TRUST"):
+        state.setdefault("pane_screens", {})[opt("--pane")] = "Do you trust the contents of this project?"
+        if os.environ["FAKE_TRUST"] == "read_error":
+            state["pane_screens"][opt("--pane")] = {"error": "read failed"}
+        fail("agent_blocked", "agent blocked during startup")
     if behaviour == "nostart":
         fail("agent_not_ready", "pi did not become ready")
-    state["agents"][name] = {"pane": opt("--pane"), "behaviour": behaviour, "argv": args, "prompts": [], "prompted": 0}
+    if os.environ.get("FAKE_TRUST_AFTER_START"):
+        state.setdefault("pane_screens", {})[opt("--pane")] = "Do you trust the contents of this project?"
+    state["agents"][name] = {"pane": opt("--pane"), "behaviour": behaviour, "argv": args, "prompts": [], "prompted": 0,
+                             "startup_states": json.loads(os.environ.get("FAKE_START_STATES", "[]"))}
     reply({"type": "agent_started", "agent": {"name": name, "agent_status": "idle"}})
 if cmd == ["agent", "prompt"]:
     name, text = args[2], args[3]
     agent = state["agents"].get(name)
     if not agent:
         fail("agent_not_found", name)
+    if os.environ.get("FAKE_PROMPT_ERROR") and not agent.get("prompt_rejected"):
+        agent["prompt_rejected"] = True
+        fail("prompt_failed", "agent did not accept the prompt")
     agent["prompts"].append(text)
     agent["prompted"] = time.time()
     found = re.search(r"output file is (.+?)\. Create", text)
@@ -114,6 +131,23 @@ if cmd == ["agent", "prompt"]:
             {"type": "message", "message": {"role": "toolResult", "content": "not an assistant"}},
         ]
         (sessions / (name + ".jsonl")).write_text("\n".join(json.dumps(e) for e in entries) + '\n{"partial":', encoding="utf-8")
+    if os.environ.get("FAKE_PI_USAGE"):
+        # Two assistant messages with the same usage: one from an hour before this attempt, one from it. Only the
+        # second counts, so a doubled sum shows up at once.
+        sessions = Path(os.environ["PM_RUN_PI_SESSIONS"]) / ("--" + re.sub(r"[/\\:]", "-", str(REPO).lstrip("/\\")) + "--")
+        sessions.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        def stamp(when):
+            return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(when)) + ".%03dZ" % (int(when * 1000) % 1000)
+        entries = [
+            {"type": "session", "timestamp": stamp(now), "cwd": str(REPO)},
+            {"type": "session_info", "name": name},
+            {"type": "message", "timestamp": stamp(now - 3600),
+             "message": {"role": "assistant", "stopReason": "stop", "usage": json.loads(os.environ["FAKE_PI_USAGE"])}},
+            {"type": "message", "timestamp": stamp(now),
+             "message": {"role": "assistant", "stopReason": "stop", "usage": json.loads(os.environ["FAKE_PI_USAGE"])}},
+        ]
+        (sessions / (name + ".jsonl")).write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
     if agent["behaviour"] != "lost" or len(agent["prompts"]) > 1:
         agent["completion_seq"] = agent.get("completion_seq", 0) + 1
     if agent["behaviour"] == "ok" or agent["behaviour"] == "lost" and len(agent["prompts"]) > 1:
@@ -146,6 +180,13 @@ if cmd == ["agent", "get"]:
     if not os.environ.get("FAKE_NO_SEQ"):
         info["completion_seq"] = agent.get("completion_seq", 0)
     reply({"type": "agent_info", "agent": info})
+if cmd == ["pane", "read"]:
+    screen = state.get("pane_screens", {}).get(args[2], "")
+    if isinstance(screen, dict):
+        fail("read_failed", screen["error"])
+    STATE.write_text(json.dumps(state))
+    sys.stdout.write(screen)
+    sys.exit(0)
 if cmd == ["pane", "close"]:
     if os.environ.get("FAKE_STOP_ERROR"):
         fail("server_timeout", "close timed out")
@@ -181,6 +222,7 @@ class PmRunFixture:
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.run_dir = self.tmp / "run"
         self.run_dir.mkdir()
+        (self.tmp / "brief.md").write_text("A worker brief.\n", encoding="utf-8")
         repo_for_in_process_runs(self, self.tmp)
         fake = self.tmp / "fake_herdr.py"
         fake.write_text(FAKE_HERDR, encoding="utf-8")
@@ -342,6 +384,207 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the menu")
         self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
 
+    def test_missing_brief_is_checked_again_before_a_retry(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("previous attempt's output", encoding="utf-8")
+        (self.tmp / "brief.md").unlink()
+        run, job = pm_run.Run(self.run_dir), self.job("a", "ok")
+        state = {"a": {"state": "pending", "attempts": [{"started": 0}]}}
+        with patch.object(run, "launch") as launch:
+            run.tick([job], state, {})
+        launch.assert_not_called()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertEqual(len(state["a"]["attempts"]), 1)
+        self.assertEqual(out.read_text(encoding="utf-8"), "previous attempt's output")
+        self.assertFalse(out.with_name("a.attempt1.md").exists())
+
+    def test_first_prompt_waits_for_ready_agent_state(self):
+        self.env["FAKE_START_STATES"] = json.dumps(["starting", "working", "ready"])
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        calls = self.herdr_state()["calls"]
+        first_prompt = next(i for i, c in enumerate(calls) if c[:2] == ["agent", "prompt"])
+        self.assertEqual(sum(c[:2] == ["agent", "get"] for c in calls[:first_prompt]), 3)
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["seq0"], 0)
+
+    def test_no_agent_state_uses_the_fixed_wait(self):
+        run = pm_run.Run(self.run_dir)
+        attempt = {"name": "worker"}
+        with patch.object(run, "status_of", return_value="unknown"), patch.object(
+            pm_run.time, "sleep"
+        ) as sleep, patch.object(pm_run, "SETUP_S", 2):
+            self.assertTrue(run.wait_ready(attempt))
+        sleep.assert_called_once_with(2)
+
+    def test_a_query_timeout_at_the_deadline_does_not_fall_back_to_prompting(self):
+        run = pm_run.Run(self.run_dir)
+        attempt = {"name": "worker"}
+        with patch.object(run, "status_of", return_value="unknown"), patch.object(pm_run, "READY_S", 1), patch.object(
+            pm_run.time, "monotonic", side_effect=[0, 0, 1]
+        ):
+            self.assertFalse(run.wait_ready(attempt))
+        self.assertIn("not ready", attempt["launch_error"])
+
+    def test_not_ready_at_the_ceiling_does_not_receive_a_brief(self):
+        self.env.update(FAKE_START_STATES=json.dumps(["working"]), PM_RUN_READY_S="0.2", PM_RUN_MAX_TRIES="1")
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "failed")
+        self.assertIn("not ready", state["attempts"][0]["why"])
+        calls = self.herdr_state()["calls"]
+        self.assertFalse(any(c[:2] == ["agent", "prompt"] for c in calls))
+
+    def test_agy_trust_keeps_previous_attempt_output_once(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("first attempt output", encoding="utf-8")
+        run, job = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy")
+        state = {"a": {"state": "pending", "attempts": [{"started": 0}]}}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            self.assertEqual((out.parent / "a.attempt1.md").read_text(encoding="utf-8"), "first attempt output")
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual(len(state["a"]["attempts"]), 2)
+        self.assertFalse((out.parent / "a.attempt1-2.md").exists())
+
+    def test_agy_trust_does_not_count_old_output_as_a_new_attempt_each_tick(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("earlier report", encoding="utf-8")
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual((out.parent / "a.kept.md").read_text(encoding="utf-8"), "earlier report")
+        self.assertFalse((out.parent / "a.kept-2.md").exists())
+
+    def test_agy_folder_trust_waits_without_tries_then_starts_after_answer(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        env = {**self.env, "FAKE_TRUST": "1"}
+        with patch.dict(os.environ, env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "pending")
+            self.assertEqual(state["a"]["attempts"], [], "a trust screen must not use an attempt")
+            pane = state["a"]["trust_wait"]["pane"]
+            self.assertIn(f"agy asks to trust {self.tmp}", run.log_path.read_text(encoding="utf-8"))
+            with patch("builtins.print") as printed:
+                run.status([job], state)
+            self.assertIn(f"waiting for blocked agy pane {pane}", str(printed.call_args_list))
+            run.save(state)
+            state = run.load("receipts.json", {})  # restarting the scheduler must keep the same wait
+            for _ in range(3):
+                run.tick([job], state, {})
+            self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+            self.assertEqual(run.log_path.read_text(encoding="utf-8").count("agy asks to trust"), 1)
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = {"error": "read failed"}
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["attempts"], [], "a failed pane read is not an answer")
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted. Type a message."
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "started")
+            self.assertEqual(len(state["a"]["attempts"]), 1)
+            self.assertEqual(state["a"]["attempts"][0]["name"], self.a1)
+            calls = self.herdr_state()["calls"]
+            self.assertIn(["pane", "close", pane], calls)
+            self.assertEqual(sum(c[:2] == ["agent", "prompt"] for c in calls), 1)
+            self.assertNotIn("RETRY a", run.log_path.read_text(encoding="utf-8"))
+
+    def test_deleting_a_job_waiting_on_folder_trust_leaves_and_names_its_pane(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            run.tick([], state, {})
+        self.assertEqual(state["a"]["state"], "removed")
+        self.assertIn(f"Herdr pane {pane}", run.log_path.read_text(encoding="utf-8"))
+        self.assertNotIn(["pane", "close", pane], self.herdr_state()["calls"])
+
+    def test_stop_closes_an_agy_trust_pane_without_counting_a_try(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            run.tick([{**job, "stop": True}], state, {})
+        self.assertEqual(state["a"]["state"], "stopped")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn(["pane", "close", pane], self.herdr_state()["calls"])
+
+    def test_agy_trust_screen_after_successful_start_also_waits_without_a_try(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        env = {**self.env, "FAKE_TRUST_AFTER_START": "1", "FAKE_START_STATES": '["blocked"]'}
+        with patch.dict(os.environ, env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "first_run", return_value=False), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "pending")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn("agy asks to trust", run.log_path.read_text(encoding="utf-8"))
+        self.assertFalse(any(c[:2] == ["agent", "prompt"] for c in self.herdr_state()["calls"]))
+
+    def test_agy_trust_close_failure_does_not_start_a_second_worker(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            herdr = self.herdr_state()
+            herdr["pane_screens"][state["a"]["trust_wait"]["pane"]] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            with patch.object(run, "stop", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertFalse(state["a"]["trust_stopped_confirmed"])
+        self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+
+    def test_agy_blocked_start_with_unreadable_pane_is_not_retried_blindly(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "read_error"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            for _ in range(3):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "pending")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+        self.assertIn("could not read", run.log_path.read_text(encoding="utf-8"))
+
     def test_writes_lets_the_worker_write_more_than_its_output(self):
         self.jobs(self.job("a", "ok", writes=["site/", "notes/x.md"]))
         self.run_pm()
@@ -358,6 +601,44 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(lines), 2, "LAUNCH and the start and done lines are routine")
         self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
         self.assertRegex(lines[1], r" run ARTIFACT b ")
+
+    def test_status_tally_counts_shared_failures_in_order_and_ignores_other_words(self):
+        failures = self.tmp / ".pm" / "local" / "failures.log"
+        failures.parent.mkdir(parents=True)
+        failures.write_text(
+            "2026-11-01 00:00:00 run-a PROMPT a: sent again\n"
+            "2026-11-01 00:00:01 run-b WAITING b: answer PROMPT here\n"
+            "2026-11-01 00:00:02 run-b PROMPT b: sent again\n"
+            "2026-11-01 00:00:03 run-a RETRY c: later\n"
+            "2026-11-01 00:00:04 run-b WAITING c: answer here\n"
+            "2026-11-01 00:00:05 run-b LAUNCH d: routine\n"
+            "bad line PROMPT d: not a failure-log record\n",
+            encoding="utf-8",
+        )
+        self.jobs(self.job("a", "ok"))
+        status = self.run_pm("--status")
+        self.assertNotIn("failures:", status.stdout)
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failures: PROMPT=2, WAITING=2, RETRY=1", result.stdout)
+        self.assertEqual(result.stdout.count("failures:"), 1)
+        self.assertNotIn("LAUNCH=", result.stdout)
+        self.assertFalse(self.fake_state.exists())
+
+    def test_status_tally_reports_an_unreadable_log_without_stopping(self):
+        run = pm_run.Run(self.run_dir)
+        with patch.object(Path, "open", side_effect=PermissionError("access denied")), patch(
+            "builtins.print"
+        ) as printed:
+            run.failure_tally()
+        self.assertIn("could not read", str(printed.call_args_list))
+        self.assertIn("--status --tally", str(printed.call_args_list))
+
+    def test_status_tally_with_no_failure_log_says_none(self):
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failures: none", result.stdout)
+        self.assertFalse((self.tmp / ".pm" / "local" / "failures.log").exists())
 
     def test_a_held_failure_log_never_stops_the_logging_loop(self):
         run = pm_run.Run(self.run_dir)
@@ -394,6 +675,37 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("RETRY a", result.stdout)
         self.assertEqual(state["b"]["state"], "blocked")
         self.assertEqual(self.herdr_state()["agents"], {}, "the worker's pane is still closed")
+
+    def test_missing_brief_fails_before_launch_and_blocks_dependants(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("old output", encoding="utf-8")
+        self.jobs(self.job("a", "ok", briefs=["brief.md", "missing.md"]), self.job("b", "ok", after=["a"]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn("brief not found: missing.md", state["a"]["why"])
+        self.assertEqual(state["b"]["state"], "blocked")
+        self.assertFalse(self.fake_state.exists(), "Herdr must not be called")
+        self.assertEqual(out.read_text(encoding="utf-8"), "old output")
+        self.assertFalse(out.with_name("a.kept.md").exists())
+        self.assertIn("brief not found: missing.md", self.run_pm("--status").stdout)
+
+    def test_missing_brief_with_json_escapes_explains_backslashes(self):
+        # A JSON writer used single backslashes, so \\r, \\n and \\b became control characters.
+        bad_path = json.loads(r'"C:\run\new\brief.md"')
+        self.jobs(self.job("a", "ok", briefs=[bad_path]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "failed")
+        self.assertEqual(state["attempts"], [])
+        self.assertIn(r"brief not found: C:\run\new\brief.md", state["why"])
+        self.assertIn(r"a backslash in jobs.json was read as an escape: write \\ or /", state["why"])
+        self.assertNotRegex(state["why"], r"[\x00-\x1f\x7f-\x9f]")
+        self.assertFalse(self.fake_state.exists())
 
     def test_jobs_file_with_a_byte_order_mark_is_read(self):
         (self.run_dir / "jobs.json").write_text(json.dumps([self.job("a", "ok")]), encoding="utf-8-sig")
@@ -548,6 +860,21 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         calls = self.herdr_state()["calls"]
         first_prompt = next(i for i, c in enumerate(calls) if c[:2] == ["agent", "prompt"])
         self.assertEqual(calls[first_prompt - 1][:2], ["agent", "get"])
+
+    def test_failed_initial_prompt_is_retried_in_the_same_session_without_a_new_attempt(self):
+        self.env["FAKE_PROMPT_ERROR"] = "1"
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "verified")
+        self.assertEqual(len(state["attempts"]), 1)
+        calls = self.herdr_state()["calls"]
+        self.assertEqual(sum(c[:2] == ["agent", "start"] for c in calls), 1)
+        prompts = [c[3] for c in calls if c[:2] == ["agent", "prompt"]]
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(prompts[0], prompts[1])
+        self.assertIn("PROMPT a", result.stdout)
 
     def test_lost_brief_behind_a_used_up_quota_is_not_resent(self):
         screen = "> Read the brief file(s) brief.md\n  API Error: 429 usage limit reached for cx/gpt-6-astra\n"
@@ -1011,6 +1338,90 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertIn("question 3 in this session", waiting[-1])
         self.assertEqual(state["a"]["state"], "started")
 
+    def test_agy_permission_questions_wait_once_past_the_hard_limit_and_resume_after_answer(self):
+        questions = (
+            "Allow access to this file?",
+            "Run this command?",
+            "Requesting permission for: read report.md",
+        )
+        for question in questions:
+            with self.subTest(question=question):
+                run, _, attempt, state = self.settled_worker(screen=question)
+                attempt["pane"] = "w1:p7"
+                job = self.job("a", "nothing", harness="agy")
+                with patch.dict(os.environ, self.env), patch.object(
+                    pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+                ), patch.object(run, "status_of", return_value="done"), patch.object(
+                    pm_run, "QUIET_S", 0
+                ), patch.object(pm_run, "HARD_S", 1):
+                    for now in (1100, 1200, 1300, 1400):
+                        with patch.object(pm_run.time, "time", return_value=now):
+                            run.tick([job], state, {})
+                    self.assertEqual(state["a"]["state"], "started")
+                    self.assertNotIn("nudges", attempt)
+                    self.assertEqual(len(self.herdr_state()["agents"]["worker"]["prompts"]), 1)
+                    herdr = self.herdr_state()
+                    self.fake_state.write_text(json.dumps({**herdr, "reads": [{"error": "read failed"}]}))
+                    with patch.object(pm_run.time, "time", return_value=1400):
+                        run.tick([job], state, {})
+                    self.assertEqual(state["a"]["state"], "started", "a failed read is not an answer")
+                    waiting = run.log_path.read_text(encoding="utf-8")
+                    self.assertEqual(waiting.count("WAITING a"), 1)
+                    self.assertIn("w1:p7", waiting)
+                    with patch("builtins.print") as printed:
+                        run.status([job], state)
+                    self.assertIn("waiting for an answer in pane w1:p7", str(printed.call_args_list))
+                    herdr = self.herdr_state()
+                    self.fake_state.write_text(
+                        json.dumps({**herdr, "reads": ["Answer accepted. Working on the task."]})
+                    )
+                    with patch.object(pm_run.time, "time", return_value=1401):
+                        run.tick([job], state, {})
+                    self.assertNotIn("asking", attempt)
+                    self.assertEqual(len(self.herdr_state()["agents"]["worker"]["prompts"]), 2)
+                run.log_path.unlink()
+
+    def test_agy_new_permission_target_is_logged_even_if_answers_fall_between_ticks(self):
+        run, _, attempt, state = self.settled_worker(screen="Requesting permission for: read first.md")
+        job = self.job("a", "nothing", harness="agy")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"):
+            run.tick([job], state, {})
+            herdr = self.herdr_state()
+            self.fake_state.write_text(json.dumps({**herdr, "reads": ["Requesting permission for: read second.md"]}))
+            run.tick([job], state, {})
+            run.tick([job], state, {})
+        self.assertEqual(run.log_path.read_text(encoding="utf-8").count("WAITING a"), 2)
+        self.assertEqual(attempt["asks"], 2)
+        self.assertEqual(state["a"]["state"], "started")
+
+    def test_agy_permission_detection_uses_last_lines(self):
+        run, _, attempt, state = self.settled_worker(screen="Allow access to this file?\n" + "new output\n" * 11)
+        job = self.job("a", "nothing", harness="agy")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"), patch.object(
+            pm_run.time, "time", return_value=1100
+        ), patch.object(pm_run, "QUIET_S", 0):
+            run.tick([job], state, {})
+        self.assertEqual(attempt["nudges"], 1, "an old permission question is not a current one")
+
+    def test_agy_permission_question_waits_even_with_a_completed_artifact(self):
+        run, _, attempt, state = self.settled_worker(screen="Allow access to this file?")
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir(exist_ok=True)
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"), patch.object(
+            run, "stop", return_value=True
+        ) as stop, patch.object(pm_run, "SETTLE_S", 0):
+            run.tick([self.job("a", "nothing", harness="agy")], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertTrue(attempt["asking"])
+        stop.assert_not_called()
+
     def test_limit_banner_with_a_reset_time_is_a_used_up_quota(self):
         run, log, attempt, state = self.settled_worker("500", "You've hit your limit · resets 3am (Europe/Istanbul)\n")
         self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=0, MAX_NUDGES=3)), 1)
@@ -1159,8 +1570,9 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(self.receipts()["a"]["attempts"][0]["stall"])
         with patch("builtins.print") as printed:
             run.status([job], state)
-        self.assertIn("stall=True", printed.call_args.args[0])
-        self.assertIn("loop=False", printed.call_args.args[0])
+        shown = "\n".join(call.args[0] for call in printed.call_args_list)  # the table, then the totals
+        self.assertIn("stall=True", shown)
+        self.assertIn("loop=False", shown)
 
     def test_first_observation_uses_prompted_as_silence_start(self):
         _, _, _, _, log = self.watch(["quiet"], [1300])
@@ -1314,6 +1726,278 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
         self.assertIn("STALLED", log)
 
 
+# A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
+USAGE = {
+    "input": 100,
+    "output": 10,
+    "cacheRead": 5,
+    "cacheWrite": 0,
+    "totalTokens": 115,
+    "cost": {"input": 0.1, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.12},
+}
+USED_115 = {
+    "input": 100,
+    "output": 10,
+    "cache_read": 5,
+    "cache_write": 0,
+    "total_tokens": 115,
+    "turns": 1,
+    "cost_usd": 0.12,
+}
+THE_NOTE = "(at API prices; plans and free models cost less)"
+
+
+def log_stamp(seconds):
+    """A Pi log timestamp for a fixed epoch second, written as Pi writes it."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(seconds))
+
+
+class UsageTest(PmRunFixture, unittest.TestCase):
+    """What an attempt used, read from its Pi session log; a log is evidence, never a guess."""
+
+    def folder(self):
+        folder = self.tmp / "sessions" / ("--" + re.sub(r"[/\\:]", "-", str(self.tmp).lstrip("/\\")) + "--")
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def write_log(self, *entries, name="worker"):
+        path = self.folder() / f"{name}.jsonl"
+        path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+        return path
+
+    def usage(self, started=1000, name="worker", log=None):
+        job = {"id": "a", "model": "cheap-a", "out": "out/a.md"}
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "sessions")}):
+            return pm_run.usage_of(job, {"name": name, "started": started}, self.tmp, log)
+
+    def session(self, *messages, started=1000):
+        """A session header for an attempt that started at `started`, then the given message entries."""
+        header = {"type": "session", "timestamp": log_stamp(started + 1)}
+        return [header, {"type": "session_info", "name": "worker"}, *messages]
+
+    def test_only_messages_written_after_the_attempt_started_count(self):
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(900), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}},
+            )
+        )
+        self.assertEqual(self.usage(), USED_115)
+
+    def test_a_message_without_a_cost_counts_its_tokens_and_leaves_the_money_null(self):
+        no_cost = {"input": 10, "output": 2, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 12}
+        self.write_log(
+            *self.session(
+                {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "message": {"role": "assistant", "usage": no_cost}},
+            )
+        )
+        self.assertEqual(
+            self.usage(),
+            {
+                "input": 110,
+                "output": 12,
+                "cache_read": 5,
+                "cache_write": 0,
+                "total_tokens": 127,
+                "turns": 2,
+                "cost_usd": None,
+            },
+        )
+
+    def test_turns_count_the_assistant_messages_summed_in_this_attempt(self):
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(900), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1200), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1300), "message": {"role": "toolResult"}},
+            )
+        )
+        self.assertEqual(self.usage()["turns"], 2, "one turn per assistant message inside this attempt; no tool result")
+
+    def test_no_log_for_this_attempt_means_no_usage(self):
+        self.assertIsNone(self.usage(), "no log is no evidence, not zero")
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}}
+            )
+        )
+        self.assertIsNone(self.usage(started=2000), "a session that began before the attempt is not this attempt's")
+        self.assertEqual(self.usage(), USED_115, "the attempt that did start it reads it")
+
+    def test_a_finished_run_without_a_session_log_keeps_no_usage(self):
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        self.assertNotIn("usage", self.receipts()["a"]["attempts"][0])
+
+    def test_an_unreadable_line_is_skipped_and_named_once(self):
+        entries = self.session(
+            {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+            {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+        )
+        broken = '\n{"message": cut\n{"type": "message", cut again\n'
+        (self.folder() / "worker.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in entries[:2]) + broken + "\n".join(json.dumps(e) for e in entries[2:]),
+            encoding="utf-8",
+        )
+        said = []
+        self.assertEqual(self.usage(log=said.append)["input"], 200, "both readable messages still count")
+        self.assertEqual(len(said), 1, "one line, however many lines were unreadable")
+        self.assertIn("skipped 2 unreadable line(s)", said[0])
+
+    def test_totals_add_the_attempts_of_two_jobs_and_leave_an_unknown_cost_unknown(self):
+        used = {
+            "input": 1000,
+            "output": 100,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 1100,
+            "turns": 2,
+            "cost_usd": 0.25,
+        }
+        jobs = [{"id": "a", "model": "cheap-a"}, {"id": "b", "model": "big-b"}]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}, {"usage": {**used, "total_tokens": 900}}]},
+            # An older receipt, written before turns were counted, says nothing about its turns.
+            "b": {"state": "failed", "attempts": [{"usage": {**used, "turns": None, "cost_usd": None}}]},
+            "_herdr_workspace": "w1",
+        }
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertEqual(
+            per_job["a"],
+            {"tokens": 2000, "turns": 4, "cost": 0.5, "known": True, "turns_known": True, "counted": 2, "partial": 0},
+            "both attempts were paid for",
+        )
+        self.assertEqual(
+            per_job["b"],
+            {"tokens": 1100, "turns": 0, "cost": 0.0, "known": False, "turns_known": False, "counted": 1, "partial": 0},
+        )
+        self.assertEqual(sorted(per_model), ["big-b", "cheap-a"])
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).print_totals(per_model)
+        text = "\n".join(call.args[0] for call in printed.call_args_list)
+        self.assertIn("cheap-a", text)
+        self.assertIn(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}", text)
+        self.assertIn(f"{'cheap-a':<24}{'2.0k':>10}{'4':>10}{'$0.50':>10}", text)
+        self.assertIn(
+            f"{'big-b':<24}{'1.1k':>10}{'-':>10}{'-':>10}",
+            text,
+            "one attempt without a cost or a turn count leaves the row unknown",
+        )
+        self.assertIn(f"{'total':<24}{'3.1k':>10}{'-':>10}{'-':>10}", text)
+        self.assertNotIn(THE_NOTE, text, "a total without money says nothing about API prices")
+        self.assertNotIn("+?", text, "every attempt reported usage: no sum is marked partial")
+        self.assertNotIn(pm_run.NO_USAGE, text)
+
+    def totals_text(self, per_model):
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).print_totals(per_model)
+        return "\n".join(call.args[0] for call in printed.call_args_list)
+
+    def test_a_missing_usage_record_makes_the_job_model_and_total_partial(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {"a": {"state": "verified", "attempts": [{"usage": used}, {"why": "log not found"}]}}
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertEqual(per_job["a"]["counted"], 1, "one attempt reported usage")
+        self.assertEqual(per_job["a"]["partial"], 1, "one attempt was paid for without a usage record")
+        self.assertEqual(per_job["a"]["tokens"], 115, "the known sum stays, it is only marked")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'cheap-a':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}", text)
+        self.assertIn(f"{'total':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}", text, "a partial sum is not the whole")
+        self.assertEqual(text.count(pm_run.NO_USAGE), 1, "the note appears once, under the totals")
+        self.assertTrue(text.rstrip().endswith(pm_run.NO_USAGE), "the note sits under the total line")
+
+    def test_status_marks_a_job_row_partial_when_an_attempt_reported_no_usage(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {"a": {"state": "verified", "attempts": [{"usage": used}, {"why": "log not found"}]}}
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).status(jobs, state)
+        text = "\n".join(call.args[0] for call in printed.call_args_list)
+        self.assertRegex(text, r"(?m)^a +verified +2 +115\+\? +1\+\? +\$0\.03\+\? ", "the job row says it is partial")
+
+    def test_a_mixed_harness_run_does_not_show_the_pi_sum_as_the_grand_total(self):
+        used = {"input": 100, "output": 10, "total_tokens": 115, "turns": 1, "cost_usd": 0.03}
+        jobs = [
+            {"id": "a", "model": "pi-model", "harness": "pi"},
+            {"id": "b", "model": "claude-model", "harness": "claude"},
+        ]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}]},
+            "b": {"state": "verified", "attempts": [{"why": "Claude's log is not read"}]},
+        }
+        per_model, _ = pm_run.usage_tally(jobs, state)
+        self.assertIn("claude-model", per_model, "a model whose attempts reported no usage still gets a row")
+        self.assertEqual(per_model["claude-model"]["partial"], 1)
+        self.assertEqual(per_model["pi-model"]["partial"], 0, "the Pi attempts themselves all reported usage")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'pi-model':<24}{'115':>10}{'1':>10}{'$0.03':>10}", text)
+        self.assertIn(f"{'claude-model':<24}{'-':>10}{'-':>10}{'-':>10}", text, "nothing is known: dashes, no mark")
+        total = next(line for line in text.splitlines() if line.startswith("total"))
+        self.assertTrue(total.startswith(f"{'total':<24}{'115+?':>10}{'1+?':>10}{'$0.03+?':>10}"), total)
+        self.assertEqual(text.count(pm_run.NO_USAGE), 1)
+
+    def test_a_removed_job_without_usage_still_counts_against_the_total(self):
+        used = {"input": 900, "output": 100, "total_tokens": 1000, "turns": 2, "cost_usd": 0.25}
+        jobs = [{"id": "a", "model": "cheap-a"}]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}]},
+            "gone": {"state": "verified", "attempts": [{"model": "big-b", "why": "log not found"}]},
+        }
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertIn("gone", per_job, "a job removed from jobs.json still counts: its attempts were paid for")
+        self.assertEqual(per_job["gone"]["counted"], 0)
+        self.assertIn("big-b", per_model, "its model keeps a row instead of disappearing")
+        text = self.totals_text(per_model)
+        self.assertIn(f"{'big-b':<24}{'-':>10}{'-':>10}{'-':>10}", text)
+        total = next(line for line in text.splitlines() if line.startswith("total"))
+        self.assertTrue(total.startswith(f"{'total':<24}{'1.0k+?':>10}{'2+?':>10}{'$0.25+?':>10}"), total)
+
+    def test_status_shows_tokens_turns_and_the_api_estimate_for_a_job_and_the_same_total_per_model(self):
+        self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
+        self.jobs(self.job("a", "ok"))
+        done = self.run_pm()
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["usage"], USED_115)
+        self.assertRegex(done.stdout, r"(?m)^ok +115 +1 +\$0\.12$", "the loop prints the totals once when it ends")
+        out = self.run_pm("--status").stdout
+        self.assertRegex(out, r"(?m)^a +verified +1 +115 +1 +\$0\.12 +", "one row: tokens, turns, estimate")
+        self.assertRegex(out, r"(?m)^ok +115 +1 +\$0\.12$")
+        self.assertRegex(out, rf"(?m)^total +115 +1 +\$0\.12 +{re.escape(THE_NOTE)}$")
+        self.assertNotIn("+?", out, "every attempt reported usage: the sums are the whole")
+        self.assertNotIn(pm_run.NO_USAGE, out)
+
+    def test_status_heads_the_money_column_api_estimate_and_says_the_note_once(self):
+        self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        out = self.run_pm("--status").stdout
+        lines = out.splitlines()
+        self.assertRegex(lines[0], r"^job\s+state\s+tries\s+tokens\s+turns\s+API est\.\s+last attempt$")
+        self.assertIn(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}", out)
+        self.assertEqual(out.count(THE_NOTE), 1, "the note belongs on the total line, not on every row")
+        total = next(line for line in lines if line.startswith("total"))
+        self.assertTrue(total.endswith(THE_NOTE), f"the total line ends with the note: {total!r}")
+        self.assertNotIn("cost", out.replace(THE_NOTE, ""), "no column is headed cost any more")
+
+    def test_status_shows_a_dash_when_no_attempt_reported_usage(self):
+        out = self.run_pm("--status").stdout
+        self.assertRegex(out, r"(?m)^total +- +- +-$")
+        self.assertNotIn(THE_NOTE, out)
+
+    def test_a_run_whose_only_attempts_reported_no_usage_shows_dashes_not_a_partial_sum(self):
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertNotIn("usage", self.receipts()["a"]["attempts"][0], "no session log, so nothing was reported")
+        out = self.run_pm("--status").stdout
+        self.assertIn(f"{'ok':<24}{'-':>10}{'-':>10}{'-':>10}", out, "a row where nothing is known stays a dash")
+        self.assertRegex(out, r"(?m)^total +- +- +-$")
+        self.assertNotIn("+?", out)
+        self.assertNotIn(pm_run.NO_USAGE, out, "no sum carries the mark, so the note would explain nothing")
+
+
 class LockedFileTest(unittest.TestCase):
     """On Windows a rename or a read fails while another process (a --status call, a watcher) holds the file."""
 
@@ -1426,6 +2110,13 @@ class HerdrSafetyTest(unittest.TestCase):
         for code, expected in (("agent_not_found", None), ("server_timeout", "unknown"), ("other", "unknown")):
             with self.subTest(code=code), patch.object(pm_run, "herdr", return_value={"error": {"code": code}}):
                 self.assertEqual(run.status_of({"name": "worker"}), expected)
+
+    def test_stop_does_not_confirm_a_failed_pane_close_even_if_agent_is_gone(self):
+        run = pm_run.Run(".")
+        with patch.object(pm_run, "herdr", return_value={"error": {"code": "timeout"}}), patch.object(
+            run, "status_of", return_value=None
+        ):
+            self.assertFalse(run.stop({"name": "worker", "pane": "p1"}))
 
     def test_stop_does_not_confirm_a_query_error(self):
         with patch.object(pm_run, "herdr", return_value={"error": {"code": "timeout"}}), patch.object(

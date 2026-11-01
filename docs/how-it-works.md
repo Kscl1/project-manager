@@ -3,6 +3,8 @@ title: How it works
 description: From a request to checked work, with records kept in your repository.
 ---
 
+New words (task, Epic, brief, commit) are in the [glossary](glossary.md).
+
 ## One request, from intent to evidence
 
 1. **You describe the goal.** The lead agent opens a task with acceptance criteria before doing the work. Larger goals become an Epic with small, scoped tasks.

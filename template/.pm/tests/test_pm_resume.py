@@ -157,7 +157,12 @@ class ResumeSummaryTest(unittest.TestCase):
             self.assertIn(heading, out)
             positions.append(out.index(heading))
         self.assertEqual(positions, sorted(positions))
-        for line in expected_status.strip().splitlines():
+        branch, *changed_files = expected_status.strip().splitlines()
+        self.assertIn(branch.removeprefix("## "), out)
+        self.assertNotIn(
+            f"## {branch.removeprefix('## ')}", out, "the branch line reads as words, not as a Markdown heading"
+        )
+        for line in changed_files:
             self.assertIn(line.strip(), out)
         for subject in subjects[1:]:
             self.assertIn(subject, out)
@@ -268,6 +273,46 @@ class ResumeSummaryTest(unittest.TestCase):
         self.commit_with("chore: settle the idea", "Refs: DRAFT-2\nAssisted-by: M (high)", "2025-06-03")
         self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
 
+    def test_only_record_files_are_the_record_itself(self):
+        run_git(self.root, "add", "-A")
+        run_git(self.root, "commit", "-m", "fixture")
+        worklog = self.root / ".pm" / "worklog" / "2025-06-02-0900-new.md"
+        worklog.parent.mkdir(parents=True)
+        worklog.write_text("# new\n", encoding="utf-8")
+        run_git(self.root, "add", ".pm/worklog")
+        run_git(self.root, "commit", "-m", "worklog")
+        self.assertNotIn("are in no record", self.warnings_section(self.run_resume().stdout))
+
+        # A commit that only writes record files records the work itself; it is not loose work.
+        self.commit_files(
+            "docs: record the close",
+            ".pm/backlog/tasks/task-1 - open.md",
+            ".pm/backlog/drafts/draft-1 - parked.md",
+            ".pm/decisions/2025-06-02-use-git.md",
+            ".pm/decisions.md",
+            ".pm/lessons.md",
+        )
+        self.assertNotIn("are in no record", self.warnings_section(self.run_resume().stdout))
+
+        # Anything else under .pm/ is work like src/app.py: a silent change to a tool, the charter, a spec, a
+        # hook or a role must still show up as unrecorded work.
+        for count, path in enumerate(
+            (
+                ".pm/tools/pm_feedback.py",
+                ".pm/charter.md",
+                ".pm/specs/x/requirements.md",
+                ".pm/hooks/pre-commit",
+                "src/app.py",
+            ),
+            start=1,
+        ):
+            self.commit_files(f"chore: change {path}", path)
+            self.assertIn(
+                f"{count} commit(s) after the newest worklog",
+                self.warnings_section(self.run_resume().stdout),
+                path,
+            )
+
     def test_names_finished_tasks_in_the_newest_worklogs_next(self):
         worklog_dir = self.root / ".pm" / "worklog"
         worklog_dir.mkdir(parents=True)
@@ -362,6 +407,21 @@ class ResumeSummaryTest(unittest.TestCase):
         for absent in ("TASK-1", "TASK-5", "TASK-6"):
             self.assertNotIn(absent, section)
 
+    def test_recently_closed_shows_a_self_check_review_line(self):
+        self.commit_subjects(["setup"])
+        path = write_task(self.root, "TASK-1", "Self-checked", "Done")
+        text = path.read_text(encoding="utf-8").replace("labels: []", "labels: []\nupdated_date: '2025-06-04 09:00'")
+        text += (
+            "\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\nReview: lead self-check\n"
+            "Evidence: not shown here\n<!-- SECTION:FINAL_SUMMARY:END -->\n"
+        )
+        path.write_text(text, encoding="utf-8")
+
+        section = self.run_resume().stdout.split("## Recently closed tasks", 1)[1].split("\n## ", 1)[0]
+
+        self.assertIn("  Review: lead self-check", section)
+        self.assertNotIn("Evidence: not shown here", section)
+
     def commit_with(self, subject, body, day):
         (self.root / "history.txt").write_text(subject, encoding="utf-8")
         run_git(self.root, "add", "history.txt")
@@ -401,6 +461,16 @@ class ResumeSummaryTest(unittest.TestCase):
         for absent in ("TASK-2", "TASK-3", "Next: none"):
             self.assertNotIn(absent, out)
         self.assertIn("- (no task closed on 2025-07-01)", self.run_tool("--did", "2025-07-01").stdout)
+
+    def test_did_without_a_day_reads_today_instead_of_crashing(self):
+        self.commit_subjects(["setup"])
+
+        result = self.run_tool("--did")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("## Did", result.stdout)
+        self.assertIn(date.today().isoformat(), result.stdout)
 
     def write_closed_late(self):
         # 20:00 UTC on 4 June is 5 June at UTC+9, in the old form and in the 'T...Z' form Backlog writes since 1.55.
@@ -570,6 +640,22 @@ class ResumeSummaryTest(unittest.TestCase):
 
     def held_section(self, out):
         return out.split("## Waiting and ageing work", 1)[1].split("\n## ", 1)[0]
+
+    def test_no_weekly_audit_warning_in_the_first_week_after_install(self):
+        self.commit_subjects(["setup"])
+        version = self.root / ".pm" / "VERSION"
+        version.write_text("0.1.0\n", encoding="utf-8")
+
+        self.assertNotIn("Weekly doc audit", self.run_resume().stdout)
+
+        old = (datetime.now() - timedelta(days=8)).timestamp()
+        os.utime(version, (old, old))
+        self.assertIn("Weekly doc audit due (never ran)", self.warnings_section(self.run_resume().stdout))
+
+        # The first commit that added .pm/VERSION wins over the file's mtime; here it is old, so the warning stays.
+        run_git(self.root, "add", ".pm/VERSION")
+        run_git(self.root, "commit", "-m", "package", "--date", "2025-01-05T12:00:00")
+        self.assertIn("Weekly doc audit due (never ran)", self.warnings_section(self.run_resume().stdout))
 
     def test_held_section_lists_stale_ready_tasks_and_passed_review_dates(self):
         self.commit_subjects(["setup"])
@@ -827,7 +913,7 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("- ⚠️ Orphan worktree: .worktrees/orphan", section)
         self.assertNotIn("Pending report", section)
 
-    def test_missing_live_fields_show_question_mark(self):
+    def test_missing_live_fields_read_not_set(self):
         self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes="Next: Run tests")
 
@@ -836,9 +922,43 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = result.stdout
         self.assertIn("Next: Run tests", out)
-        self.assertIn("Evidence: ?", out)
-        self.assertIn("Blocker: ?", out)
-        self.assertIn("Needs owner: ?", out)
+        self.assertIn("Evidence: not set", out)
+        self.assertIn("Blocker: not set", out)
+        self.assertIn("Needs owner: not set", out)
+        self.assertNotIn(": ?", out, "a question mark reads as an error to a beginner")
+
+    def test_github_timeout_is_five_seconds_and_says_so_in_one_line(self):
+        import importlib.util
+
+        self.commit_subjects(["setup"])
+        (self.root / ".pm" / "pr-repos.txt").write_text("acme/widgets\n", encoding="utf-8")
+        bin_dir = self.root / "slow-bin"
+        bin_dir.mkdir()
+        script = bin_dir / "slow_gh.py"
+        script.write_text("import time\ntime.sleep(2)\nprint('[]')\n", encoding="utf-8")
+        if os.name == "nt":
+            (bin_dir / "gh.bat").write_text(f'@"{sys.executable}" "{script}" %*\n', encoding="utf-8")
+        else:
+            wrapper = bin_dir / "gh"
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n', encoding="utf-8")
+            wrapper.chmod(0o755)
+
+        spec = importlib.util.spec_from_file_location(
+            "pm_resume_under_test", self.root / ".pm" / "tools" / "pm_resume.py"
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        old_path = os.environ.get("PATH", "")
+        os.environ["PATH"] = str(bin_dir) + os.pathsep + old_path
+        try:
+            self.assertEqual(module.GH_TIMEOUT, 5, "a session start waits five seconds per repo, not twenty")
+            module.GH_TIMEOUT = 0.2  # the fake gh sleeps two seconds, so the shortened limit trips
+            lines = module.pr_lines()
+        finally:
+            os.environ["PATH"] = old_path
+
+        self.assertEqual(lines, ["- ⚠️ GitHub did not answer in 0.2 s; pull requests not listed"])
 
     def test_malformed_task_file_does_not_crash(self):
         self.commit_subjects(["setup"])

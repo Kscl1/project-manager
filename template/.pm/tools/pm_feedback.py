@@ -9,7 +9,9 @@ The report has five fields (.pm/templates/feedback.md): package version, harness
 and at most 20 lines of the error. Everything passes the redaction below.
 The second form shows the report again and opens an issue in the package's home repo with `gh issue create`.
 Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
-With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text back and stops.
+With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text to a new
+`<name>.redacted.md` next to the report (`-2`, `-3`, ... when that name is taken), leaves that report and every
+earlier copy alone, and stops.
 
 Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
 task and decision titles of two or more words, project and user names, paths outside the package's own files, e-mail
@@ -147,7 +149,15 @@ def tool_version(name):
     if not path:
         return "not found"
     try:
-        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+        # utf-8, not the console's code page: a tool that prints an arrow or a non-Latin name must not crash.
+        out = subprocess.run(
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
     except (OSError, subprocess.SubprocessError):
         return "not found"
     lines = (out.stdout or out.stderr).strip().splitlines()
@@ -164,6 +174,14 @@ def excerpt(text):
     return "\n".join(lines)[-MAX_CHARS:]
 
 
+def display(path, root):
+    """The path to print: relative to the project when it sits inside it, so no home folder or user name shows."""
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return path.as_posix()
+
+
 def build(root, command, error, harness, title):
     """The report as Markdown: the issue form's labels as headings, the redacted values below them."""
     version = root / ".pm" / "VERSION"
@@ -175,16 +193,35 @@ def build(root, command, error, harness, title):
     return f"# [feedback] {redact(title, root, private)}\n\n{redact(body, root, private)}\n"
 
 
+def write_new(path, text):
+    """Write `text` to `path`, or to `<stem>-2`, `-3`, ... when it is taken; never replace an existing file.
+
+    Returns the path actually written, so the tool can print which one it was.
+    """
+    candidate, extra = path, 2
+    while True:
+        try:
+            with candidate.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+        except FileExistsError:
+            candidate = path.with_name(f"{path.stem}-{extra}{path.suffix}")
+            extra += 1
+            continue
+        return candidate
+
+
 def send(root, report, yes, repo):
     """Open the issue only on an explicit yes. Returns the exit code."""
     shown = report.read_text(encoding="utf-8")
     text = redact(shown, root, private_strings(root))  # again: the file may be edited
     title, _, body = text.partition("\n")
     print(text)
+    source = report
+    if text != shown:  # never overwrite the owner's own file: the redacted copy sits next to it, under a free name
+        source = write_new(report.with_name(f"{report.stem}.redacted.md"), text)
+        print(f"Redaction changed the report; the text that would be sent is in {display(source, root)}.")
     if yes and text != shown:  # the owner said yes to the file, so send only the file as it was shown
-        report.write_text(text, encoding="utf-8", newline="\n")
-        print(f"Redaction changed the report the owner saw; nothing sent. {report.as_posix()} now holds the text")
-        print("that would be sent: show it to the owner again and ask again.")
+        print("Nothing sent: show the owner that file and ask again.")
         return 1
     if not yes:
         try:
@@ -196,12 +233,15 @@ def send(root, report, yes, repo):
             print("Nothing sent.")
             return 0
     if not shutil.which("gh"):
-        print(f"gh is missing or not signed in; nothing sent. The report is saved at {report.as_posix()}.")
+        print(f"gh is missing or not signed in; nothing sent. The report is saved at {display(source, root)}.")
         return 1
     title = title.lstrip("# ").strip()
     command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
     # utf-8, not the locale's code page: on Windows that is cp1252, which cannot write pm_check's arrows
-    return subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
+    code = subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
+    if code == 0:
+        print(f"Issue opened with the text from {display(source, root)}.")
+    return code
 
 
 def main(argv=None):
@@ -221,7 +261,17 @@ def main(argv=None):
         return send(root, Path(args.send), args.yes, args.repo)
     if not args.command or not args.error_file:
         parser.error("give --command and --error-file, or --send REPORT")
-    error = sys.stdin.read() if args.error_file == "-" else Path(args.error_file).read_text(encoding="utf-8")
+    if args.error_file == "-":
+        error = sys.stdin.read()
+    else:
+        source = Path(args.error_file)
+        try:
+            # errors=replace: an error log in another code page must not crash the tool
+            error = source.read_text(encoding="utf-8", errors="replace")
+        except OSError as failure:
+            print(f"Could not read {source.as_posix()}: {failure.strerror or failure}.")
+            print("The report is written without it. Check the path, or use --error-file - to pipe the error in.")
+            error = "(no error text: the error file could not be read)"
     report = build(root, args.command, error, args.harness, args.title)
     out = root / ".pm" / "local" / "feedback" / f"{time.strftime('%Y-%m-%d-%H%M%S')}-feedback.md"
     out.parent.mkdir(parents=True, exist_ok=True)

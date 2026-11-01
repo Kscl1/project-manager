@@ -3,6 +3,8 @@ title: Nasıl çalışır?
 description: Bir istekten kontrol edilmiş işe kadar tüm süreç; kayıtlar Git deponun içinde tutulur.
 ---
 
+Görev, Epic, brief, commit gibi yeni kelimeler [sözlükte](glossary.md).
+
 ## Niyetten kanıta tek bir istek
 
 1. **Hedefi sen anlatırsın.** Lider ajan (`lead`, işi planlayan ve çıktıları doğrulayan ana kodlama ajanı), işe başlamadan önce kabul ölçütleri (`acceptance criteria`, işin tamamlanmış sayılması için gereken koşullar) içeren bir görev (yapılacak iş kaydı) açar. Daha büyük hedefler, küçük ve sınırları belli alt görevlerden oluşan bir `Epic` (üst görev) hâline gelir.

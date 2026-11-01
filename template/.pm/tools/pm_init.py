@@ -4,7 +4,11 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--swa
                                    [--check | --keep-existing | --upgrade]
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
-- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them.
+- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them. A replaced folder is
+  built in a new temporary folder beside the old one, whose name cannot already exist, and only then swapped in, so
+  a copy that fails (a lock, antivirus, a full disk) leaves the project with the tools it had; no folder of the
+  project's is ever removed on the way, and the run stops with one line saying where the old copy is and the command
+  that puts it back.
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
   --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
   deleted.
@@ -13,16 +17,22 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   --swarm, then is upgraded like the other package files until deleted.
 - Project data (tasks, decisions, worklog, specs, charter) is never copied from here and never overwritten.
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
-  run pm_board --resume when a session starts and after a compaction) and .mcp.json (Context7; LikeC4 with --map).
+  run pm_board --resume when a session starts and after a compaction), .mcp.json (Context7; LikeC4 with --map) and
+  .claude/launch.json, which Claude Desktop opens in a preview pane: the board, and the map with --map, so the
+  board needs no terminal.
   A user's own copy is never edited: what it lacks goes to the "Merge by hand" list.
-- The plan is printed before anything is written. A first install into a project that already has its own
-  AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and writes nothing; --keep-existing installs
-  and keeps those files as they are. --check prints the plan and the conflicts only. The project's own git hooks
-  are never bypassed, on any run: core.hooksPath is set only when it is unset and there are none.
+- A real install prints a few lines when it is done (what it added or changed, what it kept of the user's, what to
+  merge by hand) and then what to do next; --check prints the whole plan and the conflicts instead. A first install
+  into a project that already has its own AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and
+  writes nothing, after showing that plan; --keep-existing installs and keeps those files as they are. The
+  project's own git hooks are never bypassed, on any run: core.hooksPath is set only when it is unset and there are
+  none.
 - --lang <code> sets the project language: one 'Language: <code>' line under a '## Language' heading in AGENTS.md
   (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
   the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
   in .pm/tools may run on its own project with --lang only, so /pm-setup can set the language later.
+- --upgrade compares the '## ' sections of the package's AGENTS.md template with the project's own file and names the
+  ones it lacks in one line; it never rewrites that file, so the user's text stays as it is.
 - After an upgrade from the project-manager checkout, the programs on this machine (Backlog.md, Pi and the rest)
   are compared with the release's tested versions (tools/setup/bom.py --updates); nothing is installed.
 - A second run with the same arguments changes nothing.
@@ -36,11 +46,14 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 PKG = Path(__file__).resolve().parent.parent  # the .pm/ folder this script belongs to
 PACKAGE = ["tools", "tests", "hooks", "roles", "templates"]  # refreshed by --upgrade
@@ -50,10 +63,17 @@ GITIGNORE = [".pm/local/", ".pm-report.md", ".worktrees/", "__pycache__/"]
 # ripgrep skips hidden folders, so a plain search misses decisions, tasks and worklogs. .pm/local/ is named again
 # because ripgrep reads .gitignore only inside a git repository.
 IGNORE = ["!.pm/", ".pm/local/"]
-# LF everywhere in the package: the hook is a shell script and breaks with CRLF on Windows.
+# LF everywhere the installer writes: a hook is a shell script and breaks with CRLF on Windows, and a CRLF copy of a
+# package file looks edited next to the manifest's hash. Git is told so for each file pm_init writes, the root files
+# included, or "git add" warns about every one of them in a project with core.autocrlf=true.
 GITATTRIBUTES = [
     ".pm/** text eol=lf",
     ".agents/skills/pm-*/** text eol=lf",
+    ".claude/** text eol=lf",
+    ".gitignore text eol=lf",
+    ".gitattributes text eol=lf",
+    ".ignore text eol=lf",
+    ".mcp.json text eol=lf",
     "AGENTS.md text eol=lf",
     "CLAUDE.md text eol=lf",
     "backlog.config.yml text eol=lf",
@@ -72,6 +92,13 @@ its replacement and why it was dropped. Never delete one. After adding or moving
 <!-- decision-index:end -->
 """
 SKIP = shutil.ignore_patterns("__pycache__", "*.pyc")
+# The folder a copy is built in, beside its destination: tempfile makes the name, so it cannot already exist.
+STAGING = ".pm-init-"
+# Claude Desktop opens each entry of .claude/launch.json in its own preview pane; templates/root/launch.json holds
+# that file's version and its entries.
+# LikeC4's release, the pin in tools/setup/bom.toml: the map preview starts this exact version, so a person who
+# follows it sees what this package was tested with. Move it together with the MCP server in templates/root/mcp-map.json.
+LIKEC4_VERSION = "1.60.0"
 # Claude Code's language setting takes a language name, not a code; an unknown code is written as it is.
 LANG_NAMES = {
     "ar": "arabic", "az": "azerbaijani", "de": "german", "en": "english", "es": "spanish", "fa": "persian",
@@ -122,7 +149,19 @@ That file is the only copy of the instructions; this one only points Claude Code
 """
 
 
+QUIET = False  # a real install prints a few lines at the end; --check and --dry-run print every change
+
+
+def quiet(on=True):
+    """Keep the per-file lines to ourselves; a failure or a note still shows."""
+    global QUIET
+    QUIET = on
+
+
 def say(action, path, note=""):
+    """One line per change, unless the run is quiet and ends with a summary instead."""
+    if QUIET and action not in ("failed", "note"):
+        return
     print(f"  {action + ' ':<8}{path}{'  (' + note + ')' if note else ''}")  # a long label keeps one space
 
 
@@ -165,14 +204,28 @@ def package_parts(target, map_layer=False, swarm=False):
         yield skill, target / ".agents" / "skills" / skill.name, f".agents/skills/{skill.name}"
 
 
+def installed_parts(target):
+    """The (folder, part) pairs the manifest records where they are installed, skipping a part that is not there."""
+    return [(folder, part) for _, folder, part in package_parts(target) if folder.exists()]
+
+
+def manifest_lines(folders):
+    """Each manifest line for these (folder, part) pairs: a file's hash and its path in the project."""
+    return [
+        f"{sha256(folder / rel)}  {(Path(part) / rel).as_posix()}"
+        for folder, part in folders
+        for rel in sorted(files_in(folder), key=str)
+    ]
+
+
+def manifest_text(folders):
+    """The manifest write_manifest writes for these (folder, part) pairs, so a plan can tell whether it will change."""
+    return "\n".join(manifest_lines(folders)) + "\n"
+
+
 def write_manifest(target):
-    lines = []
-    for _, folder, part in package_parts(target):
-        if not folder.exists():
-            continue
-        for rel in sorted(files_in(folder), key=str):
-            lines.append(f"{sha256(folder / rel)}  {(Path(part) / rel).as_posix()}")
-    path, text = target / ".pm" / MANIFEST, "\n".join(lines) + "\n"
+    path, lines = target / ".pm" / MANIFEST, manifest_lines(installed_parts(target))
+    text = "\n".join(lines) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") == text:
         say("keep", path)
         return
@@ -226,30 +279,113 @@ def same_files(src, dst, part):
     return not any(classify(src, dst, part, {}))
 
 
+def staging(dst):
+    """A new, empty folder beside the old one, holding the copy while it is made. tempfile picks a name that cannot
+    already exist, so a folder the project happens to have beside its package is never reused, cleared or replaced."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=STAGING, dir=dst.parent))
+
+
+def free_entry(entry):
+    """Where the old folder goes: the run's own backup name, or a numbered one when something already sits there.
+    Only a path that does not exist is ever moved to, so nothing of the project's is replaced."""
+    candidate, n = entry, 1
+    while candidate.exists():
+        n += 1
+        candidate = entry.with_name(f"{entry.name}-{n}")
+    return candidate
+
+
+def clear(path):
+    """Remove a half-made copy, so the next run can build it again."""
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def clear_quietly(path):
+    """A leftover copy only costs disk space; a run that stopped has a bigger problem to report."""
+    try:
+        clear(path)
+    except OSError:
+        pass
+
+
+def restore_command(entry, dst):
+    """The exact command that puts a backed-up folder back. Each path is repr()'d into the payload, and the whole
+    payload is quoted for this machine's shell, so a path with a space or an apostrophe still works when pasted."""
+    payload = f"import shutil; shutil.move({str(entry)!r}, {str(dst)!r})"
+    if os.name == "nt":
+        return f"python {subprocess.list2cmdline(['-c', payload])}"
+    return f"python -c {shlex.quote(payload)}"
+
+
+class InstallStopped(Exception):
+    """One plain line when a package folder could not be replaced: what is left, and the way back."""
+
+    def __init__(self, dst, error, entry, moved):
+        super().__init__(str(error.strerror or error))
+        self.dst, self.error, self.entry, self.moved = dst, error, entry, moved
+
+    def __str__(self):
+        reason = self.error.strerror or self.error
+        if self.moved:  # the old folder sits in the backup: name it, and the command that puts it back
+            return (
+                f"Upgrade stopped: the new {self.dst.name} could not be put in place ({reason}). Your old copy is in "
+                f"{self.entry}; put it back with: {restore_command(self.entry, self.dst)}"
+            )
+        if self.dst.exists():
+            return (
+                f"Upgrade stopped: {self.dst} could not be copied ({reason}). The folder is as it was, and the backup "
+                f"folder is {self.entry.parent}."
+            )
+        return f"Upgrade stopped: {self.dst} could not be copied ({reason}). Nothing of the project's was removed."
+
+
 def copy_dir(src, dst, upgrade, backup, manifest, part):
+    """Copy or replace one package folder: build the copy in a fresh folder of its own, back the old one up, then
+    rename the copy into place. Only this run's staging folder is ever removed."""
     if dst.exists() and not upgrade:
         say("skip", dst, "exists; use --upgrade to refresh")
         return
     if dst.exists() and same_files(src, dst, part):
         say("keep", dst, "same as the package")  # no backup either: nothing would be lost
         return
+    entry, moved, holder = backup / Path(part).parent / dst.name, False, None
     if dst.exists():
         report_changes(src, dst, part, manifest)
-        # Keep the old copy until the new one is in place: local edits stay recoverable.
-        backup = backup / Path(part).parent
-        backup.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(dst), str(backup / dst.name))
-        say("backup", backup / dst.name)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dst, ignore=SKIP)
+    try:
+        holder = staging(dst)
+        new = holder / dst.name
+        shutil.copytree(src, new, ignore=SKIP)  # the project keeps its folder whole while this runs
+        if dst.exists():
+            entry = free_entry(entry)
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dst), str(entry))  # the old copy, kept until the new one is in place
+            moved = True
+            say("backup", entry)
+        shutil.move(str(new), str(dst))  # one rename on the same disk, so the folder is never away for long
+    except OSError as error:
+        if holder is not None:
+            clear_quietly(holder)  # only the folder this run made
+        raise InstallStopped(dst, error, entry, moved) from error
+    clear_quietly(holder)  # the staging folder, empty now that the copy is in place
     say("upgrade" if upgrade else "copy", dst)
 
 
-def write_pointer(skill, target, upgrade):
-    """Write the Claude Code pointer for one skill: its frontmatter, then where the instructions are."""
+def pointer_text(skill):
+    """The Claude Code pointer for one skill: its frontmatter, then where the instructions are."""
     lines = (skill / "SKILL.md").read_text(encoding="utf-8").splitlines()
     front = "\n".join(lines[1 : lines.index("---", 1)])
-    text = POINTER.format(front=front, name=skill.name)
+    return POINTER.format(front=front, name=skill.name)
+
+
+def write_pointer(skill, target, upgrade):
+    """Write the pointer, or keep one that already says this: an upgrade changes nothing when nothing moved."""
+    text = pointer_text(skill)
     dst = target / ".claude" / "skills" / skill.name / "SKILL.md"
     if dst.exists() and (not upgrade or dst.read_text(encoding="utf-8") == text):
         say("keep", dst)
@@ -356,6 +492,7 @@ def write_version(target):
 
 
 EXIT_CONFLICT = 3
+EXIT_FAILED = 1
 ROOT_TEMPLATES = PKG / "templates" / "root"
 HOOKS_HOW = "call .pm/hooks/pre-commit and .pm/hooks/commit-msg from your hooks, or move yours"
 MERGE_HOW = {
@@ -367,6 +504,22 @@ MERGE_HOW = {
     ".git/hooks": HOOKS_HOW,
 }
 SETTINGS_HOW = "add the SessionStart hooks of .pm/templates/root/claude-settings.json (they run pm_board.py --resume)"
+SECTION = re.compile(r"^## (.+?)[ \t]*$", re.MULTILINE)
+
+
+def section_names(text):
+    """The '## ' section names of a document, in order and outside fenced examples."""
+    fences = [match.span() for match in FENCE.finditer(text)]
+    return [match.group(1) for match in SECTION.finditer(text) if not any(a <= match.start() < b for a, b in fences)]
+
+
+def missing_sections(target):
+    """The package AGENTS.md sections the project's own file lacks; that file is never rewritten."""
+    template, own = ROOT_TEMPLATES / "AGENTS.md", target / "AGENTS.md"
+    if not template.is_file() or not own.is_file():
+        return []
+    have = set(section_names(own.read_text(encoding="utf-8", errors="replace")))
+    return [name for name in section_names(template.read_text(encoding="utf-8")) if name not in have]
 
 
 def git_out(args, cwd):
@@ -446,6 +599,36 @@ def mcp_action(target, map_layer):
     return ("merge", missing) if missing else ("keep", {})
 
 
+def root_launch(name):
+    """One root launch template, parsed, with the LikeC4 pin filled in."""
+    text = (ROOT_TEMPLATES / name).read_text(encoding="utf-8").replace("<version>", LIKEC4_VERSION)
+    return json.loads(text)
+
+
+def wanted_launch(map_layer):
+    """Claude Desktop's preview file as the root templates hold it: the board, and the map with --map."""
+    launch = root_launch("launch.json")
+    if map_layer:
+        launch["configurations"] += root_launch("launch-map.json")["configurations"]
+    return launch
+
+
+def launch_action(target, map_layer):
+    """(write | keep | merge, the file to write or the configurations to add). An existing file is never rewritten."""
+    path, want = target / ".claude" / "launch.json", wanted_launch(map_layer)
+    if not path.exists():
+        return "write", want
+    data = read_json(path)
+    have = data.get("configurations") if isinstance(data, dict) else None
+    names = (
+        {item["name"] for item in have if isinstance(item, dict) and "name" in item}
+        if isinstance(have, list)
+        else set()
+    )
+    missing = [config for config in want["configurations"] if config["name"] not in names]
+    return ("merge", missing) if missing else ("keep", [])
+
+
 def missing_lines(target, name, wanted):
     path = target / name
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -522,6 +705,11 @@ def merge_items(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "merge":
         items += [(".mcp.json", f"add the {name} server: {json.dumps(config)}") for name, config in servers.items()]
+    action, missing = launch_action(target, args.map)
+    if action == "merge":
+        items += [
+            (".claude/launch.json", f"add the {config['name']} preview: {json.dumps(config)}") for config in missing
+        ]
     lang_merge = language_plan(target, args.lang)[1] if args.lang else []
     return [f"- {item}: {how}" for item, how in items] + lang_merge
 
@@ -568,24 +756,48 @@ def set_hooks_path(target):
     return is_repo(target) and not hook_conflicts(target) and not git_out(["config", "--get", "core.hooksPath"], target)
 
 
+class Change(NamedTuple):
+    """One line of the plan, with the real files it writes: the summary counts files, not plan lines."""
+
+    action: str
+    path: str  # relative to the project
+    note: str
+    files: int  # 0 for an empty folder and for a git setting, which are no file at all
+    added: bool  # the files are new, not files the project already had
+
+
+def file_count(action, path, files):
+    """(how many real files this line writes, whether they are new): a copied or replaced folder hands in its own
+    count, an empty folder and a git setting write none, and every other line writes the one file it names, unless
+    the project already had it."""
+    if files is None:
+        files = 1 if isinstance(path, Path) and action != "create" else 0
+    return files, not isinstance(path, Path) or not path.exists()
+
+
 def plan(target, args, conflicts):
-    """Every change the install makes, as (action, path relative to the project, note), before anything is written.
-    main() makes exactly these changes; the tests check that no file is written outside this list."""
-    entries, copies = [], 0
+    """Every change the install makes, as Change(action, path, note, files, added), before anything is written. The
+    file count is the one the summary prints, so a copied folder counts every file in it. main() makes exactly these
+    changes; the tests check that no file is written outside this list."""
+    entries, counts, after = [], {}, []
     for src, dst, part in package_parts(target, args.map, args.swarm):
-        if not dst.exists():
-            entries.append(("copy", dst, ""))
-        elif args.upgrade and not same_files(src, dst, part):
-            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
-        else:
+        same = dst.exists() and (not args.upgrade or same_files(src, dst, part))
+        after.append((dst if same else src, part))  # the copy the manifest reads once this run is done
+        if same:
             continue
-        copies += 1
+        if dst.exists():
+            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
+            counts[dst] = sum(1 for _ in classify(src, dst, part, {}))  # the files a commit will show
+        else:
+            entries.append(("copy", dst, ""))
+            counts[dst] = len(files_in(src))
     for skill in shipped_skills(target, args.map):
         pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
-        if not pointer.exists() or args.upgrade:
+        if not pointer.exists() or (args.upgrade and pointer.read_text(encoding="utf-8") != pointer_text(skill)):
             entries.append(("write", pointer, "points Claude Code to the skill"))
-    if copies or not (target / ".pm" / "VERSION").exists() or not (target / ".pm" / MANIFEST).exists():
-        entries.append(("write", target / ".pm" / MANIFEST, "what each package file looked like"))
+    recorded = target / ".pm" / MANIFEST
+    if not recorded.exists() or recorded.read_text(encoding="utf-8") != manifest_text(after):
+        entries.append(("write", recorded, "what each package file looked like"))
     for part in [*SEED, "decisions.md"]:
         if not (target / ".pm" / part).exists():
             entries.append(("write", target / ".pm" / part, ""))
@@ -603,6 +815,11 @@ def plan(target, args, conflicts):
     action, servers = mcp_action(target, args.map)
     if action == "write":
         entries.append(("write", target / ".mcp.json", ", ".join(servers)))
+    action, launch = launch_action(target, args.map)
+    if action == "write":
+        entries.append(
+            ("write", target / ".claude" / "launch.json", ", ".join(c["name"] for c in launch["configurations"]))
+        )
     if args.lang:
         entries += [("set", path, note) for path, note in language_plan(target, args.lang)[0]]
     if not version_is_current(target):
@@ -613,11 +830,69 @@ def plan(target, args, conflicts):
         entries.append(("set", "git core.hooksPath", ".pm/hooks"))
     if is_repo(target) and not hook_conflicts(target) and hooks_to_stage(target):
         entries.append(("stage", "git index", "the .pm hooks as executable"))
-    return [(action, shown(target, path), note) for action, path, note in entries]
+    changes = []
+    for action, path, note in entries:
+        files, added = file_count(action, path, counts.get(path))
+        changes.append(Change(action, shown(target, path), note, files, added))
+    return changes
 
 
 def shown(target, path):
     return path.relative_to(target).as_posix() if isinstance(path, Path) else path
+
+
+# The user's own files the installer would write if they were missing, so a run that found them names them as kept.
+YOURS = ["AGENTS.md", "CLAUDE.md", "backlog.config.yml", ".claude/settings.json", ".mcp.json", ".claude/launch.json"]
+
+
+def counted(count, word):
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def phrase(count, word):
+    """'3 files', or nothing at all when the run has none of them."""
+    return counted(count, word) if count else ""
+
+
+def listed(parts):
+    """A short list as a person says it: 'a', 'a and b', 'a, b and c'."""
+    parts = [part for part in parts if part]
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
+def written_files(entries, added):
+    """How many distinct files these lines write: a file the plan names twice (AGENTS.md, then its language line) is
+    one file, and a copied folder still counts every file in it."""
+    files = {}
+    for change in entries:
+        if change.added == added:
+            files[change.path] = max(files.get(change.path, 0), change.files)
+    return sum(files.values())
+
+
+def result_lines(target, entries, conflicts, merge):
+    """The few lines a real install prints instead of the whole plan: what it added or changed, what it kept of the
+    user's, and where the rest waits. --check still prints the plan itself. The counts are files, not plan lines: a
+    copied folder counts every file in it, so the number is one a person can check on disk."""
+    added = written_files(entries, added=True)
+    changed = written_files(entries, added=False)
+    folders = sum(1 for change in entries if change.action == "create")
+    settings = sum(1 for change in entries if not change.files and change.action in {"set", "stage"})
+    lines = []
+    if added or folders:
+        lines.append(f"Added {listed([phrase(added, 'file'), phrase(folders, 'empty folder')])}.")
+    if changed:
+        lines.append(f"Changed {counted(changed, 'file')}.")
+    if settings:
+        lines.append(f"Set {counted(settings, 'git setting')}.")
+    if not lines:
+        lines.append("Nothing to change: the package and your files are as they are.")
+    kept = [name for name in dict.fromkeys([item for item, _ in conflicts] + YOURS) if (target / name).exists()]
+    if kept:
+        lines.append(f"Kept {counted(len(kept), 'file')} of yours: {', '.join(kept)}.")
+    if merge:
+        lines.append(f"Merge by hand: {counted(len(merge), 'item')}, listed in .pm/local/merge-by-hand.md.")
+    return lines
 
 
 def language_only(target, args):
@@ -677,13 +952,16 @@ def main(argv=None):
     stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
     if not args.dry_run:
         entries = plan(target, args, conflicts)
-        print(f"Plan for {target} ({len(entries)} change(s)):")
-        for entry in entries:
-            say(*entry)
-        if conflicts:
-            print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
-            for item, why in conflicts:
-                say("keep", item, why)
+        # The whole plan is for a run that writes nothing: --check, or a first install that stops on the project's own
+        # files. A real install prints a few lines at the end instead, so the next step is not buried.
+        if args.check or (stops and not args.keep_existing):
+            print(f"Plan for {target} ({len(entries)} change(s)):")
+            for change in entries:
+                say(change.action, change.path, change.note)
+            if conflicts:
+                print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
+                for item, why in conflicts:
+                    say("keep", item, why)
         if args.check:
             return EXIT_CONFLICT if stops else 0
         if stops and not args.keep_existing:
@@ -692,8 +970,8 @@ def main(argv=None):
                 " as they are, then merge them by hand."
             )
             return EXIT_CONFLICT
-        print()
-    print(f"{'Upgrading' if args.upgrade else 'Installing'} the package from {PKG} into {target}")
+    print(f"Project: {target}")  # the folder this run changes, first, so a long log says where it went
+    print(f"{'Upgrading' if args.upgrade else 'Installing'} the package from {PKG}")
 
     manifest = read_manifest(target)
     if args.dry_run:
@@ -714,9 +992,21 @@ def main(argv=None):
         )
         return 0
     merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
+    summary = result_lines(target, entries, conflicts, merge)  # the same: what the run found, not what it left
+    lacking = missing_sections(target) if args.upgrade else []
+    if lacking:  # the file is the user's: name what it lacks, never rewrite a line of it
+        summary.append(
+            f"Your AGENTS.md lacks these package sections: {', '.join(lacking)}. "
+            "Ask your agent to add them from .pm/templates/root/AGENTS.md."
+        )
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
-    for src, dst, part in package_parts(target, args.map, args.swarm):
-        copy_dir(src, dst, args.upgrade, backup, manifest, part)
+    quiet(True)  # one line per file is what --check is for; the run ends with a few lines instead
+    try:
+        for src, dst, part in package_parts(target, args.map, args.swarm):
+            copy_dir(src, dst, args.upgrade, backup, manifest, part)
+    except InstallStopped as stopped:
+        print(stopped)  # one plain line: what is left and the way back; the run stops here
+        return EXIT_FAILED
     for skill in shipped_skills(target, args.map):
         write_pointer(skill, target, args.upgrade)
     write_manifest(target)
@@ -741,6 +1031,9 @@ def main(argv=None):
     if action == "write":
         text = json.dumps({"mcpServers": servers}, indent=2) + "\n"
         write_once(target / ".mcp.json", text=text)
+    action, launch = launch_action(target, args.map)
+    if action == "write":
+        write_once(target / ".claude" / "launch.json", text=json.dumps(launch, indent=2) + "\n")
     if args.lang:
         set_language(target, args.lang)
     write_version(target)
@@ -757,15 +1050,18 @@ def main(argv=None):
         # disk, so set it on the files and stage them with it; the first commit then records them as executable.
         for hook in hook_names():
             path = target / hook
-            path.chmod(path.stat().st_mode | 0o111)
+            try:
+                path.chmod(path.stat().st_mode | 0o111)
+            except OSError:
+                pass  # a filesystem without POSIX modes (an exFAT stick, a network share): git records the bit anyway
         names = hooks_to_stage(target)
         if names:
             run(["git", "add", "--chmod=+x", "--", *names], cwd=target)
 
-    if merge:
-        print("\nMerge by hand (the installer never rewrites a file of yours):")
-        for line in merge:
-            print(f"  {line}")
+    quiet(False)
+    print()
+    for line in summary:  # a few lines for the person reading the run, not the file-by-file list
+        print(line)
     if not first:
         tool_updates(target)
     print("\nNext:")

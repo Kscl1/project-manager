@@ -573,6 +573,17 @@ class FrontmatterAndExitCodeTest(PmBoardTestCase):
         self.assertNotIn("no_frontmatter", result.stdout)
         self.assertNotIn("Meeting Notes", result.stdout)
 
+    def test_a_task_saved_in_a_windows_code_page_is_still_listed(self):
+        """One cp1254 byte (0xfd, a Turkish dotless i) must not make the board drop the whole task."""
+        (self.tasks_dir / "task-1.md").write_bytes(
+            b"---\nid: TASK-1\ntitle: I\xfdlk ad\xfdm\xfd\nstatus: Ready\nlabels: []\n---\n"
+        )
+
+        result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("- TASK-1 · I", result.stdout)
+
     def test_empty_tasks_directory_exits_0(self):
         """Empty DIR produces empty board with empty sections showing '- (none)'."""
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
@@ -663,6 +674,298 @@ class CommandLineInterfaceTest(PmBoardTestCase):
             "## Done\n- (none)\n"
         )
         self.assertEqual(result.stdout, expected)
+
+
+class StdoutGuardTest(PmBoardTestCase):
+    def test_main_prints_when_stdout_cannot_be_reconfigured(self):
+        """A replaced stdout without reconfigure (a test harness, a wrapped console) must not crash the board."""
+        import io
+        from unittest import mock
+
+        buffer = io.StringIO()
+        plain = type("Plain", (), {"encoding": "utf-8", "write": buffer.write, "flush": buffer.flush})()
+        argv = ["pm_board.py", "--tasks", str(self.tasks_dir), "--today", "2026-09-22"]
+
+        with mock.patch.object(sys, "stdout", plain), mock.patch.object(sys, "argv", argv):
+            code = pm_board.main()
+
+        self.assertEqual(code, 0)
+        self.assertIn("# Status board (2026-09-22)", buffer.getvalue())
+
+
+class NextCommandTest(PmBoardTestCase):
+    """`--next` answers one question in plain words: what do I do now?"""
+
+    def task_file(self, name, body="", **frontmatter):
+        """Write one task file; the frontmatter keys are written in the order given."""
+        lines = ["---", *(f"{key}: {value}" for key, value in frontmatter.items()), "---", "", body, ""]
+        return self.write_task(name, "\n".join(lines))
+
+    def run_next(self):
+        return self.run_board("--tasks", str(self.tasks_dir), "--next")
+
+    def test_active_task_wins_over_a_ready_one(self):
+        body = (
+            "## Acceptance Criteria\n"
+            "- [x] #1 already checked\n"
+            "- [ ] #2 still open\n\n"
+            "## Implementation Notes\n"
+            "Next: run the tests\n"
+        )
+        self.task_file("task-1.md", body, id="TASK-2", title="Fix the board", status="Active")
+        self.task_file(
+            "task-2.md",
+            "## Acceptance Criteria\n- [ ] #1 start here\n",
+            id="TASK-3",
+            title="Start something",
+            status="Ready",
+            priority="high",
+        )
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Continue: Fix the board (TASK-2)", result.stdout)
+        self.assertIn("Next: run the tests", result.stdout)
+        self.assertIn("- [ ] #2 still open", result.stdout)
+        self.assertNotIn("already checked", result.stdout, "only the criteria still open are listed")
+        self.assertNotIn("TASK-3", result.stdout, "an Active task comes before any Ready one")
+
+    def test_several_active_tasks_newest_first_and_the_one_to_continue(self):
+        self.task_file(
+            "task-1.md",
+            "## Acceptance Criteria\n- [ ] #1 older\n",
+            id="TASK-1",
+            title="Older work",
+            status="Active",
+            updated_date="'2026-10-30 09:00'",
+        )
+        self.task_file(
+            "task-2.md",
+            "## Acceptance Criteria\n- [ ] #1 newer\n",
+            id="TASK-2",
+            title="Newer work",
+            status="Active",
+            updated_date="'2026-10-31 18:00'",
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("2 tasks are Active; continue the newest one.", out)
+        self.assertIn("Continue: Newer work (TASK-2)", out)
+        self.assertIn("- [ ] #1 newer", out)
+        self.assertIn("- Older work (TASK-1) · updated 2026-10-30 09:00", out)
+        self.assertLess(out.index("Continue: Newer work"), out.index("Older work"), "newest first")
+
+    def test_ready_task_with_the_highest_priority_starts(self):
+        self.task_file(
+            "task-1.md", "", id="TASK-1", title="Medium work", status="Ready", priority="medium", ordinal="100"
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="High work", status="Ready", priority="high", ordinal="900")
+        self.task_file("task-3.md", "", id="TASK-3", title="No priority", status="Ready", ordinal="1")
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Start: High work (TASK-2) · priority high · ordinal 900", result.stdout)
+        self.assertNotIn("Start: Medium work", result.stdout)
+        self.assertNotIn("Start: No priority", result.stdout)
+
+    def test_lowest_ordinal_wins_between_equal_priorities(self):
+        self.task_file("task-1.md", "", id="TASK-1", title="Later", status="Ready", priority="high", ordinal="900")
+        self.task_file("task-2.md", "", id="TASK-2", title="Sooner", status="Ready", priority="high", ordinal="200")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Sooner (TASK-2) · priority high · ordinal 200", out)
+
+    def test_a_ready_task_waiting_on_an_unfinished_task_is_skipped(self):
+        self.task_file("task-5.md", "", id="TASK-5", title="Waiting task", status="In review")
+        self.write_task(
+            "task-1.md",
+            "---\nid: TASK-1\ntitle: Blocked start\nstatus: Ready\npriority: high\nordinal: 10\n"
+            "dependencies:\n  - TASK-5\n---\n",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Free to start", status="Ready", ordinal="900")
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Start: Free to start (TASK-2)", result.stdout)
+        self.assertNotIn("Blocked start", result.stdout)
+
+    def test_a_dependency_closed_into_the_completed_folder_counts_as_done(self):
+        self.task_file(
+            "task-1.md",
+            "",
+            id="TASK-1",
+            title="Waits for the old one",
+            status="Ready",
+            ordinal="900",
+            dependencies="[TASK-7]",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Free to start", status="Ready", ordinal="1000")
+        completed = self.temp_dir / "completed"
+        completed.mkdir()
+        (completed / "task-7.md").write_text("---\nid: TASK-7\ntitle: Finished\nstatus: Done\n---\n", encoding="utf-8")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Waits for the old one (TASK-1)", out)
+
+    def test_nothing_ready_prints_one_plain_line(self):
+        self.task_file("task-1.md", "", id="TASK-1", title="Done already", status="Done")
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "Nothing is Ready to start. The lead can open a task from the user's next request.",
+        )
+
+    def test_a_blocked_ready_task_is_named_after_the_plain_line(self):
+        self.task_file(
+            "task-1.md",
+            "",
+            id="TASK-1",
+            title="Waits on another",
+            status="Ready",
+            ordinal="10",
+            dependencies="[TASK-9]",
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("Nothing is Ready to start.", out)
+        self.assertIn("- Ready but waiting for another task: TASK-1 (needs TASK-9)", out)
+
+    def test_a_draft_is_never_picked(self):
+        self.task_file("task-1.md", "", id="TASK-1", title="Private idea", status="Draft", priority="high", ordinal="1")
+        self.task_file("task-2.md", "", id="TASK-2", title="Real work", status="Ready", ordinal="900")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Real work (TASK-2)", out)
+        self.assertNotIn("Private idea", out)
+
+    def test_an_active_task_without_a_live_block_reads_not_set(self):
+        self.task_file("task-1.md", "", id="TASK-1", title="Active work", status="Active")
+
+        result = self.run_next()
+
+        self.assertIn("Next: not set", result.stdout)
+        self.assertNotIn("Next: ?", result.stdout)
+
+    def test_no_open_criteria_is_stated_in_plain_words(self):
+        self.task_file(
+            "task-1.md",
+            "## Acceptance Criteria\n- [x] #1 all done\n",
+            id="TASK-1",
+            title="Nearly done",
+            status="Active",
+        )
+
+        self.assertIn("Acceptance criteria: none unchecked", self.run_next().stdout)
+
+        (self.tasks_dir / "task-1.md").unlink()
+        self.task_file("task-2.md", "", id="TASK-2", title="No criteria yet", status="Ready")
+
+        self.assertIn("Acceptance criteria: none written yet", self.run_next().stdout)
+
+    def test_a_held_active_task_is_skipped_for_an_unheld_ready_one(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2027-01-01 · owner · waiting\n",
+            id="TASK-1",
+            title="Held work",
+            status="Active",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Free to start", status="Ready")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Free to start (TASK-2)", out)
+        self.assertNotIn("Held work", out)
+
+    def test_a_held_active_task_whose_date_passed_is_continued(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2020-01-01 · owner · waiting\n",
+            id="TASK-1",
+            title="Hold is over",
+            status="Active",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Ready but later", status="Ready")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Continue: Hold is over (TASK-1)", out)
+        self.assertNotIn("Ready but later", out)
+
+    def test_a_ready_task_held_with_a_review_by_date_is_skipped(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2099-12-31 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Parked on purpose",
+            status="Ready",
+            priority="high",
+            ordinal="1",
+        )
+        self.task_file(
+            "task-2.md", "", id="TASK-2", title="Free to start", status="Ready", priority="low", ordinal="900"
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Free to start (TASK-2)", out)
+        self.assertNotIn("Parked on purpose", out)
+
+    def test_a_held_task_whose_review_date_passed_is_offered_again(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2020-01-01 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Hold is over",
+            status="Ready",
+            priority="high",
+            ordinal="1",
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Hold is over (TASK-1)", out)
+
+    def test_only_held_tasks_left_names_the_earliest_date(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2099-12-31 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Parked late",
+            status="Active",
+        )
+        self.task_file(
+            "task-2.md",
+            "## Implementation Notes\nReview by: 2099-11-30 · Sam · after the design talk\n",
+            id="TASK-2",
+            title="Parked sooner",
+            status="Ready",
+        )
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "Everything open is waiting until 2099-11-30 (Parked sooner). Say what you want to build next.",
+        )
+
+    def test_next_appears_in_the_help(self):
+        result = self.run_board("--help")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("--next", result.stdout)
 
 
 if __name__ == "__main__":

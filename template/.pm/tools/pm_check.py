@@ -3,18 +3,24 @@
 Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --staged       check only docs staged for commit (the pre-commit hook)
        python .pm/tools/pm_check.py --stale        list docs whose described code changed since review (never blocks)
-       python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
+       python .pm/tools/pm_check.py --write-index  rewrite the generated decision index and record catalogue
+       python .pm/tools/pm_check.py --help         print these modes and exit
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
-an open task keeps its live Next and Evidence lines short, so the resume summary stays short,
-and an owner ask that offers lettered options (`Needs owner: pick A or B`) has each option written out.
+an open task names at least one acceptance criterion, keeps its live Next and Evidence lines short,
+so the resume summary stays short, and an owner ask that offers lettered options
+(`Needs owner: pick A or B`) has each option written out.
 A file path written in backticks must exist: in a living doc any repo path, in a decision in force a path into
 a repository next to this one (`../repo/file`). A deleted file passes when its deleting commit is named beside it.
 A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
 
 A clean result means the docs are consistent, not that they are correct.
+The first line of a normal run names the folder it checked, so a wrong folder is visible at once.
+UTF-8 and UTF-16 byte-order marks are read. Other invalid text is reported so it can be saved as UTF-8.
 """
 
+import argparse
+import codecs
 import functools
 import os
 import re
@@ -26,14 +32,17 @@ from urllib.parse import unquote
 
 
 def find_root(start):
-    """The project root holds backlog.config.yml or .git; the tools live in <root>/.pm/tools."""
+    """The project root holds backlog.config.yml or .git; the tools live in <root>/.pm/tools.
+    Also say whether a marker was found: without one, .pm/ alone is checked and the run says so."""
     for folder in [start, *start.parents]:
         if (folder / "backlog.config.yml").exists() or (folder / ".git").exists():
-            return folder
-    return start.parent
+            return folder, True
+    root = start.parent
+    # .pm/*.md alone would report "No problems found" for a project that never ran git init: say what is checked.
+    return root, False
 
 
-ROOT = find_root(Path(__file__).resolve().parent)
+ROOT, FOUND_ROOT = find_root(Path(__file__).resolve().parent)
 # Decisions live in .pm/decisions.md: either the whole log, or an index of .pm/decisions/D-n.md files (one per
 # decision; replaced ones in .pm/decisions/archive/). Older projects keep the log in docs/decisions.md.
 DECISIONS = next((p for p in (ROOT / ".pm" / "decisions.md", ROOT / "docs" / "decisions.md") if p.exists()), None)
@@ -90,14 +99,80 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TASK_DIRS = (".pm/backlog/tasks/", "backlog/tasks/")
 DRAFT_DIRS = (".pm/backlog/drafts/", "backlog/drafts/")
 UNCHECKED = re.compile(r"^\s*-\s+\[ \]")
+ACCEPTANCE_ITEM = re.compile(r"^\s*-\s+\[[ xX]\]")  # an acceptance criterion, checked or not
 
 
 def rel(path):
     return path.relative_to(ROOT).as_posix()
 
 
-def git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+def plural(count, word):
+    """A number with its counted word: `1 problem`, `2 problems`."""
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
+class InvalidDocumentEncoding(Exception):
+    def __init__(self, path):
+        self.path = path
+
+
+BAD_ENCODINGS = set()
+
+
+def read_text(path):
+    """Read UTF-8 or BOM-marked UTF-16 strictly; never check text with replacement characters."""
+    data = path.read_bytes()
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        raise InvalidDocumentEncoding(path)
+    encoding = "utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+    try:
+        return data.decode(encoding).replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        raise InvalidDocumentEncoding(path) from None
+
+
+def checked(call, fallback):
+    """Skip a check whose input cannot be decoded, and report each affected file only once."""
+    try:
+        return call()
+    except InvalidDocumentEncoding as error:
+        BAD_ENCODINGS.add(error.path)
+        return fallback
+
+
+def report_bad_encodings(file=sys.stdout):
+    for path in sorted(BAD_ENCODINGS):
+        print(f"{rel(path)} is not saved as UTF-8; open it and save it as UTF-8, then run this again.", file=file)
+
+
+def git(*args, quiet=False, failure=None):
+    """Run git in the project root. None, and one plain line on stderr, when git cannot run here at all: not
+    installed, not on PATH, or this folder is no git repository. A caller that reports the failure itself is quiet."""
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace", check=True
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        if failure is not None:
+            failure.append(error)
+        elif not quiet:
+            print(f"git is not available here: {git_reason(error)}", file=sys.stderr)
+        return None
+    return result.stdout
+
+
+def git_reason(error):
+    """The one line git or the system gave for a failed run, plain enough to read and act on."""
+    if isinstance(error, OSError):
+        return error.strerror or str(error)
+    detail = (error.stderr or "").strip().splitlines()
+    return detail[-1] if detail else f"git exited with code {error.returncode}"
+
+
+@functools.cache
+def git_works():
+    """True when git runs in the project root: installed, on PATH and pointed at a repository."""
+    return git("rev-parse", "--git-dir", quiet=True) is not None
 
 
 def load_decisions():
@@ -109,7 +184,9 @@ def load_decisions():
     if DECISIONS is None:
         return decisions, problems
     for path, archived in decision_files():
-        ident, meta = path.stem, decision_meta(path)
+        ident, meta = path.stem, checked(lambda: decision_meta(path), None)
+        if meta is None:
+            continue
         if ident in decisions:
             problems.append(f"{rel(path)}: {ident} is defined twice\n    → keep one file: in force or archived")
         problems += [f"{rel(path)}: {problem}" for problem in decision_problems(ident, meta, archived)]
@@ -120,7 +197,8 @@ def load_decisions():
     for ident, replacement in list(decisions.items()):
         if replacement not in (None, ARCHIVED) and replacement not in decisions:
             problems.append(f"{ident}: replaced_by {replacement} does not exist\n    → name an existing decision")
-    for number, line in enumerate(DECISIONS.read_text(encoding="utf-8").splitlines(), start=1):
+    text = checked(lambda: read_text(DECISIONS), "")
+    for number, line in enumerate(text.splitlines(), start=1):
         match = DECISION.search(line)
         if not match:
             continue
@@ -132,7 +210,7 @@ def load_decisions():
         replaced = line.lstrip().startswith("- ~~")
         replacement = REPLACED_BY.search(line) if replaced else None
         decisions[match.group(1)] = replacement.group(1) if replacement else None
-    return decisions, problems
+    return (None if BAD_ENCODINGS else decisions), problems
 
 
 def decision_files():
@@ -147,7 +225,7 @@ def decision_files():
 
 def decision_meta(path):
     """The frontmatter fields of a decision file as plain strings, plus its first `# ` heading."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = read_text(path).splitlines()
     fields = read_frontmatter(lines)
     meta = {
         key: ", ".join(v for _, v in fields.get(key, [])) for key in ("id", "title", "status", "date", "replaced_by")
@@ -199,9 +277,10 @@ def check_index():
     """With one file per decision, the index must list exactly those files."""
     if not decision_files():
         return []
-    text = DECISIONS.read_text(encoding="utf-8")
+    text = read_text(DECISIONS)
+    expected = render_index()
     start, end = text.find(INDEX_BEGIN), text.find(INDEX_END)
-    if start < 0 or end < 0 or text[start : end + len(INDEX_END)] != render_index():
+    if start < 0 or end < 0 or text[start : end + len(INDEX_END)] != expected:
         return [
             f"{rel(DECISIONS)}: the decision index is out of date\n    → run python .pm/tools/pm_check.py --write-index"
         ]
@@ -211,7 +290,8 @@ def check_index():
 def check_worklogs():
     """Once one worklog carries frontmatter, every worklog must: type, title, date (the file's date), task, models."""
     logs = sorted(WORKLOG_DIR.glob("*.md")) if WORKLOG_DIR.is_dir() else []
-    fronts = {path: read_frontmatter(path.read_text(encoding="utf-8").splitlines()) for path in logs}
+    fronts = {path: checked(lambda: read_frontmatter(read_text(path).splitlines()), None) for path in logs}
+    fronts = {path: front for path, front in fronts.items() if front is not None}
     if not any(("type", "worklog") in [(k, v) for k, vals in f.items() for _, v in vals] for f in fronts.values()):
         return []
     problems = []
@@ -231,15 +311,31 @@ def check_worklogs():
     return problems
 
 
+def rewrite_text(path):
+    """The text of a file this tool rewrites, or None when it is not saved as UTF-8, with one plain line why.
+    A rewrite would quietly destroy the bytes it could not decode, so that file is left alone."""
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        print(
+            f"Nothing written: {rel(path)} is not saved as UTF-8, so a rewrite would lose its characters. "
+            "Open it, save it as UTF-8, and run this again.",
+            file=sys.stderr,
+        )
+        return None
+
+
 def write_index():
-    text = DECISIONS.read_text(encoding="utf-8")
+    text = rewrite_text(DECISIONS)
+    if text is None:
+        return None
     start, end = text.find(INDEX_BEGIN), text.find(INDEX_END)
     if start < 0 or end < 0:
         text = text.rstrip("\n") + "\n\n" + render_index() + "\n"
     else:
         text = text[:start] + render_index() + text[end + len(INDEX_END) :]
     DECISIONS.write_text(text, encoding="utf-8", newline="\n")
-    print(f"Wrote the index in {rel(DECISIONS)}: {len(decision_files())} decisions")
+    return f"the decision index in {rel(DECISIONS)} ({plural(len(decision_files()), 'decision')})"
 
 
 def records():
@@ -248,7 +344,7 @@ def records():
     for path in markdown_files():
         if rel(path).startswith(TASK_DIRS + DRAFT_DIRS):
             continue
-        front = read_frontmatter(path.read_text(encoding="utf-8").splitlines())
+        front = read_frontmatter(read_text(path).splitlines())
         kind = front.get("type", [(0, "")])[0][1]
         if kind in found:
             found[kind].append((path, front))
@@ -311,7 +407,7 @@ def check_catalogue():
     """When the catalogue page carries the markers, its generated list must match the records."""
     if not CATALOGUE.exists():
         return []
-    text = CATALOGUE.read_text(encoding="utf-8")
+    text = read_text(CATALOGUE)
     start, end = text.find(CATALOGUE_BEGIN), text.find(CATALOGUE_END)
     if start < 0 or end < 0:
         return []
@@ -323,22 +419,26 @@ def check_catalogue():
 
 
 def write_catalogue():
+    """Rewrite the generated part of the catalogue page; say what was written, or '' when the page has no markers."""
     if not CATALOGUE.exists():
-        return
-    text = CATALOGUE.read_text(encoding="utf-8")
+        return ""
+    text = rewrite_text(CATALOGUE)
+    if text is None:
+        return None
     start, end = text.find(CATALOGUE_BEGIN), text.find(CATALOGUE_END)
     if start < 0 or end < 0:
-        return
+        return ""
     CATALOGUE.write_text(
         text[:start] + render_catalogue() + text[end + len(CATALOGUE_END) :], encoding="utf-8", newline="\n"
     )
-    print(f"Wrote the record catalogue in {rel(CATALOGUE)}")
+    return f"the record catalogue in {rel(CATALOGUE)}"
 
 
 def read_frontmatter(lines):
-    """Return {key: [(line number, value), ...]} for `key: [a, b]`, `key: value` and `key:` + `- item` forms."""
+    """Return {key: [(line number, value), ...]} for `key: [a, b]`, `key: value` and `key:` + `- item` forms.
+    A byte-order mark in front of the opening `---` (PowerShell 5.1 writes one) does not hide the frontmatter."""
     fields, key = {}, None
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].strip("\ufeff").strip() != "---":
         return fields
     for number, line in enumerate(lines[1:], start=2):
         if line.strip() == "---":
@@ -396,10 +496,11 @@ def vendored(name):
 
 def check_file(path, decisions):
     name = rel(path)
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = read_text(path).splitlines()
     problems = []
 
-    for number, ref in read_frontmatter(lines).get("depends_on", []):
+    dependencies = read_frontmatter(lines).get("depends_on", []) if decisions is not None else []
+    for number, ref in dependencies:
         if ref not in decisions:
             problems.append(
                 f"{name}:{number}: depends on {ref}, which does not exist\n    → check the ID in the decision log"
@@ -452,6 +553,7 @@ def check_file(path, decisions):
         problems += check_done_task(name, lines)
     if name.startswith(TASK_DIRS):
         problems += check_open_task_type(name, lines)
+        problems += check_open_task_acceptance(name, lines)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_live_lines(name, lines)
         problems += check_owner_options(name, lines)
@@ -564,7 +666,12 @@ def deleted_on_line(repo, target, line):
     """True when a commit named on the line deleted the target (a rename counts as a delete) in that repo."""
     for commit in COMMIT.findall(line):
         show = ["git", "-C", str(repo), "-c", "core.quotePath=false", "show", "--no-renames", "--diff-filter=D"]
-        result = subprocess.run([*show, "--name-only", "--format=", commit], capture_output=True, encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [*show, "--name-only", "--format=", commit], capture_output=True, encoding="utf-8", errors="replace"
+            )
+        except OSError:  # git is not installed here: no commit history to read, so nothing is proven deleted
+            return False
         gone = result.stdout.splitlines() if result.returncode == 0 else []
         if any(p == target or p.endswith("/" + target) for p in gone):
             return True
@@ -593,6 +700,11 @@ def check_done_task(name, lines):
     return problems
 
 
+def task_id(fields):
+    """A task's own ID from its frontmatter, or `<id>` when the frontmatter carries none."""
+    return next((value for _, value in fields.get("id", [])), "").strip("'\"") or "<id>"
+
+
 def check_open_task_type(name, lines):
     """An open task carries a type (epic, package, task or bug)."""
     fields = read_frontmatter(lines)
@@ -600,7 +712,33 @@ def check_open_task_type(name, lines):
     kind = next((value for _, value in fields.get("type", [])), "").strip("'\"")
     if status == "Done" or kind:
         return []
-    return [f"{name}: open task without a type\n    → backlog task edit <id> --type <epic|package|task|bug>"]
+    return [
+        f"{name}: open task without a type\n    → backlog task edit {task_id(fields)} --type <epic|package|task|bug>"
+    ]
+
+
+def acceptance_criteria(lines):
+    """The `- [ ]` and `- [x]` items under `## Acceptance Criteria`, between its markers when it has them."""
+    body = sections(lines).get("Acceptance Criteria", [])
+    begin = next((index for index, line in enumerate(body) if line.strip() == "<!-- AC:BEGIN -->"), None)
+    if begin is None:
+        return [line for line in body if ACCEPTANCE_ITEM.match(line)]
+    end = next(
+        (index for index, line in enumerate(body[begin + 1 :], begin + 1) if line.strip() == "<!-- AC:END -->"), None
+    )
+    return [line for line in body[begin + 1 : end] if ACCEPTANCE_ITEM.match(line)]
+
+
+def check_open_task_acceptance(name, lines):
+    """An open task says what will be true when it is done, before any work starts."""
+    fields = read_frontmatter(lines)
+    status = next((value for _, value in fields.get("status", [])), "").strip("'\"")
+    if status == "Done" or acceptance_criteria(lines):
+        return []
+    return [
+        f"{name}: task has no acceptance criteria (what will be true when it is done?)\n"
+        f'    → backlog task edit {task_id(fields)} --ac "<what will be true>"'
+    ]
 
 
 def check_live_lines(name, lines):
@@ -694,7 +832,7 @@ def audit_targets():
         for path in sorted((ROOT / directory).rglob("*.md")):
             if "archive" in path.relative_to(ROOT / directory).parts:
                 continue
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = read_text(path).splitlines()
             task_id = next((value for _, value in read_frontmatter(lines).get("id", [])), "")
             if task_id:
                 targets[task_id.strip("'\"")] = list(section_lines(lines, "Implementation Notes"))
@@ -791,7 +929,7 @@ def check_audit_outcomes(name, lines):
         if report.is_file():
             findings = {
                 int(match.group(1))
-                for line in section_lines(report.read_text(encoding="utf-8").splitlines(), "Findings")
+                for line in section_lines(read_text(report).splitlines(), "Findings")
                 for match in [re.match(r"^\|\s*([0-9]+)\s*\|", line)]
                 if match
             }
@@ -804,7 +942,7 @@ def check_audit_outcomes(name, lines):
 
 def stale_flags(path):
     """Docs that declare `describes` are stale when the described paths changed after `reviewed`."""
-    fields = read_frontmatter(path.read_text(encoding="utf-8").splitlines())
+    fields = read_frontmatter(read_text(path).splitlines())
     globs = [value for _, value in fields.get("describes", [])]
     if not globs:
         return []
@@ -815,13 +953,15 @@ def stale_flags(path):
             f"    → read the doc against the code, then set reviewed:"
         ]
     since = [f"--since={reviewed}T23:59:59"] if DATE.match(reviewed) else [f"{reviewed}..HEAD"]
-    try:
-        commits = git("log", "--format=%h", *since, "--", *globs).split()
-    except subprocess.CalledProcessError:
+    listed = git("log", "--format=%h", *since, "--", *globs, quiet=True)
+    if listed is None:
+        if not git_works():  # git cannot run here at all; git_visible already said why in one line
+            return []
         return [
             f"{rel(path)}: reviewed: {reviewed} is not a commit git knows\n"
             f"    → set reviewed: to a commit hash or a YYYY-MM-DD date"
         ]
+    commits = listed.split()
     if not commits:
         return []
     return [
@@ -833,16 +973,14 @@ def stale_flags(path):
 @functools.cache
 def git_visible():
     """Files git tracks or would add (not ignored), or None outside a git repo."""
-    try:
-        listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return {ROOT / name for name in listed.split("\0") if name}
+    # The fallback notice says there is no repository here; repeating it for every git call is noise.
+    listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", quiet=not FOUND_ROOT)
+    return None if listed is None else {ROOT / name for name in listed.split("\0") if name}
 
 
 def tool_owned():
     """The files listed in .pm/tool-owned.txt: their tool keeps them current, so they are not checked here."""
-    lines = TOOL_OWNED.read_text(encoding="utf-8").splitlines() if TOOL_OWNED.is_file() else []
+    lines = read_text(TOOL_OWNED).splitlines() if TOOL_OWNED.is_file() else []
     return {ROOT / line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
 
 
@@ -859,15 +997,32 @@ def markdown_files():
 
 
 def staged_markdown_files():
-    """Docs in the commit. A changed decision log pulls in every doc, since any of them may depend on it."""
-    staged = {
-        ROOT / name
-        for name in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines()
-        if name.endswith(".md")
-    }
+    """Docs in the commit, or None if git could not list them. Decision changes pull in every doc."""
+    failure = []
+    if not FOUND_ROOT:
+        print(
+            "Commit check could not list the staged files: no git repository. Run git init in your project folder.",
+            file=sys.stderr,
+        )
+        return None
+    if git("rev-parse", "--git-dir", failure=failure) is None:
+        reason = git_reason(failure[0])
+        if "not a git repository" in reason.lower():
+            reason = "no git repository; run git init in your project folder"
+        print(f"Commit check could not list the staged files: {reason}", file=sys.stderr)
+        return None
+    listed = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", failure=failure)
+    if listed is None:
+        print(f"Commit check could not list the staged files: {git_reason(failure[0])}", file=sys.stderr)
+        return None
+    staged = {ROOT / name for name in listed.splitlines() if name.endswith(".md")}
+    if not staged:
+        return []
     if DECISIONS in staged or (DECISION_DIR and any(DECISION_DIR in path.parents for path in staged)):
-        return list(markdown_files())
-    return [path for path in markdown_files() if path in staged]
+        files = list(markdown_files())
+    else:
+        files = [path for path in markdown_files() if path in staged]
+    return files
 
 
 # The project language line pm_init writes in AGENTS.md, right under its "## Language" heading.
@@ -886,7 +1041,7 @@ KEY_PREFIX = re.compile(r"^\s*(?:[-*]\s+)?(?:\[[ xX]\]\s+)?(?:#\d+\s+)?(?:[A-ZÇ
 def project_language():
     """The code on the Language line of the root AGENTS.md, or '' when it is missing or English."""
     path = ROOT / "AGENTS.md"
-    text = FENCE.sub("", path.read_text(encoding="utf-8")) if path.is_file() else ""
+    text = FENCE.sub("", read_text(path)) if path.is_file() else ""
     found = LANGUAGE.search(text)
     code = found.group(1).lower() if found else ""
     return "" if code.split("-")[0] in ("", "en") else code
@@ -918,36 +1073,81 @@ def is_record(path):
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser(
+        description="Check that the repo's docs and task files are consistent. No dependencies, no model. "
+        "With no option it checks every doc.",
+        epilog="Exit code 1 when a problem is found, so hooks and CI can block on it. "
+        "A clean result means the docs are consistent, not that they are correct.",
+    )
+    parser.add_argument(
+        "--staged", action="store_true", help="check only the docs staged for commit (the pre-commit hook)"
+    )
+    parser.add_argument(
+        "--stale", action="store_true", help="list docs whose described code changed since review (never blocks)"
+    )
+    parser.add_argument(
+        "--write-index", action="store_true", help="rewrite the generated decision index and record catalogue"
+    )
+    args = parser.parse_args()
 
-    if "--stale" in sys.argv:
-        docs = list(markdown_files())
+    if not FOUND_ROOT and (not args.staged or args.stale or args.write_index):
+        print(
+            f"No git repository or backlog.config.yml above {ROOT.parent}; checking .pm/ only. "
+            "Run git init in your project folder.",
+            file=sys.stderr,
+        )
+
+    if args.stale:
+        docs = checked(lambda: list(markdown_files()), [])
+        print(f"Project: {ROOT}")
         covered = [
-            path for path in docs if read_frontmatter(path.read_text(encoding="utf-8").splitlines()).get("describes")
+            path
+            for path in docs
+            if checked(lambda: read_frontmatter(read_text(path).splitlines()), {}).get("describes")
         ]
-        flags = [flag for path in covered for flag in stale_flags(path)]
+        flags = [flag for path in covered for flag in checked(lambda: stale_flags(path), [])]
         for flag in flags:
             print(flag)
-        print(f"\n{len(flags)} docs may be stale" if flags else "No stale docs")
+        report_bad_encodings()
+        if flags:
+            print(f"\n{len(flags)} docs may be stale")
+        elif BAD_ENCODINGS:
+            print("Some docs could not be checked for staleness")
+        else:
+            print("No stale docs")
         print(
             f"Coverage: {len(covered)} of {len(docs)} docs declare `describes:`; the others are not checked for staleness."
         )
         return 0
 
-    if "--write-index" in sys.argv:
-        if decision_files():
-            write_index()
-        write_catalogue()
-        return 0
+    if args.write_index:
+        results = [checked(write_index, None) if decision_files() else "", checked(write_catalogue, None)]
+        written = [what for what in results if what]
+        if written:
+            print(f"Wrote {' and '.join(written)}")
+        elif not any(result is None for result in results):
+            print("Nothing to write: no decision files and no catalogue markers")
+        report_bad_encodings(file=sys.stderr)
+        return 1 if BAD_ENCODINGS or any(result is None for result in results) else 0
 
-    decisions, problems = load_decisions()
-    problems += check_index()
-    problems += check_worklogs()
-    problems += check_catalogue()
-    files = staged_markdown_files() if "--staged" in sys.argv else markdown_files()
-    language = project_language()
+    # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
+    # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
+    files = checked(staged_markdown_files, None) if args.staged else None
+    if args.staged and not files:
+        report_bad_encodings()
+        return 1 if files is None else 0
+    if not args.staged:
+        print(f"Project: {ROOT}")
+    decisions, problems = checked(load_decisions, (None, []))
+    problems += checked(check_index, [])
+    problems += checked(check_worklogs, [])
+    problems += checked(check_catalogue, [])
+    if not args.staged:
+        files = checked(lambda: list(markdown_files()), [])
+    language = checked(project_language, "")
     for path in files:
-        problems += check_file(path, decisions)
-        if language and is_record(path) and reads_english(path.read_text(encoding="utf-8").splitlines()):
+        problems += checked(lambda: check_file(path, decisions), [])
+        if language and is_record(path) and checked(lambda: reads_english(read_text(path).splitlines()), False):
             print(
                 f"Info: {rel(path)}: reads as English, but AGENTS.md sets Language: {language}\n"
                 f"    → write the prose in the project language; keys such as Next: stay English (not a failure)"
@@ -955,9 +1155,14 @@ def main():
 
     for problem in problems:
         print(problem)
-    bad_files = len({p.split(":")[0] for p in problems})
-    print(f"\n{len(problems)} problems in {bad_files} files" if problems else "No problems found")
-    return 1 if problems else 0
+    report_bad_encodings()
+    count = len(problems) + len(BAD_ENCODINGS)
+    bad_files = len({p.split(":")[0] for p in problems} | {rel(path) for path in BAD_ENCODINGS})
+    if count:
+        print(f"\n{plural(count, 'problem')} in {plural(bad_files, 'file')}")
+    elif not args.staged:
+        print("No problems found")
+    return 1 if count else 0
 
 
 if __name__ == "__main__":

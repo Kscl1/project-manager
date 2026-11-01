@@ -30,8 +30,9 @@ TASKS_DIR = ROOT / ".pm" / "backlog" / "tasks"
 CLOSED_DIRS = (ROOT / ".pm" / "backlog" / "completed", ROOT / ".pm" / "backlog" / "archive" / "tasks")
 CLOSED_SHOWN = 3  # a one-goal session writes no worklog, so the next one reads the last closing summaries
 # The closing-summary lines shown under the first line; the owner line carries the owner's name or the word Owner.
-# A name may start with a Turkish capital: records keep English keys in any project language.
-SUMMARY_LINE = re.compile(r"(?:[A-ZÇĞİÖŞÜ][\w'-]* said|Found|Next):")
+# A name may start with a Turkish capital: records keep English keys in any project language. `Review:` says a
+# close was self-checked, so the next session sees it.
+SUMMARY_LINE = re.compile(r"(?:[A-ZÇĞİÖŞÜ][\w'-]* said|Found|Next|Review):")
 DRAFTS_DIR = ROOT / ".pm" / "backlog" / "drafts"  # private work items (Backlog drafts); shown only when present
 ARCHIVED_DRAFTS_DIR = ROOT / ".pm" / "backlog" / "archive" / "drafts"  # archived drafts still record their commits
 WORKTREES_DIR = ROOT / ".worktrees"
@@ -42,6 +43,7 @@ WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-ta
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
+NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
 # task files use it.
 NOTHING_NEEDED = {"none", "nothing", "yok", "-", "?", "n/a"}
@@ -51,7 +53,7 @@ FINDING_ROW = re.compile(r"^\|\s*(\d+)\s*\|")
 READY_SHOWN = 10
 # Optional: other GitHub repos whose open pull requests are listed too, one owner/repo per line; # starts a comment.
 PR_REPOS_FILE = ROOT / ".pm" / "pr-repos.txt"
-GH_TIMEOUT = 20
+GH_TIMEOUT = 5
 
 
 def scalar(value):
@@ -142,7 +144,7 @@ def closed_lines(tasks):
     done.sort(key=lambda task: (task["updated"][:16].replace("T", " "), task_order(task)), reverse=True)
     lines = []
     for task in done[:CLOSED_SHOWN]:
-        lines.append(f"- {task['id']} · {task['title']} ({local_day(task['updated']) or '?'})")
+        lines.append(f"- {task['id']} · {task['title']} ({local_day(task['updated']) or NOT_SET})")
         first, rest = task["summary"][0], task["summary"][1:]
         lines.append(f"  {shorten(first, 300)}")
         lines.extend(f"  {shorten(line, 200)}" for line in rest if SUMMARY_LINE.match(line))
@@ -321,11 +323,36 @@ def collect_warnings(tasks):
     return warnings
 
 
+def install_date():
+    """The day the package arrived: the first commit that added .pm/VERSION, else the file's modification date.
+
+    A brand-new project has no docs to audit yet, so its first week stays quiet.
+    """
+    version = ROOT / ".pm" / "VERSION"
+    try:
+        if not version.is_file():
+            return None
+        added = git_stdout(
+            ["log", "--reverse", "--format=%ad", "--date=short", "--diff-filter=A", "--", ".pm/VERSION"], ""
+        )
+        for line in (added or "").splitlines():
+            found = as_date(line)
+            if found:
+                return found
+        return datetime.fromtimestamp(version.stat().st_mtime).date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def weekly_audit_warning(today):
     """Warn when no weekly doc audit (.pm/local/audits/weekly-YYYY-MM-DD) was verified in the last seven days.
 
     Only a folder with a non-empty lead-verification.md counts: an empty or unverified folder does not.
+    The first week after the package was installed stays silent: there is nothing to audit yet.
     """
+    installed = install_date()
+    if installed is not None and (today - installed).days < WEEKLY_AUDIT_DAYS:
+        return None
     dates = []
     try:
         for folder in AUDITS_DIR.glob("weekly-*"):
@@ -343,6 +370,24 @@ def weekly_audit_warning(today):
         return None
     since = f"last: {last.isoformat()}" if last else "never ran"
     return f"- ⚠️ Weekly doc audit due ({since}): .pm/templates/doc-audit.md, kind weekly"
+
+
+# A commit is the record itself when it writes only these: tasks and drafts, worklogs, decisions and lessons.
+# Every other path under .pm/ (tools, hooks, roles, specs, the charter) is work, like src/app.py, so a silent
+# change to one of them still shows up as unrecorded work.
+RECORD_PATHS = (".pm/backlog/", ".pm/worklog/", ".pm/decisions/")
+RECORD_FILES = (".pm/decisions.md", ".pm/lessons.md")
+
+
+def is_record_path(path):
+    return path in RECORD_FILES or any(path.startswith(record) for record in RECORD_PATHS)
+
+
+def record_only(sha):
+    """A commit that writes only record files is the record itself: a task, a draft, a worklog, a decision, a lesson."""
+    listing = git_stdout(["show", "--name-only", "--format=", "-z", sha], None)  # -z: a Turkish name stays raw
+    paths = [path for path in (listing or "").split("\0") if path]
+    return bool(paths) and all(is_record_path(path) for path in paths)
 
 
 def worklog_gap_warning():
@@ -367,7 +412,8 @@ def worklog_gap_warning():
         for task in load_tasks() + load_closed() + load_tasks(DRAFTS_DIR) + load_tasks(ARCHIVED_DRAFTS_DIR)
         if task["status"] != "Done" or task["summary"]
     }
-    loose = [c for c in commits(f"{last}..HEAD") if not c["refs"] or not c["refs"] <= recorded]
+    loose = [c for c in commits(f"{last}..HEAD") if not record_only(c["sha"])]
+    loose = [c for c in loose if not c["refs"] or not c["refs"] <= recorded]
     if not loose:
         return None
     return (
@@ -532,7 +578,10 @@ def pr_lines():
                 check=False,
             )
             pulls = json.loads(result.stdout) if result.returncode == 0 else None
-        except (OSError, subprocess.TimeoutExpired, ValueError):
+        except subprocess.TimeoutExpired:
+            lines.append(f"- ⚠️ GitHub did not answer in {GH_TIMEOUT:g} s; pull requests not listed")
+            continue
+        except (OSError, ValueError):
             pulls = None
         if not isinstance(pulls, list):
             lines.append(f"- ⚠️ Could not list the open pull requests of {name}")
@@ -657,6 +706,14 @@ def commits_main(task_id):
     return 0
 
 
+def git_status_lines(output):
+    """`git status -sb` as plain lines: the branch line loses git's `## ` marker so it reads as words."""
+    lines = output.splitlines() or [""]
+    if lines[0].startswith("## "):
+        lines[0] = lines[0][3:]
+    return lines
+
+
 def render_section(name, body):
     return f"## {name}\n{body}"
 
@@ -665,13 +722,18 @@ def asks_something(value):
     return bool(value) and value.split()[0].strip(".,;:").lower() not in NOTHING_NEEDED
 
 
+def shown(value):
+    """A live-block value in plain words: a missing or empty line reads `not set`, never `?`."""
+    return NOT_SET if value is None or value == "?" else value
+
+
 def brief_task_lines(tasks):
     """Each open task with its next step, and its blocker or owner ask only when there is one."""
     lines = []
     for task in tasks:
         live = task["live"]
         lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
-        lines.append(f"  Next: {live['Next'] if live['Next'] is not None else '?'}")
+        lines.append(f"  Next: {shown(live['Next'])}")
         lines.extend(f"  {name}: {live[name]}" for name in ("Blocker", "Needs owner") if asks_something(live[name]))
     return lines
 
@@ -682,8 +744,7 @@ def full_task_lines(tasks):
     for task in tasks:
         lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
         for name in LIVE_FIELDS:
-            value = task["live"][name]
-            lines.append(f"  {name}: {value if value is not None else '?'}")
+            lines.append(f"  {name}: {shown(task['live'][name])}")
         for worker in task["live"]["Worker"]:
             lines.append(f"  Worker: {worker}")
     return lines
@@ -717,9 +778,9 @@ def main(brief=False):
 
     sections = []
     if brief:
-        status = status_output.splitlines() or [""]
+        status = git_status_lines(status_output)
         changed = f"\n{len(status) - 1} changed file(s)" if len(status) > 1 else ""
-        sections.append(("Git", status[0].removeprefix("## ") + changed))
+        sections.append(("Git", status[0] + changed))
         if closed:
             sections.append(("Recently closed", "\n".join(line for line in closed if line.startswith("- "))))
         sections.append(("Open tasks", "\n".join(brief_task_lines(tasks)) or "- (none)"))
@@ -728,7 +789,7 @@ def main(brief=False):
         if log_output is None:  # a new repository has no commits yet, which is not a failure
             no_commits = git_stdout(["rev-parse", "--git-dir"], None) is not None
             log_output = "(no commits yet)" if no_commits else "⚠️ Could not run `git log -5 --oneline`."
-        sections += [("Git status", status_output), ("Last 5 commits", log_output)]
+        sections += [("Git status", "\n".join(git_status_lines(status_output))), ("Last 5 commits", log_output)]
         if closed:
             sections.append(("Recently closed tasks", "\n".join(closed)))
         sections.append(("Open tasks", "\n".join(full_task_lines(tasks)) or "- (none)"))
@@ -753,7 +814,8 @@ def main(brief=False):
 
 if __name__ == "__main__":
     if "--did" in sys.argv:
-        sys.exit(did_main(sys.argv[sys.argv.index("--did") + 1]))
+        index = sys.argv.index("--did") + 1
+        sys.exit(did_main(sys.argv[index] if index < len(sys.argv) else date.today().isoformat()))
     if "--commits" in sys.argv:
         sys.exit(commits_main(sys.argv[sys.argv.index("--commits") + 1]))
     sys.exit(main(brief="--brief" in sys.argv))

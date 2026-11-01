@@ -32,14 +32,31 @@ file that already exists when a job's first attempt starts (another run dir, or 
 is copied to <stem>.kept<suffix> first, so a finished report is never lost to a relaunch.
 A brief that changes while its worker runs is logged as BRIEF-CHANGED when the job is judged, and the receipt keeps
 brief_changed: the report answers the brief the worker read, which may no longer be the job's.
+Each ended attempt keeps what it used: the attempt's `usage` holds "input", "output", "cache_read", "cache_write",
+"total_tokens", "turns" (how many assistant messages were summed) and "cost_usd", summed from the assistant messages
+the attempt's Pi session log wrote after the attempt started; a message without cost.total makes cost_usd null, and a
+log that is not found leaves usage out altogether (never a guess). Usage is counted in tokens and turns, and money is
+only what those tokens would cost at API prices (the column is headed "API est."), because most workers run on flat
+plans or free models. Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an attempt:
+its job row, its model row and the grand total keep the known sum and end in `+?`, and one line under the totals
+says what that means, so a partial sum is never read as the whole.
+`--status` shows tokens and turns per job, then one line per model and a grand total; the end of the loop prints the
+same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
-successors.
+successors. Before each launch every brief must exist as a file; a missing one fails the job without starting a worker.
+After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
+it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
-Each question pm_run sees is logged as WAITING, a later one in the same session too, even when the answer to the one
+An agy permission question in the last pane lines also waits, even when Herdr reports the turn done. Each question
+pm_run sees is logged as WAITING with the pane id, a later one in the same session too, even when the answer to the one
 before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
+If a blocked agy startup shows the folder trust question, the job stays pending without using a try. Answer Yes in
+that pane; pm_run closes it and starts the job once the screen changes. A failed pane read does not count as an answer.
 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
-       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table and exit
+       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and turns, then exit
+       python .pm/swarm/pm_run.py <run-dir> --status --tally  also count shared failure-log events, most frequent first
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
@@ -74,7 +91,7 @@ Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 s
 PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it ready).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
 PM_RUN_QUOTA_WAIT_S (1800),
-PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_MAX_TRIES (5),
+PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_READY_S (60, capped at 60), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
 Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
 without a check, a question, a stall...) is also appended, one line with date and run directory, to
@@ -103,6 +120,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
+# Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
+# models. Printed once, on the total line, not on every row.
+API_NOTE = "(at API prices; plans and free models cost less)"
 # pm_run stops when every job is here
 ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
 
@@ -115,6 +135,7 @@ HARD_S, TICK, SETTLE_S = _env("HARD_S", 75 * 60), _env("TICK", 15), _env("SETTLE
 STALL_S = _env("STALL_S", 300)
 SETUP_S = _env("SETUP_S", 2)  # let the pane's setup line finish before the agent starts
 START_S = _env("START_S", 10)
+READY_S = min(60, max(0, _env("READY_S", 60)))  # never wait more than a minute for an agent's state
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
 QUOTA_WAIT_S = _env("QUOTA_WAIT_S", 30 * 60)
@@ -185,6 +206,10 @@ NO_HELPERS = {
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
 # no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms.
 FIRST_RUN = re.compile(r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use")
+PERMISSION = re.compile(
+    r"allow\s+access\s+to\s+this\s+file\s*\?|run\s+this\s+command\s*\?|requesting\s+permission\s+for\s*:", re.I
+)
+TRUST = re.compile(r"do\s+you\s+trust\s+the\s+contents\s+of\s+this\s+project\s*\?", re.I)
 RESUME = (
     "Your previous turn ended before the output was finished. Re-read the brief file(s) {briefs} and {out}, "
     "keep what is there, finish it, "
@@ -203,8 +228,9 @@ def held(action):
     return action()
 
 
-def herdr(*args, plain=False):
+def herdr(*args, plain=False, timeout=None):
     """Run one Herdr CLI command; return JSON (or {"error": ...}), or raw stdout for a successful pane read."""
+    timeout = HERDR_TIMEOUT if timeout is None else min(HERDR_TIMEOUT, timeout)
     try:
         result = subprocess.run(
             [*HERDR_CMD, *args],
@@ -212,10 +238,10 @@ def herdr(*args, plain=False):
             text=True,
             encoding="utf-8",
             errors="replace",
-            timeout=HERDR_TIMEOUT,
+            timeout=timeout,
         )
     except subprocess.TimeoutExpired:
-        return {"error": {"code": "timeout", "message": f"Herdr call timed out after {HERDR_TIMEOUT:g} s"}}
+        return {"error": {"code": "timeout", "message": f"Herdr call timed out after {timeout:g} s"}}
     except OSError as exc:  # not installed, or PM_RUN_HERDR names a file that is not there
         return {"error": {"message": f"cannot start {HERDR_CMD[0]} ({exc}); install Herdr or set PM_RUN_HERDR"}}
     if plain and result.returncode == 0:
@@ -345,6 +371,102 @@ def output_stamp(path):
         return None
 
 
+def short_tokens(count):
+    """A token count as people read it: 950, 8.4k, 1.2M; "-" when no attempt reported one."""
+    if count is None:
+        return "-"
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}k"
+    return str(int(count))
+
+
+def short_turns(count):
+    """Assistant messages a row summed, as itself: 47; "-" when no attempt reported a turn count."""
+    return "-" if count is None else str(int(count))
+
+
+def short_cost(money):
+    """Money as people read it: $0.04, or $0.0013 for a cheap job; "-" when nothing is known."""
+    if money is None:
+        return "-"
+    return f"${money:.4f}" if 0 < money < 0.01 else f"${money:.2f}"
+
+
+PARTIAL = "+?"  # ends a sum that some attempts did not report at all; the note under the totals explains it
+NO_USAGE = "+? = some attempts reported no usage"
+
+
+def usage_cells(row):
+    """The three printed cells (tokens, turns, money) of one tally row; "-" when nothing is known.
+
+    A partial sum (an attempt reported no usage at all, for example a log that was not found) keeps the known value
+    and ends in "+?", so a partial sum is never read as the whole. A figure that no counted attempt reported stays
+    "-" on its own: an older receipt without turns, or a usage without cost.total.
+    """
+    if not row or not row["counted"]:
+        return "-", "-", "-"
+    mark = PARTIAL if row["partial"] else ""
+    tokens = short_tokens(row["tokens"]) + mark
+    turns = short_turns(row["turns"]) + mark if row["turns_known"] else "-"
+    cost = short_cost(row["cost"]) + mark if row["known"] else "-"
+    return tokens, turns, cost
+
+
+def empty_row():
+    """A tally row that has counted nothing yet; `counted` 0 keeps it printed as "-"."""
+    return {"tokens": 0, "turns": 0, "cost": 0.0, "known": True, "turns_known": True, "counted": 0, "partial": 0}
+
+
+def summed_rows(rows):
+    """One tally row added up from `rows`; an empty tally keeps counted 0, so it prints "-" and not "0"."""
+    total = empty_row()
+    for row in rows:
+        total["tokens"] += row["tokens"]
+        total["turns"] += row["turns"]
+        total["cost"] += row["cost"]
+        total["known"] = total["known"] and row["known"]
+        total["turns_known"] = total["turns_known"] and row["turns_known"]
+        total["counted"] += row["counted"]
+        total["partial"] += row["partial"]
+    return total
+
+
+def usage_tally(jobs, state):
+    """Tokens, turns and cost per model and per job id, over every attempt in the receipts.
+
+    An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an
+    attempt: it makes its rows partial, so the known sum is never shown as the whole. `counted` says how many
+    attempts reported usage, and a row with none prints "-". A job that is no longer in jobs.json still counts: its
+    attempts were paid for too.
+    """
+    models = {job["id"]: job.get("model") for job in jobs}
+    per_model, per_job = {}, {}
+    for jid, s in state.items():
+        if jid.startswith("_"):
+            continue
+        for attempt in s.get("attempts", []):
+            usage = attempt.get("usage")
+            model = attempt.get("model") or models.get(jid) or "unknown model"
+            for key, bucket in ((model, per_model), (jid, per_job)):
+                row = bucket.setdefault(key, empty_row())
+                if not isinstance(usage, dict):  # no usage record: the row keeps its sum but is marked partial
+                    row["partial"] += 1
+                    continue
+                row["counted"] += 1
+                row["tokens"] += usage.get("total_tokens") or 0
+                if usage.get("turns") is None:  # a receipt written before turns were counted
+                    row["turns_known"] = False
+                else:
+                    row["turns"] += usage["turns"]
+                if usage.get("cost_usd") is None:
+                    row["known"] = False
+                else:
+                    row["cost"] += usage["cost_usd"]
+    return per_model, per_job
+
+
 def session_log(attempt, now):
     """(size, seconds since last write) of the attempt's Pi session log, or (None, None) when unknown."""
     try:
@@ -365,6 +487,19 @@ def keep_output(out, stem, move):
     else:
         shutil.copy2(out, kept)
     return kept
+
+
+def missing_brief(job, repo):
+    """A missing brief's safe, one-line reason, or None when every path exists."""
+    for brief in job["briefs"]:
+        if not (repo / brief).is_file():
+            control = any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in brief)
+            shown = "".join(
+                json.dumps(c, ensure_ascii=False)[1:-1] if ord(c) < 32 or 127 <= ord(c) <= 159 else c for c in brief
+            )
+            hint = r" (a backslash in jobs.json was read as an escape: write \\ or /)" if control else ""
+            return f"brief not found: {shown}{hint}"
+    return None
 
 
 def brief_digest(job, repo):
@@ -391,15 +526,15 @@ def launch_prompt(job):
     return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also, helpers=helpers)
 
 
-def turn_end(job, attempt, repo):
-    """Read bounded head/tail samples of this repo's recent Pi sessions, then cache the matching path.
+def pi_log(job, attempt, repo):
+    """This attempt's Pi session log as (path, a head/tail sample of its entries), or None.
 
     --name is a session_info entry near the start. Only files created for this attempt count; names repeat
-    across runs. Large/missing/unreadable logs are diagnostic gaps, never proof that a worker stopped.
+    across runs. Large/missing/unreadable logs are diagnostic gaps, never proof that a worker stopped. The sample
+    is enough for the last turn and its error, not for a usage sum: `usage_of` reads the whole file.
     """
     if job.get("harness", "pi") != "pi":
-        return "session log not found (only Pi logs supported)"
-    attempt.update(stopReason=None, errorMessage=None)  # an earlier turn's error is no evidence for this one
+        return None
     root = Path(os.environ.get("PM_RUN_PI_SESSIONS", Path.home() / ".pi" / "agent" / "sessions"))
     folder = root / ("--" + re.sub(r"[/\\:]", "-", str(repo).lstrip("/\\")) + "--")
     try:
@@ -427,18 +562,99 @@ def turn_end(job, attempt, repo):
                 ):
                     continue
                 attempt["session_log"] = str(path)
-                messages = [e.get("message") for e in entries if e.get("type") == "message"]
-                last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
-                attempt["stopReason"] = last.get("stopReason")
-                attempt["errorMessage"] = last.get("errorMessage")
-                if last.get("stopReason") == "error":
-                    return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
-                return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+                return path, entries
             except (OSError, ValueError, TypeError):
                 continue
     except OSError:
         pass
-    return "session log not found for this attempt (bounded Pi log lookup)"
+    return None
+
+
+def turn_end(job, attempt, repo):
+    """The last assistant message of this attempt's Pi session log: its stop reason or provider error."""
+    if job.get("harness", "pi") != "pi":
+        return "session log not found (only Pi logs supported)"
+    attempt.update(stopReason=None, errorMessage=None)  # an earlier turn's error is no evidence for this one
+    found = pi_log(job, attempt, repo)
+    if not found:
+        return "session log not found for this attempt (bounded Pi log lookup)"
+    messages = [e.get("message") for e in found[1] if e.get("type") == "message"]
+    last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
+    attempt["stopReason"] = last.get("stopReason")
+    attempt["errorMessage"] = last.get("errorMessage")
+    if last.get("stopReason") == "error":
+        return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
+    return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+
+
+def log_time(entry):
+    """Epoch seconds of a Pi log line, from its own timestamp or its message's (ms); None when it has neither."""
+    stamp = entry.get("timestamp")
+    if isinstance(stamp, str):
+        try:
+            return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+    for value in (stamp, message.get("timestamp")):
+        if isinstance(value, (int, float)):
+            return value / 1000 if value > 1e11 else float(value)  # Pi keeps message times in milliseconds
+    return None
+
+
+def usage_of(job, attempt, repo, log=None):
+    """What this attempt's Pi session log says it used, or None when there is no log or nothing in it.
+
+    Sums come from the assistant messages written after the attempt started, so a log that also holds earlier turns
+    counts only this one; `turns` is how many of those messages were summed. cost_usd is null unless every message
+    reported cost.total. A line that does not parse is skipped and named once through `log`, never raised: reading the
+    log must not break a run.
+    """
+    found = pi_log(job, attempt, repo)
+    if not found:
+        return None
+    path = found[0]
+    keys = (("input", "input"), ("output", "output"), ("cache_read", "cacheRead"), ("cache_write", "cacheWrite"))
+    sums = {name: 0 for name, _ in keys}
+    sums["total_tokens"], totals_known, cost, cost_known, counted, skipped = 0, True, 0.0, True, 0, 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    if line.strip():
+                        skipped += 1
+                    continue
+                message = entry.get("message") if isinstance(entry, dict) else None
+                usage = message.get("usage") if isinstance(message, dict) else None
+                if not isinstance(usage, dict) or message.get("role") != "assistant":
+                    continue
+                written = log_time(entry)
+                if written is not None and written < attempt["started"]:
+                    continue
+                counted += 1
+                for name, key in keys:
+                    value = usage.get(key)
+                    if isinstance(value, (int, float)):
+                        sums[name] += value
+                total = usage.get("totalTokens")
+                totals_known = totals_known and isinstance(total, (int, float))
+                if isinstance(total, (int, float)):
+                    sums["total_tokens"] += total
+                part = usage.get("cost")
+                reported = part.get("total") if isinstance(part, dict) else None
+                cost_known = cost_known and isinstance(reported, (int, float))
+                cost += reported if isinstance(reported, (int, float)) else 0
+    except OSError:
+        return None
+    if skipped and log:
+        log(f"USAGE {job['id']}: skipped {skipped} unreadable line(s) in {path.name}; the rest was counted")
+    if not counted:
+        return None
+    if not totals_known:  # a message without the field: the parts still add up to what was used
+        sums["total_tokens"] = sum(sums[name] for name, _ in keys)
+    return {**sums, "turns": counted, "cost_usd": round(cost, 9) if cost_known else None}
 
 
 class Run:
@@ -576,8 +792,7 @@ class Run:
         return ws
 
     def launch(self, job, attempt, state):
-        """Open a tab, start the worker there (Pi, or Claude Code with "harness": "claude"), send the brief.
-        True when the prompt was submitted."""
+        """Open a worker tab and send the brief; True when a live session is ready to watch."""
         ws = self.workspace(state)
         tab = herdr("tab", "create", "--workspace", ws, "--label", job["id"], "--cwd", str(self.repo), "--no-focus")
         pane = tab.get("result", {}).get("root_pane", {}).get("pane_id")
@@ -603,16 +818,23 @@ class Run:
         start = herdr("agent", "start", attempt["name"], *agent_args, *job.get("args", []))
         if "error" in start:
             attempt["launch_error"] = start["error"].get("message", "")
+            attempt["launch_code"] = start["error"].get("code", "")
             return False
         if harness == "agy" and self.first_run(attempt):
             return False
-        self.status_of(attempt)  # baseline before sending: ready/idle alone does not prove Pi can receive the brief
+        if not self.wait_ready(attempt):
+            return False
         attempt["seq0"] = attempt.get("completion_seq")
         sent = herdr("agent", "prompt", attempt["name"], launch_prompt(job))
         attempt["prompted"] = time.time()
         attempt["briefs_sha"] = brief_digest(job, self.repo)  # the text the worker was just pointed at
         self.reset_observation(attempt)
-        return "error" not in sent
+        if "error" in sent:
+            self.log(
+                f"HOLD {job['id']}: Herdr did not accept the brief; the same session is watched and the brief "
+                "is sent again if the worker stays idle"
+            )
+        return True  # a live agent is watched even when Herdr rejected its first prompt
 
     def first_run(self, attempt):
         """True when agy shows its first-run screen. Herdr reports agy ready about 4 s before agy draws anything
@@ -631,8 +853,43 @@ class Run:
             time.sleep(1)
         return False
 
-    def status_of(self, attempt):
-        got = herdr("agent", "get", attempt["name"])
+    def trust_screen(self, attempt):
+        """A blocked start may not have a registered agent, so read its pane directly."""
+        if not attempt.get("pane"):
+            return False
+        screen = herdr("pane", "read", str(attempt["pane"]), "--source", "visible", plain=True)
+        return bool(TRUST.search(screen)) if isinstance(screen, str) else None
+
+    def wait_ready(self, attempt):
+        """Wait for an idle input; use the old fixed delay only if Herdr reports no state."""
+        deadline = time.monotonic() + READY_S
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                attempt["launch_error"] = f"agent not ready after {READY_S:g} s; brief not sent"
+                return False
+            status = self.status_of(attempt, timeout=remaining)
+            if time.monotonic() >= deadline:
+                attempt["launch_error"] = f"agent not ready after {READY_S:g} s; brief not sent"
+                return False
+            if status in ("ready", "idle"):
+                return True
+            if status == "unknown":
+                delay = min(SETUP_S, max(0, deadline - time.monotonic()))
+                if delay > 0:
+                    time.sleep(delay)
+                if time.monotonic() >= deadline:
+                    attempt["launch_error"] = f"agent not ready after {READY_S:g} s; brief not sent"
+                    return False
+                return True
+            if status is None or status == "blocked":
+                attempt["launch_error"] = f"agent {'is gone' if status is None else 'is blocked'}; brief not sent"
+                attempt["launch_code"] = status or "agent_not_found"
+                return False
+            time.sleep(min(1, max(0, deadline - time.monotonic())))
+
+    def status_of(self, attempt, timeout=None):
+        got = herdr("agent", "get", attempt["name"], timeout=timeout)
         if "error" in got:
             if got["error"].get("code") == "agent_not_found":
                 return None
@@ -643,12 +900,12 @@ class Run:
         attempt["completion_seq"] = agent.get("completion_seq")
         if "state_change_seq" in agent:
             attempt["state_seq"] = agent["state_change_seq"]
-        return agent["agent_status"]
+        return agent.get("agent_status") or "unknown"
 
     def stop(self, attempt):
-        """Close the worker's pane; True once Herdr no longer knows the agent."""
-        if attempt.get("pane"):
-            herdr("pane", "close", str(attempt["pane"]))
+        """Close the worker's pane; True only when the close succeeded and Herdr no longer knows the agent."""
+        if attempt.get("pane") and "error" in herdr("pane", "close", str(attempt["pane"])):
+            return False
         for _ in range(5):
             if self.status_of(attempt) is None:
                 return True
@@ -722,18 +979,44 @@ class Run:
             if status == "unknown":
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue  # no kill, nudge or retry on a failed query, even after the hard limit
-            if status == "blocked":
-                # A new question: the flag clears once the worker moves on, and Herdr's state counter grows even
-                # when an answer and the next question both fall between two ticks.
-                if not a.get("asking") or a.get("state_seq") != a.get("asked_seq"):
-                    a.update(asking=True, asked=now, asked_seq=a.get("state_seq"), asks=a.get("asks", 0) + 1)
+            question = None
+            if status in SETTLED and job.get("harness") == "agy":
+                screen = herdr("agent", "read", a["name"], "--source", "visible", plain=True)
+                if isinstance(screen, str):
+                    lines = [line.strip() for line in screen.splitlines() if line.strip()]
+                    tail = "\n".join(lines[-10:])
+                    found = PERMISSION.search(tail)
+                    if found:
+                        end = tail.find("\n", found.end())
+                        question = " ".join(tail[found.start() : end if end >= 0 else None].lower().split())
+                elif a.get("ask_kind") == "permission":
+                    question = a.get("asked_question")  # a failed read cannot prove the question was answered
+            if status == "blocked" or question:
+                kind = "permission" if question else "blocked"
+                # The counter also spots a new blocked question answered between two ticks.
+                if (
+                    not a.get("asking")
+                    or a.get("state_seq") != a.get("asked_seq")
+                    or kind != a.get("ask_kind")
+                    or question != a.get("asked_question")
+                ):
+                    a.update(
+                        asking=True,
+                        asked=now,
+                        asked_seq=a.get("state_seq"),
+                        asks=a.get("asks", 0) + 1,
+                        ask_kind=kind,
+                        asked_question=question,
+                    )
                     self.log(
-                        f"WAITING {job['id']}: the worker asks for input in Herdr tab {job['id']} "
+                        f"WAITING {job['id']}: answer the worker in Herdr pane {a.get('pane')} "
                         f"(question {a['asks']} in this session)"
                     )
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue
             a.pop("asking", None)
+            a.pop("ask_kind", None)
+            a.pop("asked_question", None)
             if status == "working":
                 a["worked"] = True
                 self.warn_pane(job, a, now)
@@ -753,6 +1036,7 @@ class Run:
                     if not a["stopped_confirmed"]:
                         self.fail_or_retry(job, s, "artifact present but the worker could not be confirmed stopped")
                         continue
+                    self.count_usage(job, a)
                     rc, verify_why = run_verify(job, self.repo)
                     a["verify_rc"] = rc
                     if rc is None:
@@ -799,6 +1083,28 @@ class Run:
             s = state[job["id"]]
             if s["state"] != "pending":
                 continue
+            if s.get("trust_wait"):
+                a = s["trust_wait"]
+                trust = self.trust_screen(a)
+                if trust is None:
+                    continue  # a failed read is not an answer
+                if trust:
+                    if not a.get("trust_logged"):
+                        a["trust_logged"] = True
+                        self.log(
+                            f"WAITING {job['id']}: agy asks to trust {self.repo}; open agy there once and answer Yes, "
+                            f"then the job starts (Herdr pane {a['pane']})"
+                        )
+                    continue
+                if not self.stop(a):
+                    s.update(
+                        state="failed",
+                        why="trust pane could not be confirmed closed; no retry",
+                        trust_stopped_confirmed=False,
+                    )
+                    self.log(f"FAILED {job['id']}: {s['why']}; close the pane and start a new run")
+                    continue
+                s.pop("trust_wait")
             deps = [state.get(d, {}).get("state") for d in job.get("after", [])]
             if any(d in ENDED and d != "verified" for d in deps):
                 s["state"] = "blocked"
@@ -809,14 +1115,26 @@ class Run:
             bucket = job.get("bucket", "default")
             if busy.get(bucket, 0) >= caps.get(bucket, 2):
                 continue
+            why = missing_brief(job, self.repo)
+            if why:
+                s.update(state="failed", why=why)
+                self.log(f"FAILED {job['id']}: {why}; fix the path in jobs.json and start a new run")
+                continue
             n = len(s["attempts"]) + 1
             out = self.repo / job["out"]
             try:
-                if n > 1 and out.exists() and out.stat().st_mtime >= s["attempts"][-1]["started"]:
+                if (
+                    n > 1
+                    and not s["attempts"][-1].get("output_kept")
+                    and out.exists()
+                    and out.stat().st_mtime >= s["attempts"][-1]["started"]
+                ):
                     kept = held(lambda: keep_output(out, f"{out.stem}.attempt{n - 1}", move=True))
+                    s["attempts"][-1]["output_kept"] = str(kept)
                     self.log(f"KEPT {job['id']}: previous output saved as {kept.name}")
-                elif n == 1 and out.exists():
+                elif n == 1 and out.exists() and not s.get("output_kept"):
                     kept = held(lambda: keep_output(out, f"{out.stem}.kept", move=False))
+                    s["output_kept"] = str(kept)
                     self.log(f"KEPT {job['id']}: {out.name} existed before this run; a copy is at {kept.name}")
             except OSError as exc:
                 s["state"] = "failed"
@@ -828,6 +1146,22 @@ class Run:
                 s["state"] = "started"
                 busy[bucket] = busy.get(bucket, 0) + 1
                 self.log(f"LAUNCH {job['id']} attempt {n} on {job['model']} in Herdr pane {a['pane']}")
+            elif (
+                job.get("harness") == "agy"
+                and "blocked" in (a.get("launch_code", "") + " " + a.get("launch_error", "")).lower()
+                and (trust := self.trust_screen(a)) is not False
+            ):
+                s["trust_wait"] = s["attempts"].pop()  # setup needs an owner, not a paid attempt
+                if trust:
+                    a["trust_logged"] = True
+                    self.log(
+                        f"WAITING {job['id']}: agy asks to trust {self.repo}; open agy there once and answer Yes, "
+                        f"then the job starts (Herdr pane {a['pane']})"
+                    )
+                else:
+                    self.log(
+                        f"WAITING {job['id']}: could not read blocked agy pane {a['pane']}; watching it before retry"
+                    )
             elif a.get("first_run"):
                 self.hand_over(
                     job,
@@ -839,12 +1173,28 @@ class Run:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
         return state
 
+    def count_usage(self, job, attempt):
+        """Keep what the attempt's session log says it used; a log that cannot be read costs a log line, never a run."""
+        try:
+            usage = usage_of(job, attempt, self.repo, self.log)
+        except Exception as exc:  # noqa: BLE001 - reading usage must not break the loop that reads it
+            self.log(f"USAGE {job['id']}: not read ({type(exc).__name__}: {exc}); the run goes on")
+            return
+        if usage:
+            attempt["usage"] = usage
+
     def stop_on_request(self, job, s):
         """`--stop <job>` set "stop" in jobs.json: close a live worker's pane; a pending job never starts."""
         how = "it never started"
         if s["state"] == "started":
             a = s["attempts"][-1]
             a.update(stopped_confirmed=self.stop(a), ended=time.time(), why="stopped on request")
+            self.count_usage(job, a)
+            how = f"Herdr pane {a.get('pane')} closed" if a["stopped_confirmed"] else "its pane could not be closed"
+        elif s.get("trust_wait"):
+            a = s.pop("trust_wait")
+            a["stopped_confirmed"] = self.stop(a)
+            s["trust_stopped_confirmed"] = a["stopped_confirmed"]
             how = f"Herdr pane {a.get('pane')} closed" if a["stopped_confirmed"] else "its pane could not be closed"
         s["state"] = "stopped"
         self.log(f"STOPPED {job['id']}: on request, {how}; its successors are blocked")
@@ -853,10 +1203,10 @@ class Run:
         """A started job deleted from jobs.json is no longer watched: say so once, and leave its pane alone."""
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
-            if jid.startswith("_") or jid in ids or s.get("state") != "started":
+            if jid.startswith("_") or jid in ids or not (s.get("state") == "started" or s.get("trust_wait")):
                 continue
             s["state"] = "removed"
-            pane = s["attempts"][-1].get("pane") if s["attempts"] else None
+            pane = s["trust_wait"]["pane"] if s.get("trust_wait") else s["attempts"][-1].get("pane")
             self.log(
                 f"REMOVED {jid}: deleted from jobs.json while its worker runs in Herdr pane {pane}; no longer "
                 f"watched and the pane is left open (to stop a job, use --stop {jid})"
@@ -927,6 +1277,7 @@ class Run:
         a = s["attempts"][-1]
         s["state"] = "handed-over"
         a.update(why=why, ended=time.time())
+        self.count_usage(job, a)
         self.log(f"HANDED-OVER {job['id']}: {why}; the session stays open in Herdr pane {a.get('pane')}, no relaunch")
 
     def fail_or_retry(self, job, s, why):
@@ -934,6 +1285,7 @@ class Run:
         if "stopped_confirmed" not in a:
             a["stopped_confirmed"] = self.stop(a)
         a["ended"] = time.time()
+        self.count_usage(job, a)
         if not a["stopped_confirmed"]:
             why += "; worker could not be confirmed stopped; no retry"
         if not a["stopped_confirmed"] or len(s["attempts"]) >= MAX_TRIES:
@@ -945,7 +1297,14 @@ class Run:
         s["attempts"][-1]["why"] = why
 
     def status(self, jobs, state):
-        print(f"{'job':<16}{'state':<18}{'tries':>6}  last attempt")
+        per_model, per_job = usage_tally(jobs, state)
+
+        def used(jid):
+            """The job's tokens, turns and API-price estimate as three printed columns; "-" where none was recorded."""
+            tokens, turns, cost = usage_cells(per_job.get(jid))
+            return f"{tokens:>10}{turns:>10}{cost:>10}"
+
+        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
         for job in jobs:
             s = state.get(job["id"], {"state": "pending", "attempts": []})
             a = s["attempts"][-1] if s["attempts"] else {}
@@ -954,13 +1313,62 @@ class Run:
                 for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
+            if s.get("why"):
+                detail += (", " if detail else "") + f"why={s['why']}"
+            if s.get("trust_wait"):
+                detail += (", " if detail else "") + f"waiting for blocked agy pane {s['trust_wait'].get('pane')}"
+            if a.get("asking"):
+                detail += (", " if detail else "") + f"waiting for an answer in pane {a.get('pane')}"
             if a.get("wait_until", 0) > time.time():  # a running quota wait, as a clock time
                 detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
-            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
+            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
             if not jid.startswith("_") and jid not in ids:
-                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}")
+                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
+        self.print_totals(per_model)
+
+    def failure_tally(self):
+        """Count shared failure-log events, not event names mentioned in a message."""
+        path = self.repo / ".pm" / "local" / "failures.log"
+        counts = Counter()
+        try:
+            with path.open(encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    parts = line.split(maxsplit=4)
+                    if (
+                        len(parts) >= 4
+                        and re.fullmatch(r"\d{4}-\d\d-\d\d", parts[0])
+                        and re.fullmatch(r"\d\d:\d\d:\d\d", parts[1])
+                        and parts[3] in FAILURES
+                    ):
+                        counts[parts[3]] += 1
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"failures: could not read {path}: {exc}; check access and try --status --tally again")
+            return
+        ordered = sorted(counts, key=lambda kind: (-counts[kind], kind))
+        print("failures: " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
+
+    def print_totals(self, per_model):
+        """One line per model and the grand total; a sum that an attempt did not report ends in "+?".
+
+        Those attempts (no log found, or a harness that reports no usage) make their model row and the grand total
+        partial, so a known sum is never shown as the whole; one line under the totals explains the mark. A figure
+        that no counted attempt reported stays "-". The money is what the tokens would cost at API prices, so the
+        total line says so once, after it, rather than repeating the note on every row.
+        """
+        print(f"{'model':<24}{'tokens':>10}{'turns':>10}{'API est.':>10}")
+        for model in sorted(per_model):
+            tokens, turns, cost = usage_cells(per_model[model])
+            print(f"{model:<24}{tokens:>10}{turns:>10}{cost:>10}")
+        total = summed_rows(per_model.values())
+        tokens, turns, cost = usage_cells(total)
+        note = f"  {API_NOTE}" if cost != "-" else ""
+        print(f"{'total':<24}{tokens:>10}{turns:>10}{cost:>10}{note}")
+        if total["counted"] and total["partial"]:
+            print(NO_USAGE)
 
     def request_stop(self, jobs, state, job_id):
         """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""
@@ -1006,7 +1414,11 @@ def main():
     state = run.load("receipts.json", {})
     if "--status" in sys.argv:
         run.status(jobs, state)
+        if "--tally" in sys.argv:
+            run.failure_tally()
         return
+    if "--tally" in sys.argv:
+        sys.exit("pm_run: use --tally with --status")
     if "--check" in sys.argv:
         sys.exit(0 if run.check(jobs, state, sys.argv[sys.argv.index("--check") + 1]) else 1)
     if "--stop" in sys.argv:
@@ -1022,7 +1434,12 @@ def main():
         # the run ends only once its final receipts are on disk
         if saved and all(state.get(j["id"], {}).get("state") in ENDED for j in jobs):
             run.log("pm_run done: " + ", ".join(f"{j['id']}={state[j['id']]['state']}" for j in jobs))
-            unconfirmed = any(a.get("stopped_confirmed") is False for j in jobs for a in state[j["id"]]["attempts"])
+            run.print_totals(usage_tally(jobs, state)[0])
+            unconfirmed = any(
+                state[j["id"]].get("trust_stopped_confirmed") is False
+                or any(a.get("stopped_confirmed") is False for a in state[j["id"]]["attempts"])
+                for j in jobs
+            )
             # a handed-over session stays open, and so does the pane of a job deleted while it ran
             handed = any(s["state"] in ("handed-over", "removed") for k, s in state.items() if not k.startswith("_"))
             if state.get("_herdr_workspace") and not unconfirmed and not handed:

@@ -15,6 +15,36 @@ SKILLS = PM_INIT.parent.parent.parent / ".agents" / "skills"
 GIT = shutil.which("git")
 # A project's own .pm/local (run folders, backups, nested repos) is no part of the package: never copy it.
 PACKAGE_ONLY = shutil.ignore_patterns("__pycache__", "local")
+# Runs pm_init with shutil patched, so a copy or a rename fails the way a lock, antivirus or a full disk does.
+COPY_FAILS = """
+def boom(*args, **kwargs):
+    raise OSError(28, "No space left on device")
+
+
+pm_init.shutil.copytree = boom
+"""
+RENAME_FAILS = """
+import os
+
+real_move = pm_init.shutil.move
+
+
+def move(src, dst, *args, **kwargs):
+    if os.path.basename(os.path.dirname(str(src))).startswith(".pm-init-"):
+        raise OSError(13, "Permission denied")
+    return real_move(src, dst, *args, **kwargs)
+
+
+pm_init.shutil.move = move
+"""
+# A filesystem without POSIX modes (an exFAT stick, a network share) refuses the exec bit on the hooks.
+CHMOD_FAILS = """
+def boom(self, *args, **kwargs):
+    raise OSError(95, "Operation not supported")
+
+
+pm_init.Path.chmod = boom
+"""
 
 
 def _remove_readonly(func, path, _exc_info):
@@ -44,6 +74,35 @@ class PmInitTest(unittest.TestCase):
             encoding="utf-8",
             errors="replace",
         )
+
+    def run_with(self, patch, *args, target=None):
+        """Run pm_init from a small driver that patches a stdlib call first, so a copy can fail inside a real run."""
+        driver_dir = Path(tempfile.mkdtemp(prefix="pm_driver_"))
+        self.addCleanup(shutil.rmtree, driver_dir, onerror=_remove_readonly)
+        driver = driver_dir / "driver.py"
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(PM_INIT.parent)!r})\n"
+            "import pm_init\n"
+            f"{patch}\n"
+            f"sys.exit(pm_init.main([{str(target or self.root)!r}, *{list(args)!r}]))\n",
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [sys.executable, str(driver)],
+            env={**os.environ, "PM_BOM_TOOL": str(self.fake_bom)},
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def stopped_line(self, output):
+        """The one line a stopped run prints, checked for being one line."""
+        lines = [line for line in output.splitlines() if line.startswith("Upgrade stopped:")]
+        self.assertEqual(len(lines), 1, output)
+        return lines[0]
 
     def test_fresh_install_creates_package_and_named_config(self):
         result = self.run_init(self.root, "--name", "Example Project")
@@ -109,13 +168,16 @@ class PmInitTest(unittest.TestCase):
     def test_an_upgrade_with_nothing_new_keeps_everything_and_names_the_upgrade_checks(self):
         self.assertEqual(self.run_init().returncode, 0)
 
+        check = self.run_init(self.root, "--check")
         result = self.run_init(self.root, "--upgrade")
 
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
-        self.assertIn("Plan for", result.stdout)
-        plan = result.stdout.split("Plan for", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("Plan for", check.stdout)
+        plan = check.stdout.split("Plan for", 1)[1].split("\n\n", 1)[0]
         self.assertNotIn("upgrade", plan)
+        self.assertIn("Nothing to change", result.stdout, "a real install says so in one line, not with a plan")
         after = result.stdout.split("\nNext:", 1)[1]
         self.assertIn("python -m unittest discover -s .pm/tests", after)
         self.assertIn("python .pm/tools/pm_board.py --resume", after)
@@ -135,6 +197,18 @@ class PmInitTest(unittest.TestCase):
         self.assertIn("nothing was written", result.stdout)
         self.assertEqual(edited.read_text(encoding="utf-8"), before)
         self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
+
+    def test_an_install_into_a_checkout_with_autocrlf_leaves_no_crlf_noise(self):
+        # Git for Windows often sets core.autocrlf=true; every file pm_init writes says eol=lf, or "git add" warns.
+        subprocess.run([GIT, "config", "core.autocrlf", "true"], cwd=self.root, check=True)
+        self.assertEqual(self.run_init().returncode, 0)
+
+        added = subprocess.run(
+            [GIT, "add", "-A"], cwd=self.root, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertNotIn("LF will be replaced by CRLF", added.stderr + added.stdout)
 
     def test_a_clone_with_autocrlf_reports_no_skill_as_edited(self):
         # Git for Windows often sets core.autocrlf=true; the manifest hashes bytes, so CRLF copies looked edited.
@@ -191,6 +265,19 @@ class PmInitTest(unittest.TestCase):
             check=True,
         )
         self.assertEqual(hooks_path.stdout.strip(), ".pm/hooks")
+
+    def test_a_filesystem_without_exec_bits_never_stops_the_install(self):
+        # An exFAT stick or a network share refuses chmod; the hooks are still staged as executable.
+        result = self.run_with(CHMOD_FAILS)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / ".pm" / "hooks" / "pre-commit").is_file())
+        staged = subprocess.run(
+            [GIT, "ls-files", "-s", ".pm/hooks"], cwd=self.root, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        self.assertEqual(len(staged), 2, staged)
+        for line in staged:
+            self.assertTrue(line.startswith("100755 "), line)
 
     def test_hooks_are_staged_as_executable(self):
         result = self.run_init()
@@ -292,6 +379,94 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(backups[0].read_text(encoding="utf-8"), "local package file\n")
         self.assertFalse(extra.exists())
 
+    def test_a_copy_that_fails_leaves_the_tools_in_place(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        edited = self.root / ".pm/tools/pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(COPY_FAILS, "--upgrade")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("# local change\n"))
+        self.assertNotIn("Traceback", result.stderr)
+        line = self.stopped_line(result.stdout)
+        self.assertIn("No space left on device", line)
+        self.assertIn(str(self.root / ".pm" / "local" / "backup"), line)  # nothing to restore, but it says where
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [], "a half-made copy is cleared away")
+
+    def test_a_failed_copy_on_a_first_install_removes_nothing(self):
+        result = self.run_with(COPY_FAILS)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        line = self.stopped_line(result.stdout)
+        self.assertIn("Nothing of the project's was removed", line)
+        self.assertFalse((self.root / ".pm" / "tools").exists())
+        self.assertFalse((self.root / ".pm" / "VERSION").exists())
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [])
+
+    def test_an_install_and_an_upgrade_keep_the_folders_the_project_called_new_and_old(self):
+        # A project may keep its own draft beside the package; the staging folder and the backup use names of their
+        # own, so neither the first install nor the upgrade reuses or clears that draft.
+        drafts = {".pm/tools.new/keep.txt": "a draft of mine\n", ".pm/tools.old/keep.txt": "an old copy\n"}
+        for relative, text in drafts.items():
+            path = self.root / relative
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+
+        installed = self.run_init()
+
+        self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+        tool = self.root / ".pm" / "tools" / "pm_check.py"
+        tool.write_text("old\n", encoding="utf-8")  # so the upgrade really replaces the folder
+        upgraded = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(upgraded.returncode, 0, upgraded.stdout + upgraded.stderr)
+        for relative, text in drafts.items():
+            with self.subTest(path=relative):
+                self.assertEqual((self.root / relative).read_text(encoding="utf-8"), text)
+        self.assertNotEqual(tool.read_text(encoding="utf-8"), "old\n", "the upgrade did replace the tools")
+        self.assertEqual(list((self.root / ".pm").glob(".pm-init-*")), [], "this run's staging folder is gone")
+
+    def test_a_rename_that_fails_names_the_backup_and_the_command_that_restores_it(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        edited = self.root / ".pm/tools/pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(RENAME_FAILS, "--upgrade")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertFalse((self.root / ".pm/tools").exists(), "the swap stopped between the two moves")
+        line = self.stopped_line(result.stdout)
+        backed_up = next((self.root / ".pm/local/backup").glob("*/tools"))
+        self.assertIn(str(backed_up), line)
+        self.assertIn("put it back with: python -c ", line)
+
+        command = line.split("put it back with: ", 1)[1].replace("python ", f'"{sys.executable}" ', 1)
+        subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True)
+
+        self.assertTrue((self.root / ".pm/tools/pm_check.py").is_file(), "the line's command brings the tools back")
+
+    def test_the_recovery_command_works_for_a_path_with_an_apostrophe(self):
+        # An apostrophe used to end the Python string in the printed command; a real project folder may hold one.
+        project = Path(tempfile.mkdtemp(prefix="pm_apostrophe_")) / "O'Brien's project"
+        self.addCleanup(shutil.rmtree, project.parent, onerror=_remove_readonly)
+        project.mkdir()
+        self.assertEqual(self.run_init(project).returncode, 0)
+        edited = project / ".pm" / "tools" / "pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(RENAME_FAILS, "--upgrade", target=project)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        line = self.stopped_line(result.stdout)
+        backed_up = next((project / ".pm/local/backup").glob("*/tools"))
+        self.assertIn(str(backed_up), line)
+
+        command = line.split("put it back with: ", 1)[1].replace("python ", f'"{sys.executable}" ', 1)
+        subprocess.run(command, shell=True, cwd=project, check=True, capture_output=True)
+
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("# local change\n"), "the command restores it")
+
     def test_install_copies_every_pm_skill_with_a_claude_pointer(self):
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
         self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)
@@ -333,10 +508,12 @@ class PmInitTest(unittest.TestCase):
         edited = self.root / ".agents" / "skills" / "pm-scratch" / "SKILL.md"
         edited.write_text(edited.read_text(encoding="utf-8") + "local rule\n", encoding="utf-8")
 
+        dry = self.run_init(self.root, "--upgrade", "--dry-run")
         result = self.run_init(self.root, "--upgrade")
 
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("local-edit", dry.stdout)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("local-edit", result.stdout)
         self.assertEqual(edited.read_bytes(), (SKILLS / "pm-scratch" / "SKILL.md").read_bytes())
         backups = list((self.root / ".pm/local/backup").glob("*/.agents/skills/pm-scratch/SKILL.md"))
         self.assertEqual(len(backups), 1)
@@ -360,6 +537,14 @@ class PmInitTest(unittest.TestCase):
         index = subprocess.run([GIT, "ls-files", "-s"], cwd=self.root, capture_output=True, text=True).stdout
         return files, index
 
+    def empty_folders(self):
+        """The folders under the project that hold no file, .git aside: what the summary calls empty folders."""
+        return {
+            p.relative_to(self.root).as_posix()
+            for p in self.root.rglob("*")
+            if p.is_dir() and ".git" not in p.relative_to(self.root).parts and not any(p.iterdir())
+        }
+
     def test_second_run_changes_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = self.snapshot()
@@ -369,6 +554,18 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertEqual(self.snapshot(), before)
         self.assertNotIn("  write ", second.stdout)
+
+    def test_a_run_that_only_sets_git_says_so_and_counts_no_file(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        subprocess.run([GIT, "config", "--unset", "core.hooksPath"], cwd=self.root, check=True)
+        before = self.snapshot()
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before, "a setting is not a file: nothing on disk changed")
+        self.assertIn("Set 1 git setting.\n", result.stdout)
+        self.assertNotIn("Nothing to change", result.stdout)
 
     def test_session_hooks_and_mcp_are_written(self):
         self.assertEqual(self.run_init().returncode, 0)
@@ -384,6 +581,181 @@ class PmInitTest(unittest.TestCase):
 
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7", "likec4"})
+
+    def test_launch_file_opens_the_board_without_a_terminal(self):
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        launch = json.loads((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"))
+        self.assertEqual(launch["version"], "0.0.1")
+        self.assertEqual(
+            launch["configurations"],
+            [
+                {
+                    "name": "board",
+                    "runtimeExecutable": "backlog",
+                    "runtimeArgs": ["browser", "--no-open", "--port", "6420"],
+                    "port": 6420,
+                }
+            ],
+        )
+        config = (self.root / "backlog.config.yml").read_text(encoding="utf-8")
+        self.assertIn("default_port: 6420", config, "the preview and the board config name the same port")
+
+    def test_map_adds_its_preview_with_the_pinned_likec4(self):
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        launch = json.loads((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"))
+        self.assertEqual([config["name"] for config in launch["configurations"]], ["board", "map"])
+        # One pin for the map: the preview starts the LikeC4 the MCP server in templates/root/mcp-map.json names.
+        server = json.loads((PM_INIT.parent.parent / "templates" / "root" / "mcp-map.json").read_text(encoding="utf-8"))
+        pinned = server["mcpServers"]["likec4"]["args"][1].rsplit("@", 1)[1]
+        map_config = launch["configurations"][1]
+        self.assertEqual(map_config["runtimeExecutable"], "npx")
+        self.assertEqual(map_config["runtimeArgs"], ["-y", f"likec4@{pinned}", "start", "--port", "5173"])
+        self.assertEqual(map_config["port"], 5173)
+
+    def test_own_launch_file_is_kept_and_the_missing_previews_are_listed(self):
+        (self.root / ".claude").mkdir()
+        own = '{"version": "0.0.1", "configurations": [{"name": "mine"}]}\n'
+        (self.root / ".claude" / "launch.json").write_text(own, encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / ".claude" / "launch.json").read_text(encoding="utf-8"), own)
+        kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .claude/launch.json: add the board preview:", kept)
+        self.assertIn("- .claude/launch.json: add the map preview:", kept)
+        self.assertIn('"runtimeExecutable": "backlog"', kept, "the line carries the JSON to paste")
+        self.assertIn("Merge by hand: 2 items, listed in .pm/local/merge-by-hand.md.", result.stdout)
+
+    def test_upgrade_never_touches_the_launch_file(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        path = self.root / ".claude" / "launch.json"
+        path.write_text('{"version": "0.0.1", "configurations": [{"name": "mine"}]}\n', encoding="utf-8")
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["configurations"], [{"name": "mine"}])
+
+    def test_an_upgrade_names_the_agents_sections_the_project_lacks(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        agents = self.root / "AGENTS.md"
+        ours = agents.read_text(encoding="utf-8").split("## Lead only: teaching", 1)[0]
+        agents.write_text(ours + "\nOur own rule stays.\n", encoding="utf-8")
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "Your AGENTS.md lacks these package sections: Lead only: teaching. "
+            "Ask your agent to add them from .pm/templates/root/AGENTS.md.",
+            result.stdout,
+        )
+        self.assertEqual(agents.read_text(encoding="utf-8"), ours + "\nOur own rule stays.\n")
+
+    def test_an_upgrade_names_every_package_section_an_own_agents_file_lacks(self):
+        (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
+        self.assertEqual(self.run_init(self.root, "--keep-existing").returncode, 0)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "Your AGENTS.md lacks these package sections: Start here, Lead only: which tool when, Lead only: teaching.",
+            result.stdout,
+        )
+        self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
+
+    def test_an_upgrade_says_nothing_when_the_agents_sections_are_there(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Your AGENTS.md lacks", result.stdout)
+
+    def test_a_real_install_names_the_project_first(self):
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], f"Project: {self.root.resolve()}")
+
+    def test_a_real_install_counts_the_files_it_wrote(self):
+        before, folders_before = self.snapshot()[0], self.empty_folders()
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        folders = self.empty_folders() - folders_before
+        self.assertGreater(len(written), 1, "a copied package folder is many files, not one plan line")
+        self.assertIn(f"Added {len(written)} files and {len(folders)} empty folders.", result.stdout)
+        self.assertIn("Set 2 git settings.", result.stdout)
+        self.assertNotIn("Plan for", result.stdout, "the whole plan is what --check is for")
+        self.assertIn("\nNext:", result.stdout)
+        self.assertIn("run /pm-setup", result.stdout)
+        self.assertIn("backlog browser", result.stdout)
+        # The number a beginner can check: the commit that follows holds exactly those files.
+        subprocess.run([GIT, "add", "-A"], cwd=self.root, check=True)
+        staged = subprocess.run([GIT, "diff", "--cached", "--name-only"], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(len(staged.stdout.split()), len(written))
+
+    def test_a_fresh_install_with_a_language_counts_each_file_once(self):
+        # --lang writes AGENTS.md and .claude/settings.json, and the plan names both again for the language itself;
+        # the summary counts files on disk, so each of them is one.
+        before, folders_before = self.snapshot()[0], self.empty_folders()
+
+        result = self.run_init(self.root, "--lang", "tr")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        folders = self.empty_folders() - folders_before
+        self.assertIn("AGENTS.md", written)
+        self.assertIn(".claude/settings.json", written)
+        self.assertIn(f"Added {len(written)} files and {len(folders)} empty folders.", result.stdout)
+        self.assertIn("Language: tr", self.agents_text())
+
+    def test_an_added_folder_counts_every_file_in_it(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        before = self.snapshot()[0]
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        self.assertGreater(len(written), 1, "the map skill folder is several files")
+        self.assertIn(f"Added {len(written)} files.", result.stdout)
+
+    def test_an_upgrade_counts_the_files_it_replaces(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        tool = self.root / ".pm" / "tools" / "pm_check.py"
+        tool.write_text("old\n", encoding="utf-8")
+        before = self.snapshot()[0]
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        after = self.snapshot()[0]
+        # The backup copy in .pm/local/ is not a change to the project, so it is left out of the count.
+        changed = {name for name in after if not name.startswith(".pm/local/") and before.get(name) != after[name]}
+        self.assertEqual(changed, {".pm/tools/pm_check.py"})
+        self.assertIn("Changed 1 file.", result.stdout)
+        self.assertNotIn("Added ", result.stdout, "the manifest is the same, so nothing was added")
+
+    def test_a_rerun_says_what_it_kept_of_the_users(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Nothing to change: the package and your files are as they are.", result.stdout)
+        self.assertIn("Kept 6 files of yours:", result.stdout)
+        self.assertIn(".claude/launch.json", result.stdout)
+        self.assertNotIn("Merge by hand:", result.stdout)
 
     def test_map_skill_comes_with_map_and_then_stays(self):
         skill = self.root / ".agents" / "skills" / "pm-likec4-dsl"
@@ -489,9 +861,10 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"), own_settings)
         self.assertEqual((self.root / ".mcp.json").read_text(encoding="utf-8"), own_mcp)
-        merge = result.stdout.split("Merge by hand", 1)[1]
-        self.assertIn(".claude/settings.json", merge)
-        self.assertIn("context7", merge)
+        self.assertIn("Kept 2 files of yours: .claude/settings.json, .mcp.json.", result.stdout)
+        merge = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .claude/settings.json", merge)
+        self.assertIn("- .mcp.json: add the context7 server", merge)
 
     def test_own_agents_file_stops_a_first_install(self):
         (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
@@ -513,11 +886,10 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "Use tabs.\n")
         self.assertTrue((self.root / ".pm" / "tools" / "pm_check.py").is_file())
-        merge = result.stdout.split("Merge by hand", 1)[1]
-        self.assertIn("AGENTS.md", merge)
-        self.assertIn("@AGENTS.md", merge)
         kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
         self.assertIn("- AGENTS.md:", kept)
+        self.assertIn("@AGENTS.md", kept)
+        self.assertIn("Kept 2 files of yours: AGENTS.md, CLAUDE.md.", result.stdout)
         self.assertEqual(self.run_init().returncode, 0)
         self.assertEqual((self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8"), kept)
 
@@ -685,7 +1057,9 @@ class PmInitTest(unittest.TestCase):
         text = self.agents_text()
         self.assertTrue(text.startswith(own), "the user's lines and fenced examples stay as they were")
         self.assertIn("## Language\n\nLanguage: tr\n", text)
-        self.assertEqual(self.run_init(self.root, "--lang", "tr").stdout.count("  set "), 0, "a rerun finds the line")
+        self.assertEqual(
+            self.run_init(self.root, "--lang", "tr", "--check").stdout.count("  set "), 0, "a rerun finds the line"
+        )
 
     def test_upgrade_lists_the_programs_that_differ_from_the_release(self):
         first = self.run_init(self.root)
@@ -749,6 +1123,7 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Plan for", result.stdout)
         self.assertIn(".mcp.json", result.stdout)
+        self.assertIn(".claude/launch.json", result.stdout)
         self.assertEqual([p.name for p in self.root.iterdir()], [".git"])
 
 

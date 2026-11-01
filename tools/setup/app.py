@@ -14,15 +14,31 @@ from pathlib import Path
 from urllib.parse import quote
 
 import bom
-from rich.text import Text
-from textual import work
-from textual.app import App, ComposeResult, SuspendNotSupported
-from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, SelectionList, Static
-from textual.widgets.selection_list import Selection
-from textual.worker import get_current_worker
+
+try:
+    from rich.text import Text
+    from textual import work
+    from textual.app import App, ComposeResult, SuspendNotSupported
+    from textual.binding import Binding
+    from textual.containers import VerticalScroll
+    from textual.screen import Screen
+    from textual.widgets import DataTable, Footer, Header, SelectionList, Static
+    from textual.widgets.selection_list import Selection
+    from textual.worker import get_current_worker
+except ImportError as error:  # started with a Python that is not the setup screen's own (DESIGN.md, Running it)
+    if __name__ != "__main__":  # the app tests import this file and skip themselves when Textual is missing
+        raise
+    venv = "tools/setup/.venv"
+    python = f"{venv}/Scripts/python" if sys.platform == "win32" else f"{venv}/bin/python"
+    print(
+        f"The setup screen needs the packages in tools/setup/requirements.txt, and this Python does not have them: {error}."
+        "\nMake its virtual environment, install them and start it again:"
+        f"\n  python -m venv {venv}"
+        f"\n  {python} -m pip install -r tools/setup/requirements.txt"
+        f"\n  {python} tools/setup/app.py <your project folder>",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 # A symbol and a theme colour per level (bom.LEVEL), so the status reads without colour too.
 SYMBOLS = {"good": "✓", "warn": "!", "bad": "✗", "skip": "·"}

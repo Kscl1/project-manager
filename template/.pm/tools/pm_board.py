@@ -1,6 +1,7 @@
 """Status board in English for the Backlog.md task files. Standard library only.
 
-Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD] [--tree | --resume [--brief] | --did [DAY] | --commits TASK]
+Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD]
+                                      [--next | --tree | --resume [--brief] | --did [DAY] | --commits TASK]
 """
 
 import argparse
@@ -23,6 +24,9 @@ WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-ta
 URGENT_LIMIT = 1
 # The Backlog status names, in board order; a task with any other status goes to "Other".
 SECTIONS = ["Active", "In review", "Owner check", "Ready", "Done"]
+ACTIVE, READY, DONE = "Active", "Ready", "Done"
+PRIORITIES = ("high", "medium", "low")  # `--next` picks a Ready task by this order; no priority comes last
+NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 
 
 def default_tasks_dir():
@@ -34,6 +38,7 @@ def default_tasks_dir():
 
 
 BLOCK_SCALARS = (">", ">-", ">+", "|", "|-", "|+")
+LIST_FIELDS = ("labels", "dependencies")  # frontmatter fields holding a list, inline `[a, b]` or one `- a` per line
 
 
 def scalar(value):
@@ -57,16 +62,16 @@ def read_frontmatter(lines):
             fields[key] = joiner.join(block)
             continue
         block = None
-        if key == "labels" and line.lstrip().startswith("- "):
-            fields["labels"].append(scalar(line.strip()[2:]))
+        if key in LIST_FIELDS and line.lstrip().startswith("- "):
+            fields[key].append(scalar(line.strip()[2:]))
             continue
         name, sep, value = line.partition(":")
         if not sep or line.startswith((" ", "\t")):
             key = None
             continue
         key = name.strip()
-        if key == "labels":
-            fields["labels"] = [scalar(v) for v in value.strip().strip("[]").split(",") if v.strip()]
+        if key in LIST_FIELDS:
+            fields[key] = [scalar(v) for v in value.strip().strip("[]").split(",") if v.strip()]
         elif value.strip() in BLOCK_SCALARS:
             block, joiner = [], " " if value.strip()[0] == ">" else "\n"
             fields[key] = ""
@@ -75,11 +80,71 @@ def read_frontmatter(lines):
     return None  # the closing --- never came, so this is not frontmatter
 
 
+def number(value):
+    """The first whole number in a frontmatter value, or None when it holds none."""
+    found = re.search(r"-?\d+", value or "")
+    return int(found.group()) if found else None
+
+
+def section_lines(lines, heading):
+    """The lines under a `## heading` in the task body, up to the next heading."""
+    found, inside = [], False
+    for line in lines:
+        if line.startswith("## "):
+            inside = line[3:].strip().casefold() == heading
+            continue
+        if inside:
+            found.append(line)
+    return found
+
+
+LIVE_NEXT = re.compile(r"Next(?:\s*\([^)]*\))?:(.*)$")
+OPEN_CRITERION = re.compile(r"^\s*[-*]\s+\[ \]\s*(.*)$")
+
+
+def live_next(lines):
+    """The live block's `Next:` line, or None when the task has none yet."""
+    for line in section_lines(lines, "implementation notes"):
+        found = LIVE_NEXT.match(line.strip())
+        if found:
+            return found.group(1).strip() or None
+    return None
+
+
+def open_criteria(lines):
+    """The acceptance criteria still unchecked, as written (`#1` number included)."""
+    criteria = []
+    for line in section_lines(lines, "acceptance criteria"):
+        found = OPEN_CRITERION.match(line)
+        if found:
+            criteria.append(found.group(1).strip())
+    return criteria
+
+
+def resume_tool():
+    """The sibling pm_resume script, so both tools read a `Review by:` line the same way.
+
+    The two ship together; a lone copy of this file still prints the board, just without the hold dates.
+    """
+    tools = Path(__file__).resolve().parent
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    try:
+        import pm_resume
+    except ImportError:
+        return None
+    return pm_resume
+
+
 def read_task(path):
-    fields = read_frontmatter(path.read_text(encoding="utf-8-sig").splitlines())
+    # A task saved in a Windows code page must not crash the board: the odd byte reads as a replacement mark.
+    lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
+    fields = read_frontmatter(lines)
     if fields is None:
         return None
     labels = fields.get("labels", [])
+    resume = resume_tool()
+    review_by = resume.review_fields(resume.implementation_notes(lines))["review_by"] if resume else None
     return {
         "id": fields.get("id", ""),
         "title": fields.get("title", ""),
@@ -87,7 +152,31 @@ def read_task(path):
         "type": fields.get("type", ""),
         "parent": fields.get("parent_task_id", ""),
         "urgent": "urgent" in labels or "acil" in labels,
+        "priority": fields.get("priority", "").strip().lower(),
+        "ordinal": number(fields.get("ordinal", "")),
+        "dependencies": [name for name in fields.get("dependencies", []) if name],
+        "updated": fields.get("updated_date", "").strip(),
+        "next": live_next(lines),
+        "criteria": open_criteria(lines),
+        "review_by": resume.as_date(review_by) if resume else None,
     }
+
+
+def read_tasks(directory):
+    """Every task file in a folder; a file with no frontmatter or that cannot be read is skipped."""
+    try:
+        paths = sorted(Path(directory).glob("*.md"))
+    except OSError:
+        return []
+    tasks = []
+    for path in paths:
+        try:
+            task = read_task(path)
+        except (OSError, UnicodeError):
+            continue
+        if task:
+            tasks.append(task)
+    return tasks
 
 
 def order(task):
@@ -186,11 +275,120 @@ def _cycle_ids(tasks, by_id, seen):
     return cycle
 
 
+def priority_rank(task):
+    """high, medium, low, then a task whose priority is empty or unknown."""
+    return PRIORITIES.index(task["priority"]) if task["priority"] in PRIORITIES else len(PRIORITIES)
+
+
+def start_key(task):
+    """The Ready pick: priority first, then the lowest ordinal, then the lowest task number."""
+    return (priority_rank(task), task["ordinal"] if task["ordinal"] is not None else float("inf"), order(task))
+
+
+def newest_first(tasks):
+    """Tasks by updated_date, newest first; one without a stamp keeps its id order and comes last."""
+    tasks = sorted(tasks, key=order)
+    tasks.sort(key=lambda task: task["updated"][:16].replace("T", " "), reverse=True)
+    return tasks
+
+
+def updated_note(task):
+    stamp = task["updated"][:16].replace("T", " ")
+    return f" · updated {stamp}" if stamp else ""
+
+
+def criteria_lines(task, when_empty):
+    """The acceptance criteria still unchecked as a checklist, or one plain line when there are none."""
+    if not task["criteria"]:
+        return [when_empty]
+    return ["Acceptance criteria:", *(f"- [ ] {item}" for item in task["criteria"])]
+
+
+def continue_lines(active):
+    """The newest Active task to continue, then the other Active tasks newest first."""
+    lines = [f"{len(active)} tasks are Active; continue the newest one."] if len(active) > 1 else []
+    chosen = active[0]
+    lines.append(f"Continue: {chosen['title']} ({chosen['id']})")
+    lines.append(f"Next: {chosen['next'] or NOT_SET}")
+    lines.extend(criteria_lines(chosen, "Acceptance criteria: none unchecked"))
+    if len(active) > 1:
+        lines.append("Also Active (newest first; leave them for now):")
+        lines.extend(f"- {task['title']} ({task['id']}){updated_note(task)}" for task in active[1:])
+    return lines
+
+
+def start_lines(task):
+    """The next Ready task, why it comes first, and what finishing it means."""
+    priority = task["priority"] or "none"
+    ordinal = task["ordinal"] if task["ordinal"] is not None else "none"
+    return [
+        f"Start: {task['title']} ({task['id']}) · priority {priority} · ordinal {ordinal}",
+        *criteria_lines(task, "Acceptance criteria: none written yet"),
+    ]
+
+
+def held_on_purpose(task, today):
+    """A `Review by:` date that has not passed yet: the lead parked this task on purpose."""
+    review_by = task["review_by"]
+    return review_by is not None and review_by >= today
+
+
+def held_until_line(held):
+    """One plain line for a board whose open work all waits for a later `Review by:` date."""
+    earliest = min(task["review_by"] for task in held)
+    first = min((task for task in held if task["review_by"] == earliest), key=order)
+    return (
+        f"Everything open is waiting until {earliest.isoformat()} ({first['title']}). Say what you want to build next."
+    )
+
+
+def next_lines(tasks, closed_done=(), today=None):
+    """The one task to work on now in plain words, or one line saying there is nothing to start."""
+    today = today or date.today()
+    tasks = [task for task in tasks if task["id"] and task["title"]]
+    active = newest_first([task for task in tasks if task["status"] == ACTIVE and not held_on_purpose(task, today)])
+    if active:
+        return continue_lines(active)
+    done = {task["id"] for task in tasks if task["status"] == DONE} | set(closed_done)
+    ready = [task for task in tasks if task["status"] == READY]
+    startable = [
+        task
+        for task in ready
+        if all(name in done for name in task["dependencies"]) and not held_on_purpose(task, today)
+    ]
+    if startable:
+        return start_lines(min(startable, key=start_key))
+    open_tasks = [task for task in tasks if task["status"] in (ACTIVE, READY)]
+    held = [task for task in open_tasks if held_on_purpose(task, today)]
+    if held and len(held) == len(open_tasks):
+        return [held_until_line(held)]
+    lines = ["Nothing is Ready to start. The lead can open a task from the user's next request."]
+    for task in sorted(ready, key=order):
+        waiting = ", ".join(name for name in task["dependencies"] if name not in done)
+        if waiting:
+            lines.append(f"- Ready but waiting for another task: {task['id']} (needs {waiting})")
+    return lines
+
+
+def closed_done_ids(tasks_dir):
+    """Ids of Done tasks Backlog moved out of the tasks folder, so a finished dependency still counts."""
+    folder = Path(tasks_dir)
+    found = set()
+    for closed in (folder.parent / "completed", folder.parent / "archive" / "tasks"):
+        found.update(task["id"] for task in read_tasks(closed) if task["status"] == DONE)
+    return found
+
+
 def main():
-    sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="Print an English status board from Backlog tasks.")
     parser.add_argument("--tasks", default=None)
     parser.add_argument("--today", default=date.today().isoformat())
+    parser.add_argument("--next", action="store_true", help="print the one task to work on now")
     parser.add_argument("--tree", action="store_true", help="print only the Epic tree")
     parser.add_argument("--resume", action="store_true", help="print the session resume summary")
     parser.add_argument("--brief", action="store_true", help="a short resume briefing for the owner")
@@ -214,7 +412,12 @@ def main():
         return pm_resume.main(brief=args.brief)
 
     tasks_dir = args.tasks if args.tasks else default_tasks_dir()
-    tasks = [t for t in (read_task(p) for p in sorted(Path(tasks_dir).glob("*.md"))) if t]
+    tasks = read_tasks(tasks_dir)
+    if args.next:
+        resume = resume_tool()
+        today = (resume.as_date(args.today) if resume else None) or date.today()
+        print("\n".join(next_lines(tasks, closed_done_ids(tasks_dir), today)))
+        return 0
     if args.tree:
         print(tree_block(tasks, args.today))
         return 0

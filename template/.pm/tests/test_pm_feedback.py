@@ -155,6 +155,9 @@ class FeedbackTest(unittest.TestCase):
         self.assertEqual(len(reports), 1)
         return reports[0], out
 
+    def display(self, path):
+        return path.relative_to(self.root).as_posix()
+
     def assertClean(self, text):
         for value in FORBIDDEN:
             self.assertNotIn(value.lower(), text.lower(), f"{value!r} leaked")
@@ -178,6 +181,35 @@ class FeedbackTest(unittest.TestCase):
         line = "the charter says WIP 1/7 and/or 10/16; see src/app.py, docs/research/notes and my/folder.v2"
         text = pm_feedback.redact(line, self.root, pm_feedback.private_strings(self.root))
         self.assertEqual(text, "the charter says WIP 1/7 and/or 10/16; see <file>, <file> and <file>")
+
+    def test_tool_version_survives_output_the_console_cannot_decode(self):
+        """A tool that prints an arrow or a non-Latin name must not raise UnicodeDecodeError."""
+
+        def run(args, **kwargs):
+            if kwargs.get("encoding") != "utf-8" or kwargs.get("errors") != "replace":
+                raise UnicodeDecodeError("utf-8", b"\x81", 0, 1, "invalid start byte")
+            return subprocess.CompletedProcess(args, 0, "backlog 2.1 \u2192 ready\n", "")
+
+        with mock.patch.object(pm_feedback.subprocess, "run", run):
+            self.assertEqual(pm_feedback.tool_version("backlog"), "backlog 2.1 \u2192 ready")
+
+    def test_error_file_in_another_code_page_is_read_without_a_crash(self):
+        self.error_file.write_bytes(b"pm_check: caf\xe9 \x81 odd bytes\nKeyError: 'status'\n")
+        code, out = self.run_tool("--command", "pm_check", "--error-file", str(self.error_file))
+        self.assertEqual(code, 0)
+        self.assertNotIn("Traceback", out)
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("KeyError: 'status'", report.read_text(encoding="utf-8"))
+
+    def test_unreadable_error_file_becomes_one_plain_line(self):
+        missing = self.root / "no-such-error.txt"
+        code, out = self.run_tool("--command", "pm_check", "--error-file", str(missing))
+        self.assertEqual(code, 0)
+        self.assertIn(f"Could not read {missing.as_posix()}:", out)
+        self.assertIn("The report is written without it", out)
+        self.assertNotIn("Traceback", out)
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("the error file could not be read", report.read_text(encoding="utf-8"))
 
     def test_error_excerpt_is_short(self):
         self.error_file.write_text("\n".join(f"line {n}" for n in range(100)), encoding="utf-8")
@@ -208,6 +240,7 @@ class FeedbackTest(unittest.TestCase):
         self.assertEqual(args[:5], ["gh", "issue", "create", "--repo", pm_feedback.HOME_REPO])
         self.assertTrue(args[args.index("--title") + 1].startswith("[feedback] pm_check crashes on"))
         self.assertIn("### Error excerpt", body)
+        self.assertIn(self.display(report), out)  # the owner sees which file went out
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
 
@@ -236,7 +269,7 @@ class FeedbackTest(unittest.TestCase):
             code, out = self.run_tool("--send", str(report), "--yes")
         self.assertEqual(code, 1)
         self.assertIn("gh is missing or not signed in", out)
-        self.assertIn(report.as_posix(), out)
+        self.assertIn(self.display(report), out)
         self.assertEqual(self.gh.calls, [])
 
     def test_apostrophes_in_prose_stay(self):
@@ -248,17 +281,83 @@ class FeedbackTest(unittest.TestCase):
             self.assertIn("<text>", text)
         self.assertEqual(pm_feedback.redact("KeyError: 'status'", self.root, private), "KeyError: 'status'")
 
+    def test_redacted_copy_sits_next_to_the_report_and_is_what_gets_sent(self):
+        report, _ = self.write_report()
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        edited = report.read_text(encoding="utf-8")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        redacted = report.with_name(f"{report.stem}.redacted.md")
+        self.assertIn(self.display(redacted), out)  # says which file was sent
+        self.assertEqual(report.read_text(encoding="utf-8"), edited)  # the owner's file stays as it was
+        self.assertClean(redacted.read_text(encoding="utf-8"))
+        self.assertEqual(len(self.gh.calls), 1)
+        args, body = self.gh.calls[0]
+        self.assertClean(" ".join(args) + body)
+
+    def test_an_existing_redacted_copy_with_owner_notes_survives_the_send_path(self):
+        report, _ = self.write_report()
+        notes = f"owner notes for the maintainer: {TASK_TITLE}\n"
+        sidecar = report.with_name(f"{report.stem}.redacted.md")
+        sidecar.write_text(notes, encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), notes, "an existing copy keeps its bytes")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        self.assertIn(self.display(second), out)  # names the copy it actually wrote
+        self.assertClean(second.read_text(encoding="utf-8"))
+        self.assertClean(" ".join(self.gh.calls[0][0]) + self.gh.calls[0][1])
+
+    def test_an_existing_redacted_copy_with_owner_notes_survives_the_refused_yes_path(self):
+        report, _ = self.write_report()
+        notes = f"owner notes kept: {TASK_TITLE}\n"
+        sidecar = report.with_name(f"{report.stem}.redacted.md")
+        sidecar.write_text(notes, encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("Nothing sent", out)
+        self.assertEqual(self.gh.calls, [])
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), notes, "an existing copy keeps its bytes")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        self.assertIn(self.display(second), out)  # says where the text that would be sent sits
+        self.assertClean(second.read_text(encoding="utf-8"))
+
+    def test_the_redacted_copy_counts_up_when_two_names_are_taken(self):
+        report, _ = self.write_report()
+        first = report.with_name(f"{report.stem}.redacted.md")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        first.write_text("first notes\n", encoding="utf-8")
+        second.write_text("second notes\n", encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        third = report.with_name(f"{report.stem}.redacted-3.md")
+        self.assertIn(self.display(third), out)
+        self.assertEqual(first.read_text(encoding="utf-8"), "first notes\n")
+        self.assertEqual(second.read_text(encoding="utf-8"), "second notes\n")
+        self.assertClean(third.read_text(encoding="utf-8"))
+
     def test_yes_never_sends_text_the_owner_did_not_see(self):
         report, _ = self.write_report()
         with report.open("a", encoding="utf-8") as extra:
             extra.write(f"\nadded by hand: {TASK_TITLE} {GITHUB_TOKEN} {self.root / 'src' / 'billing'}\n")
+        edited = report.read_text(encoding="utf-8")
         code, out = self.run_tool("--send", str(report), "--yes")
         self.assertEqual(code, 1)
-        self.assertIn("nothing sent", out)
+        self.assertIn("Nothing sent", out)
         self.assertEqual(self.gh.calls, [])
-        shown = report.read_text(encoding="utf-8")
-        self.assertClean(shown)  # the file now holds the redacted text, ready to show again
-        self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(report.read_text(encoding="utf-8"), edited)  # the hand-edited report is not overwritten
+        redacted = report.with_name(f"{report.stem}.redacted.md")
+        self.assertIn(self.display(redacted), out)  # says where the text that would be sent sits
+        shown = redacted.read_text(encoding="utf-8")
+        self.assertClean(shown)  # the redacted copy is clean, ready to show again
+        self.run_tool("--send", str(redacted), "--yes")
         self.assertEqual(len(self.gh.calls), 1)
         args, body = self.gh.calls[0]
         title, _, rest = shown.partition("\n")

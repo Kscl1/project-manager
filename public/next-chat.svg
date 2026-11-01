@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="fig-title">
+  <title id="fig-title">Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.</title>
+  <defs>
+    <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/>
+    </marker>
+  </defs>
+  <style>
+    .card { fill: #f7f5ef; }
+    .panel { fill: #ffffff; stroke: #d8d3c6; stroke-width: 1.5; }
+    .title { font: 600 18px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #1f2328; }
+    .body { font: 15.5px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #3b3f45; }
+    .note { font: 16px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #4b5058; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 14.5px; fill: #1f2328; }
+    .num { font: 600 15px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; fill: #ffffff; }
+    .arrow { stroke: #6b7280; stroke-width: 2.5; fill: none; marker-end: url(#arrowhead); }
+    .time-line { stroke: #b7b2a5; stroke-width: 2; stroke-dasharray: 7 7; }
+  </style>
+
+  <rect class="card" x="0" y="0" width="1000" height="600" rx="20"/>
+
+  <!-- Row 1: today -->
+  <rect class="panel" x="24" y="28" width="296" height="272" rx="14"/>
+  <circle cx="62" cy="66" r="14" fill="#1d4ed8"/>
+  <text class="num" x="62" y="71" text-anchor="middle">1</text>
+  <text class="title" x="86" y="72">You ask</text>
+  <text class="body" x="48" y="112">In plain words:</text>
+  <text class="body" x="48" y="136">&#8220;Fix the contact link.&#8221;</text>
+  <text class="body" x="48" y="184">No commands to learn.</text>
+
+  <path class="arrow" d="M320 164 H346"/>
+
+  <rect class="panel" x="352" y="28" width="296" height="272" rx="14"/>
+  <circle cx="390" cy="66" r="14" fill="#b45309"/>
+  <text class="num" x="390" y="71" text-anchor="middle">2</text>
+  <text class="title" x="414" y="72">The assistant works</text>
+  <text class="body" x="376" y="112">It shows its plan.</text>
+  <text class="body" x="376" y="136">You say yes.</text>
+  <text class="body" x="376" y="160">It changes the file and</text>
+  <text class="body" x="376" y="184">runs the check.</text>
+
+  <path class="arrow" d="M648 164 H674"/>
+
+  <rect class="panel" x="680" y="28" width="296" height="272" rx="14"/>
+  <circle cx="718" cy="66" r="14" fill="#15803d"/>
+  <text class="num" x="718" y="71" text-anchor="middle">3</text>
+  <text class="title" x="742" y="72">Notes are saved</text>
+  <text class="body" x="704" y="112">In <tspan class="mono">.pm/</tspan> in your project:</text>
+  <text class="body" x="704" y="136">Job: fix the contact link</text>
+  <text class="body" x="704" y="160">Done when: tapping the link</text>
+  <text class="body" x="704" y="184">opens an email</text>
+  <text class="body" x="704" y="208">Next: test it on a phone</text>
+
+  <!-- Time passes -->
+  <line class="time-line" x1="24" y1="352" x2="976" y2="352"/>
+  <rect x="250" y="330" width="500" height="44" rx="22" fill="#f7f5ef"/>
+  <text class="note" x="500" y="358" text-anchor="middle">Time passes: you close the chat and open a new one.</text>
+  <path class="arrow" d="M828 300 V392"/>
+
+  <!-- Row 2: next time -->
+  <rect class="panel" x="24" y="404" width="952" height="168" rx="14"/>
+  <circle cx="62" cy="442" r="14" fill="#6d28d9"/>
+  <text class="num" x="62" y="447" text-anchor="middle">4</text>
+  <text class="title" x="86" y="448">You open a new chat in the same folder</text>
+  <text class="body" x="48" y="496">You: &#8220;Continue.&#8221;</text>
+  <text class="body" x="48" y="520">It reads the saved notes, checks the files, and names the next step:</text>
+  <text class="body" x="48" y="544">try the contact link on a phone.</text>
+</svg>

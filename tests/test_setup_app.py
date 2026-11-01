@@ -1,7 +1,10 @@
-"""Tests for tools/setup/app.py, headless with a fake probe and runner. Skipped where Textual is not installed (CI)."""
+"""Tests for tools/setup/app.py, headless with a fake probe and runner. The screen tests are skipped where Textual
+is not installed (CI); starting app.py without it is tested everywhere."""
 
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -10,6 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools" / "setup"))
+
+ROOT = Path(__file__).resolve().parent.parent
+SETUP = ROOT / "tools" / "setup"
 
 try:
     import app
@@ -25,6 +31,32 @@ ITEMS = [
 ]  # fmt: skip
 MAP = {"id": "m", "name": "M", "kind": "command", "layer": "map", "check": ["m"], "min": "1.0", "tested": "1.0",
        "install": {"all": "get m"}}  # fmt: skip
+
+
+class StartWithoutTextual(unittest.TestCase):
+    """Started outside its virtual environment, app.py says what to run instead of ending in a traceback."""
+
+    def test_plain_message_and_exit_1(self):
+        with tempfile.TemporaryDirectory() as folder:
+            fake = Path(folder) / "textual"  # a Textual that cannot import, as on a machine without the venv
+            fake.mkdir()
+            (fake / "__init__.py").write_text("raise ImportError('No module named textual')\n", encoding="utf-8")
+            done = subprocess.run(
+                [sys.executable, str(SETUP / "app.py")],
+                cwd=ROOT,
+                env={**os.environ, "PYTHONPATH": folder},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+        self.assertIn(
+            "this Python does not have them: No module named", done.stderr
+        )  # textual, or rich where it is absent
+        self.assertIn("python -m venv tools/setup/.venv", done.stderr)
+        self.assertIn("-m pip install -r tools/setup/requirements.txt", done.stderr)
+        self.assertIn("tools/setup/app.py <your project folder>", done.stderr)
 
 
 @unittest.skipIf(app is None, "Textual is not installed; see tools/setup/DESIGN.md")
