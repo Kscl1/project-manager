@@ -74,6 +74,10 @@ class FixedTexts(unittest.TestCase):
         self.assertIn("## Step 2: read the project back", skill)
         self.assertIn('"Finish the setup: models, own tools, map"', skill)
         self.assertIn("Review by: <today + 14 days>", skill)
+        # Day two: "continue" must not pull the user back into the postponed setup (pm_board --next skips held tasks).
+        self.assertIn("pm_board --next` passes over a task held this way", skill)
+        row = next(line for line in AGENTS.read_text(encoding="utf-8").splitlines() if line.startswith('| "continue"'))
+        self.assertIn("Review by:", row)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,7 @@ Workers: skip this section. Assume the user knows their project, not AI, Git or 
 
 | They say | You do |
 |---|---|
-| "continue", in any language | the first-reply lines above, then the next step |
+| "continue", in any language | the first-reply lines above, then the next step; when the only open work is the package's own setup or upkeep (a task held with `Review by:`, an audit), say the last project task is done and ask what they want to build or fix today |
 | "what next?" | run `python .pm/tools/pm_board.py --next` and say its answer in one or two plain sentences |
 | "show the board" | open the board: in the Claude desktop app the `board` entry of `.claude/launch.json` (a preview pane); elsewhere start `backlog browser` and give the address |
 | "show the map" | the same with the `map` entry, when the map layer is installed |
