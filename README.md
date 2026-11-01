@@ -18,15 +18,7 @@ You do not have to learn a new tool: it uses files and programs you already have
 - **A project folder:** the folder that holds your code. If it is not a Git repository yet, the agent offers to turn it into one during setup (a Git repository is a folder whose history Git keeps).
 - **About 15 minutes.** The agent path below needs no terminal skills; the other two ways ask you to type commands.
 
-You need five programs. The installer checks them and names what is missing. The badges show each program's minimum version; the installer itself pins a tested version, a little newer, and tells you when yours differs.
-
-[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
-![Git 2.54.0+](https://img.shields.io/badge/Git-2.54.0%2B-F05032?logo=git&logoColor=white)
-![Node.js 24.14.0+](https://img.shields.io/badge/Node.js-24.14.0%2B-5FA04E?logo=nodedotjs&logoColor=white)
-[![Backlog.md 1.52.0+](https://img.shields.io/badge/Backlog.md-1.52.0%2B-000000?logo=markdown&logoColor=white)](https://github.com/MrLesk/Backlog.md)
-[![Claude Code 2.1.296+](https://img.shields.io/badge/Claude_Code-2.1.296%2B-D97757?logo=claude&logoColor=white)](https://code.claude.com)
+You need five programs. The installer checks them and names what is missing. The badges below the install box show each program's minimum version; the installer itself pins a tested version, a little newer, and tells you when yours differs.
 
 ## Install
 
@@ -47,6 +39,14 @@ project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-
 The agent asks which project and which optional parts you want, checks your machine, keeps its changes on a separate branch so you can undo them, and writes a short note for the next chat. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did. Then you open the project again in a new chat and type `/pm-setup`.
 
 The steps your agent follows: [Install with your agent](docs/install-with-agent.md) ([Türkçe](docs/tr/install-with-agent.md)).
+
+[![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![Git 2.54.0+](https://img.shields.io/badge/Git-2.54.0%2B-F05032?logo=git&logoColor=white)
+![Node.js 24.14.0+](https://img.shields.io/badge/Node.js-24.14.0%2B-5FA04E?logo=nodedotjs&logoColor=white)
+[![Backlog.md 1.52.0+](https://img.shields.io/badge/Backlog.md-1.52.0%2B-000000?logo=markdown&logoColor=white)](https://github.com/MrLesk/Backlog.md)
+[![Claude Code 2.1.296+](https://img.shields.io/badge/Claude_Code-2.1.296%2B-D97757?logo=claude&logoColor=white)](https://code.claude.com)
 
 [Getting started](docs/getting-started.md) · [Package guide](template/README.md) · [Principles](template/.pm/principles.md)
 
