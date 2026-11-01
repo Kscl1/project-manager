@@ -9,9 +9,12 @@ hero:
     file: ../../src/assets/logo.svg
     alt: project-manager logosu
   actions:
+    - text: Ajanınla kur
+      link: /project-manager/tr/install-with-agent/
+      icon: right-arrow
     - text: Başla
       link: /project-manager/tr/getting-started/
-      icon: right-arrow
+      variant: secondary
     - text: Nasıl çalışır?
       link: /project-manager/tr/how-it-works/
       variant: secondary

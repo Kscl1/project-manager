@@ -9,9 +9,12 @@ hero:
     file: ../src/assets/logo.svg
     alt: project-manager logo
   actions:
+    - text: Install with your agent
+      link: /project-manager/install-with-agent/
+      icon: right-arrow
     - text: Get started
       link: /project-manager/getting-started/
-      icon: right-arrow
+      variant: secondary
     - text: How it works
       link: /project-manager/how-it-works/
       variant: secondary
