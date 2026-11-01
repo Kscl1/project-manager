@@ -61,12 +61,27 @@ class FixedTexts(unittest.TestCase):
         self.assertIn("## Lead only: talking to the user", agents)
         en = re.search(r"^- EN: From now on you can just say: (.*)$", self.texts, re.M)
         self.assertTrue(en, "the EN 'what you can say' line")
-        self.assertRegex(self.texts, r"(?m)^- TR: Bundan sonra şunları demen yeter: ")
-        promised = re.findall(r'"([^"]+)"', en.group(1))
-        table = [p for p in promised if p != "stop teaching"]
-        self.assertEqual(table, ["continue", "what next?", "show the board", "explain <word>"])
-        for phrase in table:
-            self.assertIn(f'"{phrase}', agents, phrase)
+        tr = re.search(r"^- TR: Bundan sonra şunları demen yeter: (.*)$", self.texts, re.M)
+        self.assertTrue(tr, "the TR 'what you can say' line")
+        en_promised = re.findall(r'"([^"]+)"', en.group(1))
+        tr_promised = re.findall(r'"([^"]+)"', tr.group(1))
+        pairs = list(zip(en_promised, tr_promised, strict=True))
+        self.assertEqual(
+            pairs,
+            [
+                ("continue", "devam"),
+                ("what next?", "sırada ne var?"),
+                ("show the board", "panoyu göster"),
+                ("explain <word>", "<kelime> nedir?"),
+                ("stop teaching", "anlatmayı bırak"),
+            ],
+        )
+        rows = agents.split("| They say | You do |", 1)[1].split("\n\n", 1)[0].splitlines()
+        for english, turkish in pairs:
+            self.assertTrue(any(english in row and turkish in row for row in rows), (english, turkish))
+        stop = next(row for row in rows if "stop teaching" in row)
+        for phrase in ("mode: off", "known", "hinted", "one line", "safety asks"):
+            self.assertIn(phrase, stop)
         self.assertIn("pm_board.py --next", agents)
 
     def test_quick_setup_leaves_one_later_task(self):
@@ -74,10 +89,12 @@ class FixedTexts(unittest.TestCase):
         self.assertIn("## Step 2: read the project back", skill)
         self.assertIn('"Finish the setup: models, own tools, map"', skill)
         self.assertIn("Review by: <today + 14 days>", skill)
-        # Day two: "continue" must not pull the user back into the postponed setup (pm_board --next skips held tasks).
-        self.assertIn("pm_board --next` passes over a task held this way", skill)
+        # A dated reminder is not permission for "continue" to begin postponed setup.
+        self.assertIn("`continue` never starts the later task", skill)
+        self.assertIn("when the user asks for models, tools or the map, or on that date", skill)
         row = next(line for line in AGENTS.read_text(encoding="utf-8").splitlines() if line.startswith('| "continue"'))
         self.assertIn("Review by:", row)
+        self.assertIn("never starts", row)
 
 
 if __name__ == "__main__":

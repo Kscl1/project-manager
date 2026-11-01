@@ -7,7 +7,7 @@ Project-specific product rules belong here; the portable work system lives in `.
 Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md.
 
 1. `python .pm/tools/pm_board.py --resume` — compare active task notes with git, worktrees and reports; do not trust an old transcript.
-2. `.pm/charter.md` — project intent, acceptance and where every answer lives (`/pm-setup` writes it; until then there is none).
+2. `.pm/charter.md` if it exists — project intent, acceptance and where every answer lives. If it is missing, `/pm-setup` can create it.
 3. `.pm/decisions.md` — relevant decision IDs, not a second copy of their text.
 4. `.pm/README.md`, and the relevant Epic requirements in `.pm/specs/<epic>/` when that Epic has them.
 
@@ -21,19 +21,21 @@ When the package itself misbehaves (a `.pm/` tool, rule, role card or template, 
 
 Workers: skip this section. Assume the user knows their project, not AI, Git or project management, and reads the first lines of a reply.
 
-- **Your first reply in a session**, whatever the user typed ("continue", a question, a new request), opens with at most four short lines in the project language, before anything else: where we are (what was finished last and what is in progress, in plain words); what waits for the user, each thing by its plain name with one line of why, or "nothing"; a risk or contradiction you found, only if there is one; your recommended next step and why. Then do what they asked.
+- **Your first reply in a session:** if the user's first message is `/pm-setup`, the skill's fixed setup opening is the first reply. Otherwise send at most four short lines total in the project language: where we are (what finished and what is in progress); what waits for the user and why, or "nothing"; a risk or contradiction, only if there is one; your recommended next step and why. Use plain names and group multiple waiting items into one line. Give requested detail or a later setup opening in the next reply.
+- For the setup's later task, on or after its `Review by:` date the next session mentions it once under "what waits for you" and records the mention in that task. A reminder is not permission to start it.
 - **Plain names.** Call a task by its title in everyday words, its ID at most in parentheses. Show no commit hash, file path, command or tool name unless the user asked or must act on it: "the setup", not "TASK-1.7"; "a second opinion from another AI", not "an independent review gate". Result first, evidence after and short.
 - **What the user can just say:**
 
 | They say | You do |
 |---|---|
-| "continue", in any language | the first-reply lines above, then the next step; when the only open work is the package's own setup or upkeep (a task held with `Review by:`, an audit), say the last project task is done and ask what they want to build or fix today |
-| "what next?" | run `python .pm/tools/pm_board.py --next` and say its answer in one or two plain sentences |
-| "show the board" | open the board: in the Claude desktop app the `board` entry of `.claude/launch.json` (a preview pane); elsewhere start `backlog browser` and give the address |
-| "show the map" | the same with the `map` entry, when the map layer is installed |
-| "explain <word>" | a full plain answer, even when the word is in `known` |
+| "continue" / "devam", in any language | the first-reply lines above, then the next step; `continue` never starts the later setup task, even after its `Review by:` date. When only setup or upkeep waits, say the last project task is done and ask what they want to build or fix today |
+| "what next?" / "sırada ne var?" | run `python .pm/tools/pm_board.py --next` and say its answer in one or two plain sentences |
+| "show the board" / "panoyu göster" | open the board: in the Claude desktop app the `board` entry of `.claude/launch.json` (a preview pane); elsewhere start `backlog browser` and give the address |
+| "show the map" | if the map layer is not installed, say so; otherwise in the Claude desktop app open the `map` entry of `.claude/launch.json`. Elsewhere, check whether `npx likec4@1.60.0 start` needs an install and ask before running it if so; then start it in the project and give the address it prints |
+| "explain <word>" / "<kelime> nedir?" | a full plain answer, even when the word is in `known` |
+| "stop teaching" / "anlatmayı bırak" | set `mode: off` in `.pm/local/teaching.md`, keep `known` and `hinted` (if the file is missing, create `known: []` and `hinted: {}`), and acknowledge in one line; safety asks stay and requested explanations still get a full answer |
 
-- **Decide or ask.** Decide yourself, and write one line in the task for any choice the user may care about: the method, the order, the checks, the records inside `.pm/`, commits on a work branch. Ask first, as one short question with your recommendation first, only before: changing a user file outside `.pm/` (show the diff); anything that leaves the machine (a push, a pull request, an issue, an install, a paid or outside call); anything machine-wide; deleting work; merging into the user's main branch; changing what the project is for or what it may spend. These asks hold in every teaching mode.
+- **Decide or ask.** Decide yourself, and write one line in the task for any choice the user may care about: the method, the order, the checks, the records inside `.pm/`, commits on a work branch. Ask first, as one short question with your recommendation first, only before: changing a user file outside `.pm/` (show the diff); sending the user's code or data out or changing anything outside the machine (a push, pull request, issue, install or paid call); anything machine-wide; deleting work; merging into the user's main branch; changing what the project is for or what it may spend. Reading public docs with Context7 and reading the project's own GitHub state (such as `--resume` listing pull requests) are reads, not asks. These asks hold in every teaching mode.
 
 ## Lead only: which tool when
 
