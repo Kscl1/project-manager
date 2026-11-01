@@ -873,6 +873,36 @@ class NextCommandTest(PmBoardTestCase):
 
         self.assertIn("Acceptance criteria: none written yet", self.run_next().stdout)
 
+    def test_a_held_active_task_is_skipped_for_an_unheld_ready_one(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2027-01-01 · owner · waiting\n",
+            id="TASK-1",
+            title="Held work",
+            status="Active",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Free to start", status="Ready")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Free to start (TASK-2)", out)
+        self.assertNotIn("Held work", out)
+
+    def test_a_held_active_task_whose_date_passed_is_continued(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2020-01-01 · owner · waiting\n",
+            id="TASK-1",
+            title="Hold is over",
+            status="Active",
+        )
+        self.task_file("task-2.md", "", id="TASK-2", title="Ready but later", status="Ready")
+
+        out = self.run_next().stdout
+
+        self.assertIn("Continue: Hold is over (TASK-1)", out)
+        self.assertNotIn("Ready but later", out)
+
     def test_a_ready_task_held_with_a_review_by_date_is_skipped(self):
         self.task_file(
             "task-1.md",
@@ -907,23 +937,28 @@ class NextCommandTest(PmBoardTestCase):
 
         self.assertIn("Start: Hold is over (TASK-1)", out)
 
-    def test_only_held_tasks_left_says_so_in_plain_words(self):
-        for number, review_by in ((1, "2099-12-31"), (2, "2099-11-30")):
-            self.task_file(
-                f"task-{number}.md",
-                f"## Implementation Notes\nReview by: {review_by} · Sam · after the design talk\n",
-                id=f"TASK-{number}",
-                title=f"Parked {number}",
-                status="Ready",
-                priority="high",
-            )
+    def test_only_held_tasks_left_names_the_earliest_date(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2099-12-31 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Parked late",
+            status="Active",
+        )
+        self.task_file(
+            "task-2.md",
+            "## Implementation Notes\nReview by: 2099-11-30 · Sam · after the design talk\n",
+            id="TASK-2",
+            title="Parked sooner",
+            status="Ready",
+        )
 
         result = self.run_next()
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.strip(),
-            "Nothing to start; 2 task(s) wait on purpose (Review by). Ask the user what to build or fix next.",
+            "Everything open is waiting until 2099-11-30 (Parked sooner). Say what you want to build next.",
         )
 
     def test_next_appears_in_the_help(self):

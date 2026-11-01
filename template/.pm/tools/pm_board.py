@@ -333,27 +333,36 @@ def held_on_purpose(task, today):
     return review_by is not None and review_by >= today
 
 
+def held_until_line(held):
+    """One plain line for a board whose open work all waits for a later `Review by:` date."""
+    earliest = min(task["review_by"] for task in held)
+    first = min((task for task in held if task["review_by"] == earliest), key=order)
+    return (
+        f"Everything open is waiting until {earliest.isoformat()} ({first['title']}). Say what you want to build next."
+    )
+
+
 def next_lines(tasks, closed_done=(), today=None):
     """The one task to work on now in plain words, or one line saying there is nothing to start."""
     today = today or date.today()
     tasks = [task for task in tasks if task["id"] and task["title"]]
-    active = newest_first([task for task in tasks if task["status"] == ACTIVE])
+    active = newest_first([task for task in tasks if task["status"] == ACTIVE and not held_on_purpose(task, today)])
     if active:
         return continue_lines(active)
     done = {task["id"] for task in tasks if task["status"] == DONE} | set(closed_done)
     ready = [task for task in tasks if task["status"] == READY]
-    startable = [task for task in ready if all(name in done for name in task["dependencies"])]
-    held = [task for task in startable if held_on_purpose(task, today)]
-    startable = [task for task in startable if task not in held]
+    startable = [
+        task
+        for task in ready
+        if all(name in done for name in task["dependencies"]) and not held_on_purpose(task, today)
+    ]
     if startable:
         return start_lines(min(startable, key=start_key))
-    if held:
-        lines = [
-            f"Nothing to start; {len(held)} task(s) wait on purpose (Review by). "
-            "Ask the user what to build or fix next."
-        ]
-    else:
-        lines = ["Nothing is Ready to start. The lead can open a task from the user's next request."]
+    open_tasks = [task for task in tasks if task["status"] in (ACTIVE, READY)]
+    held = [task for task in open_tasks if held_on_purpose(task, today)]
+    if held and len(held) == len(open_tasks):
+        return [held_until_line(held)]
+    lines = ["Nothing is Ready to start. The lead can open a task from the user's next request."]
     for task in sorted(ready, key=order):
         waiting = ", ".join(name for name in task["dependencies"] if name not in done)
         if waiting:
