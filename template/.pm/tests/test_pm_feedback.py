@@ -296,6 +296,53 @@ class FeedbackTest(unittest.TestCase):
         args, body = self.gh.calls[0]
         self.assertClean(" ".join(args) + body)
 
+    def test_an_existing_redacted_copy_with_owner_notes_survives_the_send_path(self):
+        report, _ = self.write_report()
+        notes = f"owner notes for the maintainer: {TASK_TITLE}\n"
+        sidecar = report.with_name(f"{report.stem}.redacted.md")
+        sidecar.write_text(notes, encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), notes, "an existing copy keeps its bytes")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        self.assertIn(self.display(second), out)  # names the copy it actually wrote
+        self.assertClean(second.read_text(encoding="utf-8"))
+        self.assertClean(" ".join(self.gh.calls[0][0]) + self.gh.calls[0][1])
+
+    def test_an_existing_redacted_copy_with_owner_notes_survives_the_refused_yes_path(self):
+        report, _ = self.write_report()
+        notes = f"owner notes kept: {TASK_TITLE}\n"
+        sidecar = report.with_name(f"{report.stem}.redacted.md")
+        sidecar.write_text(notes, encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertIn("Nothing sent", out)
+        self.assertEqual(self.gh.calls, [])
+        self.assertEqual(sidecar.read_text(encoding="utf-8"), notes, "an existing copy keeps its bytes")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        self.assertIn(self.display(second), out)  # says where the text that would be sent sits
+        self.assertClean(second.read_text(encoding="utf-8"))
+
+    def test_the_redacted_copy_counts_up_when_two_names_are_taken(self):
+        report, _ = self.write_report()
+        first = report.with_name(f"{report.stem}.redacted.md")
+        second = report.with_name(f"{report.stem}.redacted-2.md")
+        first.write_text("first notes\n", encoding="utf-8")
+        second.write_text("second notes\n", encoding="utf-8")
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        third = report.with_name(f"{report.stem}.redacted-3.md")
+        self.assertIn(self.display(third), out)
+        self.assertEqual(first.read_text(encoding="utf-8"), "first notes\n")
+        self.assertEqual(second.read_text(encoding="utf-8"), "second notes\n")
+        self.assertClean(third.read_text(encoding="utf-8"))
+
     def test_yes_never_sends_text_the_owner_did_not_see(self):
         report, _ = self.write_report()
         with report.open("a", encoding="utf-8") as extra:

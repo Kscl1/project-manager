@@ -9,8 +9,9 @@ The report has five fields (.pm/templates/feedback.md): package version, harness
 and at most 20 lines of the error. Everything passes the redaction below.
 The second form shows the report again and opens an issue in the package's home repo with `gh issue create`.
 Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
-With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text to
-`<name>.redacted.md` next to the report, leaves that report alone, and stops.
+With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text to a new
+`<name>.redacted.md` next to the report (`-2`, `-3`, ... when that name is taken), leaves that report and every
+earlier copy alone, and stops.
 
 Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
 task and decision titles of two or more words, project and user names, paths outside the package's own files, e-mail
@@ -192,6 +193,23 @@ def build(root, command, error, harness, title):
     return f"# [feedback] {redact(title, root, private)}\n\n{redact(body, root, private)}\n"
 
 
+def write_new(path, text):
+    """Write `text` to `path`, or to `<stem>-2`, `-3`, ... when it is taken; never replace an existing file.
+
+    Returns the path actually written, so the tool can print which one it was.
+    """
+    candidate, extra = path, 2
+    while True:
+        try:
+            with candidate.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+        except FileExistsError:
+            candidate = path.with_name(f"{path.stem}-{extra}{path.suffix}")
+            extra += 1
+            continue
+        return candidate
+
+
 def send(root, report, yes, repo):
     """Open the issue only on an explicit yes. Returns the exit code."""
     shown = report.read_text(encoding="utf-8")
@@ -199,9 +217,8 @@ def send(root, report, yes, repo):
     title, _, body = text.partition("\n")
     print(text)
     source = report
-    if text != shown:  # never overwrite the owner's own file: the redacted copy sits next to it
-        source = report.with_name(f"{report.stem}.redacted.md")
-        source.write_text(text, encoding="utf-8", newline="\n")
+    if text != shown:  # never overwrite the owner's own file: the redacted copy sits next to it, under a free name
+        source = write_new(report.with_name(f"{report.stem}.redacted.md"), text)
         print(f"Redaction changed the report; the text that would be sent is in {display(source, root)}.")
     if yes and text != shown:  # the owner said yes to the file, so send only the file as it was shown
         print("Nothing sent: show the owner that file and ask again.")
