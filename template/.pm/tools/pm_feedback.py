@@ -147,7 +147,15 @@ def tool_version(name):
     if not path:
         return "not found"
     try:
-        out = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=15)
+        out = subprocess.run(
+            # utf-8, not the console's code page: a tool that prints an arrow or a non-Latin name must not crash.
+            [path, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
     except (OSError, subprocess.SubprocessError):
         return "not found"
     lines = (out.stdout or out.stderr).strip().splitlines()

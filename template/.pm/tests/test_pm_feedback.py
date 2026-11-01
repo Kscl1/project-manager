@@ -179,6 +179,17 @@ class FeedbackTest(unittest.TestCase):
         text = pm_feedback.redact(line, self.root, pm_feedback.private_strings(self.root))
         self.assertEqual(text, "the charter says WIP 1/7 and/or 10/16; see <file>, <file> and <file>")
 
+    def test_tool_version_survives_output_the_console_cannot_decode(self):
+        """A tool that prints an arrow or a non-Latin name must not raise UnicodeDecodeError."""
+
+        def run(args, **kwargs):
+            if kwargs.get("encoding") != "utf-8" or kwargs.get("errors") != "replace":
+                raise UnicodeDecodeError("utf-8", b"\x81", 0, 1, "invalid start byte")
+            return subprocess.CompletedProcess(args, 0, "backlog 2.1 \u2192 ready\n", "")
+
+        with mock.patch.object(pm_feedback.subprocess, "run", run):
+            self.assertEqual(pm_feedback.tool_version("backlog"), "backlog 2.1 \u2192 ready")
+
     def test_error_excerpt_is_short(self):
         self.error_file.write_text("\n".join(f"line {n}" for n in range(100)), encoding="utf-8")
         report, _ = self.write_report()
