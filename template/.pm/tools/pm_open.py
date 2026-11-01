@@ -135,7 +135,12 @@ def main(argv=None):
     command, port = found
     address = ADDRESS.format(port=port)
     if listening(port):
-        print(f"The {args.name} is already open at {address}. Nothing was started; I opened it in your browser.")
+        # Only a port is known to answer, not which program holds it, so say both possibilities.
+        print(f"Something already answers at {address}; nothing was started and I opened it in your browser.")
+        print(
+            f"If that page is not the {args.name}, another program holds port {port}: stop it, or change the port in "
+            ".claude/launch.json."
+        )
         webbrowser.open(address)
         return 0
     program = shutil.which(command[0])
@@ -146,10 +151,17 @@ def main(argv=None):
         )
         return 1
     package = next((argument for argument in command if argument.startswith("likec4@")), None)
-    if args.name == "map" and package and not args.download and not downloaded(package):
-        print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
-        print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
-        return 2
+    if args.name == "map" and package and not args.download:
+        if not downloaded(package):
+            print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
+            print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
+            return 2
+        # Without a yes the start itself must not download either: npx gets --no-install instead of -y.
+        command = [
+            command[0],
+            "--no-install",
+            *(argument for argument in command[1:] if argument not in ("-y", "--yes")),
+        ]
 
     log = ROOT / ".pm" / "local" / LOG.format(name=args.name)
     process = start([program, *command[1:]], ROOT, log)

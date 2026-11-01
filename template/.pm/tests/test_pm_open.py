@@ -106,7 +106,8 @@ class OpenTest(unittest.TestCase):
         self.answers = [True]
         code, out = self.run_tool("board")
         self.assertEqual(code, 0)
-        self.assertIn("already open", out)
+        self.assertIn("Something already answers", out)
+        self.assertIn("another program holds port 6420", out)
         self.assertIn("http://127.0.0.1:6420", out)
         self.assertEqual(self.opened, ["http://127.0.0.1:6420"])
         self.assertEqual(self.runs, [])
@@ -203,7 +204,11 @@ class OpenTest(unittest.TestCase):
         code, _ = self.run_tool("map")
         self.assertEqual(code, 0)
         self.assertEqual(self.checks, [["/bin/npx", "--no-install", "likec4@1.60.0", "--version"]])
-        self.assertEqual(self.runs[0][0], ["/bin/npx", "-y", "likec4@1.60.0", "start", "--port", "5173"])
+        self.assertEqual(
+            self.runs[0][0],
+            ["/bin/npx", "--no-install", "likec4@1.60.0", "start", "--port", "5173"],
+            "without --download the start itself may not download, so -y becomes --no-install",
+        )
 
     def test_launch_file_wins_over_the_built_in_defaults(self):
         self.write_launch(
