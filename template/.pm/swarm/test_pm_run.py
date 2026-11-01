@@ -60,6 +60,11 @@ def finished():
     return "word " * 60 + "\n<!-- done -->\n"
 
 def status(agent):
+    if not agent["prompts"] and agent.get("prompt_rejected"):
+        return "idle"
+    if not agent["prompts"] and agent.get("startup_states"):
+        states = agent["startup_states"]
+        return states.pop(0) if len(states) > 1 else states[0]
     if not agent["prompts"] or agent["behaviour"] == "lost" and len(agent["prompts"]) == 1:
         return "idle"
     if agent["behaviour"] == "ask":
@@ -87,15 +92,26 @@ if cmd == ["tab", "create"]:
     reply({"type": "tab_created", "tab": {"tab_id": f"{ws['workspace_id']}:t{n}"}, "root_pane": {"pane_id": ws["panes"][-1]}})
 if cmd == ["agent", "start"]:
     name, behaviour = args[2], opt("--model")
+    if os.environ.get("FAKE_TRUST"):
+        state.setdefault("pane_screens", {})[opt("--pane")] = "Do you trust the contents of this project?"
+        if os.environ["FAKE_TRUST"] == "read_error":
+            state["pane_screens"][opt("--pane")] = {"error": "read failed"}
+        fail("agent_blocked", "agent blocked during startup")
     if behaviour == "nostart":
         fail("agent_not_ready", "pi did not become ready")
-    state["agents"][name] = {"pane": opt("--pane"), "behaviour": behaviour, "argv": args, "prompts": [], "prompted": 0}
+    if os.environ.get("FAKE_TRUST_AFTER_START"):
+        state.setdefault("pane_screens", {})[opt("--pane")] = "Do you trust the contents of this project?"
+    state["agents"][name] = {"pane": opt("--pane"), "behaviour": behaviour, "argv": args, "prompts": [], "prompted": 0,
+                             "startup_states": json.loads(os.environ.get("FAKE_START_STATES", "[]"))}
     reply({"type": "agent_started", "agent": {"name": name, "agent_status": "idle"}})
 if cmd == ["agent", "prompt"]:
     name, text = args[2], args[3]
     agent = state["agents"].get(name)
     if not agent:
         fail("agent_not_found", name)
+    if os.environ.get("FAKE_PROMPT_ERROR") and not agent.get("prompt_rejected"):
+        agent["prompt_rejected"] = True
+        fail("prompt_failed", "agent did not accept the prompt")
     agent["prompts"].append(text)
     agent["prompted"] = time.time()
     found = re.search(r"output file is (.+?)\. Create", text)
@@ -164,6 +180,13 @@ if cmd == ["agent", "get"]:
     if not os.environ.get("FAKE_NO_SEQ"):
         info["completion_seq"] = agent.get("completion_seq", 0)
     reply({"type": "agent_info", "agent": info})
+if cmd == ["pane", "read"]:
+    screen = state.get("pane_screens", {}).get(args[2], "")
+    if isinstance(screen, dict):
+        fail("read_failed", screen["error"])
+    STATE.write_text(json.dumps(state))
+    sys.stdout.write(screen)
+    sys.exit(0)
 if cmd == ["pane", "close"]:
     if os.environ.get("FAKE_STOP_ERROR"):
         fail("server_timeout", "close timed out")
@@ -199,6 +222,7 @@ class PmRunFixture:
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.run_dir = self.tmp / "run"
         self.run_dir.mkdir()
+        (self.tmp / "brief.md").write_text("A worker brief.\n", encoding="utf-8")
         repo_for_in_process_runs(self, self.tmp)
         fake = self.tmp / "fake_herdr.py"
         fake.write_text(FAKE_HERDR, encoding="utf-8")
@@ -360,6 +384,207 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the menu")
         self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
 
+    def test_missing_brief_is_checked_again_before_a_retry(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("previous attempt's output", encoding="utf-8")
+        (self.tmp / "brief.md").unlink()
+        run, job = pm_run.Run(self.run_dir), self.job("a", "ok")
+        state = {"a": {"state": "pending", "attempts": [{"started": 0}]}}
+        with patch.object(run, "launch") as launch:
+            run.tick([job], state, {})
+        launch.assert_not_called()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertEqual(len(state["a"]["attempts"]), 1)
+        self.assertEqual(out.read_text(encoding="utf-8"), "previous attempt's output")
+        self.assertFalse(out.with_name("a.attempt1.md").exists())
+
+    def test_first_prompt_waits_for_ready_agent_state(self):
+        self.env["FAKE_START_STATES"] = json.dumps(["starting", "working", "ready"])
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        calls = self.herdr_state()["calls"]
+        first_prompt = next(i for i, c in enumerate(calls) if c[:2] == ["agent", "prompt"])
+        self.assertEqual(sum(c[:2] == ["agent", "get"] for c in calls[:first_prompt]), 3)
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["seq0"], 0)
+
+    def test_no_agent_state_uses_the_fixed_wait(self):
+        run = pm_run.Run(self.run_dir)
+        attempt = {"name": "worker"}
+        with patch.object(run, "status_of", return_value="unknown"), patch.object(
+            pm_run.time, "sleep"
+        ) as sleep, patch.object(pm_run, "SETUP_S", 2):
+            self.assertTrue(run.wait_ready(attempt))
+        sleep.assert_called_once_with(2)
+
+    def test_a_query_timeout_at_the_deadline_does_not_fall_back_to_prompting(self):
+        run = pm_run.Run(self.run_dir)
+        attempt = {"name": "worker"}
+        with patch.object(run, "status_of", return_value="unknown"), patch.object(pm_run, "READY_S", 1), patch.object(
+            pm_run.time, "monotonic", side_effect=[0, 0, 1]
+        ):
+            self.assertFalse(run.wait_ready(attempt))
+        self.assertIn("not ready", attempt["launch_error"])
+
+    def test_not_ready_at_the_ceiling_does_not_receive_a_brief(self):
+        self.env.update(FAKE_START_STATES=json.dumps(["working"]), PM_RUN_READY_S="0.2", PM_RUN_MAX_TRIES="1")
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "failed")
+        self.assertIn("not ready", state["attempts"][0]["why"])
+        calls = self.herdr_state()["calls"]
+        self.assertFalse(any(c[:2] == ["agent", "prompt"] for c in calls))
+
+    def test_agy_trust_keeps_previous_attempt_output_once(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("first attempt output", encoding="utf-8")
+        run, job = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy")
+        state = {"a": {"state": "pending", "attempts": [{"started": 0}]}}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            self.assertEqual((out.parent / "a.attempt1.md").read_text(encoding="utf-8"), "first attempt output")
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual(len(state["a"]["attempts"]), 2)
+        self.assertFalse((out.parent / "a.attempt1-2.md").exists())
+
+    def test_agy_trust_does_not_count_old_output_as_a_new_attempt_each_tick(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("earlier report", encoding="utf-8")
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertEqual((out.parent / "a.kept.md").read_text(encoding="utf-8"), "earlier report")
+        self.assertFalse((out.parent / "a.kept-2.md").exists())
+
+    def test_agy_folder_trust_waits_without_tries_then_starts_after_answer(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        env = {**self.env, "FAKE_TRUST": "1"}
+        with patch.dict(os.environ, env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "pending")
+            self.assertEqual(state["a"]["attempts"], [], "a trust screen must not use an attempt")
+            pane = state["a"]["trust_wait"]["pane"]
+            self.assertIn(f"agy asks to trust {self.tmp}", run.log_path.read_text(encoding="utf-8"))
+            with patch("builtins.print") as printed:
+                run.status([job], state)
+            self.assertIn(f"waiting for blocked agy pane {pane}", str(printed.call_args_list))
+            run.save(state)
+            state = run.load("receipts.json", {})  # restarting the scheduler must keep the same wait
+            for _ in range(3):
+                run.tick([job], state, {})
+            self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+            self.assertEqual(run.log_path.read_text(encoding="utf-8").count("agy asks to trust"), 1)
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = {"error": "read failed"}
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["attempts"], [], "a failed pane read is not an answer")
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = "Trust accepted. Type a message."
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            os.environ.pop("FAKE_TRUST")
+            with patch.object(run, "first_run", return_value=False):
+                run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "started")
+            self.assertEqual(len(state["a"]["attempts"]), 1)
+            self.assertEqual(state["a"]["attempts"][0]["name"], self.a1)
+            calls = self.herdr_state()["calls"]
+            self.assertIn(["pane", "close", pane], calls)
+            self.assertEqual(sum(c[:2] == ["agent", "prompt"] for c in calls), 1)
+            self.assertNotIn("RETRY a", run.log_path.read_text(encoding="utf-8"))
+
+    def test_deleting_a_job_waiting_on_folder_trust_leaves_and_names_its_pane(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            run.tick([], state, {})
+        self.assertEqual(state["a"]["state"], "removed")
+        self.assertIn(f"Herdr pane {pane}", run.log_path.read_text(encoding="utf-8"))
+        self.assertNotIn(["pane", "close", pane], self.herdr_state()["calls"])
+
+    def test_stop_closes_an_agy_trust_pane_without_counting_a_try(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            run.tick([{**job, "stop": True}], state, {})
+        self.assertEqual(state["a"]["state"], "stopped")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn(["pane", "close", pane], self.herdr_state()["calls"])
+
+    def test_agy_trust_screen_after_successful_start_also_waits_without_a_try(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        env = {**self.env, "FAKE_TRUST_AFTER_START": "1", "FAKE_START_STATES": '["blocked"]'}
+        with patch.dict(os.environ, env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "first_run", return_value=False), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "pending")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn("agy asks to trust", run.log_path.read_text(encoding="utf-8"))
+        self.assertFalse(any(c[:2] == ["agent", "prompt"] for c in self.herdr_state()["calls"]))
+
+    def test_agy_trust_close_failure_does_not_start_a_second_worker(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "1"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            herdr = self.herdr_state()
+            herdr["pane_screens"][state["a"]["trust_wait"]["pane"]] = "Trust accepted"
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            with patch.object(run, "stop", return_value=False):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertFalse(state["a"]["trust_stopped_confirmed"])
+        self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+
+    def test_agy_blocked_start_with_unreadable_pane_is_not_retried_blindly(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        with patch.dict(os.environ, {**self.env, "FAKE_TRUST": "read_error"}), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            for _ in range(3):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "pending")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+        self.assertIn("could not read", run.log_path.read_text(encoding="utf-8"))
+
     def test_writes_lets_the_worker_write_more_than_its_output(self):
         self.jobs(self.job("a", "ok", writes=["site/", "notes/x.md"]))
         self.run_pm()
@@ -376,6 +601,44 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(lines), 2, "LAUNCH and the start and done lines are routine")
         self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
         self.assertRegex(lines[1], r" run ARTIFACT b ")
+
+    def test_status_tally_counts_shared_failures_in_order_and_ignores_other_words(self):
+        failures = self.tmp / ".pm" / "local" / "failures.log"
+        failures.parent.mkdir(parents=True)
+        failures.write_text(
+            "2026-11-01 00:00:00 run-a PROMPT a: sent again\n"
+            "2026-11-01 00:00:01 run-b WAITING b: answer PROMPT here\n"
+            "2026-11-01 00:00:02 run-b PROMPT b: sent again\n"
+            "2026-11-01 00:00:03 run-a RETRY c: later\n"
+            "2026-11-01 00:00:04 run-b WAITING c: answer here\n"
+            "2026-11-01 00:00:05 run-b LAUNCH d: routine\n"
+            "bad line PROMPT d: not a failure-log record\n",
+            encoding="utf-8",
+        )
+        self.jobs(self.job("a", "ok"))
+        status = self.run_pm("--status")
+        self.assertNotIn("failures:", status.stdout)
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failures: PROMPT=2, WAITING=2, RETRY=1", result.stdout)
+        self.assertEqual(result.stdout.count("failures:"), 1)
+        self.assertNotIn("LAUNCH=", result.stdout)
+        self.assertFalse(self.fake_state.exists())
+
+    def test_status_tally_reports_an_unreadable_log_without_stopping(self):
+        run = pm_run.Run(self.run_dir)
+        with patch.object(Path, "open", side_effect=PermissionError("access denied")), patch(
+            "builtins.print"
+        ) as printed:
+            run.failure_tally()
+        self.assertIn("could not read", str(printed.call_args_list))
+        self.assertIn("--status --tally", str(printed.call_args_list))
+
+    def test_status_tally_with_no_failure_log_says_none(self):
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("failures: none", result.stdout)
+        self.assertFalse((self.tmp / ".pm" / "local" / "failures.log").exists())
 
     def test_a_held_failure_log_never_stops_the_logging_loop(self):
         run = pm_run.Run(self.run_dir)
@@ -412,6 +675,37 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("RETRY a", result.stdout)
         self.assertEqual(state["b"]["state"], "blocked")
         self.assertEqual(self.herdr_state()["agents"], {}, "the worker's pane is still closed")
+
+    def test_missing_brief_fails_before_launch_and_blocks_dependants(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("old output", encoding="utf-8")
+        self.jobs(self.job("a", "ok", briefs=["brief.md", "missing.md"]), self.job("b", "ok", after=["a"]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertEqual(state["a"]["attempts"], [])
+        self.assertIn("brief not found: missing.md", state["a"]["why"])
+        self.assertEqual(state["b"]["state"], "blocked")
+        self.assertFalse(self.fake_state.exists(), "Herdr must not be called")
+        self.assertEqual(out.read_text(encoding="utf-8"), "old output")
+        self.assertFalse(out.with_name("a.kept.md").exists())
+        self.assertIn("brief not found: missing.md", self.run_pm("--status").stdout)
+
+    def test_missing_brief_with_json_escapes_explains_backslashes(self):
+        # A JSON writer used single backslashes, so \\r, \\n and \\b became control characters.
+        bad_path = json.loads(r'"C:\run\new\brief.md"')
+        self.jobs(self.job("a", "ok", briefs=[bad_path]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "failed")
+        self.assertEqual(state["attempts"], [])
+        self.assertIn(r"brief not found: C:\run\new\brief.md", state["why"])
+        self.assertIn(r"a backslash in jobs.json was read as an escape: write \\ or /", state["why"])
+        self.assertNotRegex(state["why"], r"[\x00-\x1f\x7f-\x9f]")
+        self.assertFalse(self.fake_state.exists())
 
     def test_jobs_file_with_a_byte_order_mark_is_read(self):
         (self.run_dir / "jobs.json").write_text(json.dumps([self.job("a", "ok")]), encoding="utf-8-sig")
@@ -566,6 +860,21 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         calls = self.herdr_state()["calls"]
         first_prompt = next(i for i, c in enumerate(calls) if c[:2] == ["agent", "prompt"])
         self.assertEqual(calls[first_prompt - 1][:2], ["agent", "get"])
+
+    def test_failed_initial_prompt_is_retried_in_the_same_session_without_a_new_attempt(self):
+        self.env["FAKE_PROMPT_ERROR"] = "1"
+        self.jobs(self.job("a", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()["a"]
+        self.assertEqual(state["state"], "verified")
+        self.assertEqual(len(state["attempts"]), 1)
+        calls = self.herdr_state()["calls"]
+        self.assertEqual(sum(c[:2] == ["agent", "start"] for c in calls), 1)
+        prompts = [c[3] for c in calls if c[:2] == ["agent", "prompt"]]
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(prompts[0], prompts[1])
+        self.assertIn("PROMPT a", result.stdout)
 
     def test_lost_brief_behind_a_used_up_quota_is_not_resent(self):
         screen = "> Read the brief file(s) brief.md\n  API Error: 429 usage limit reached for cx/gpt-6-astra\n"
@@ -1028,6 +1337,90 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(waiting), 3, "one line per question, not per tick, the later questions too")
         self.assertIn("question 3 in this session", waiting[-1])
         self.assertEqual(state["a"]["state"], "started")
+
+    def test_agy_permission_questions_wait_once_past_the_hard_limit_and_resume_after_answer(self):
+        questions = (
+            "Allow access to this file?",
+            "Run this command?",
+            "Requesting permission for: read report.md",
+        )
+        for question in questions:
+            with self.subTest(question=question):
+                run, _, attempt, state = self.settled_worker(screen=question)
+                attempt["pane"] = "w1:p7"
+                job = self.job("a", "nothing", harness="agy")
+                with patch.dict(os.environ, self.env), patch.object(
+                    pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+                ), patch.object(run, "status_of", return_value="done"), patch.object(
+                    pm_run, "QUIET_S", 0
+                ), patch.object(pm_run, "HARD_S", 1):
+                    for now in (1100, 1200, 1300, 1400):
+                        with patch.object(pm_run.time, "time", return_value=now):
+                            run.tick([job], state, {})
+                    self.assertEqual(state["a"]["state"], "started")
+                    self.assertNotIn("nudges", attempt)
+                    self.assertEqual(len(self.herdr_state()["agents"]["worker"]["prompts"]), 1)
+                    herdr = self.herdr_state()
+                    self.fake_state.write_text(json.dumps({**herdr, "reads": [{"error": "read failed"}]}))
+                    with patch.object(pm_run.time, "time", return_value=1400):
+                        run.tick([job], state, {})
+                    self.assertEqual(state["a"]["state"], "started", "a failed read is not an answer")
+                    waiting = run.log_path.read_text(encoding="utf-8")
+                    self.assertEqual(waiting.count("WAITING a"), 1)
+                    self.assertIn("w1:p7", waiting)
+                    with patch("builtins.print") as printed:
+                        run.status([job], state)
+                    self.assertIn("waiting for an answer in pane w1:p7", str(printed.call_args_list))
+                    herdr = self.herdr_state()
+                    self.fake_state.write_text(
+                        json.dumps({**herdr, "reads": ["Answer accepted. Working on the task."]})
+                    )
+                    with patch.object(pm_run.time, "time", return_value=1401):
+                        run.tick([job], state, {})
+                    self.assertNotIn("asking", attempt)
+                    self.assertEqual(len(self.herdr_state()["agents"]["worker"]["prompts"]), 2)
+                run.log_path.unlink()
+
+    def test_agy_new_permission_target_is_logged_even_if_answers_fall_between_ticks(self):
+        run, _, attempt, state = self.settled_worker(screen="Requesting permission for: read first.md")
+        job = self.job("a", "nothing", harness="agy")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"):
+            run.tick([job], state, {})
+            herdr = self.herdr_state()
+            self.fake_state.write_text(json.dumps({**herdr, "reads": ["Requesting permission for: read second.md"]}))
+            run.tick([job], state, {})
+            run.tick([job], state, {})
+        self.assertEqual(run.log_path.read_text(encoding="utf-8").count("WAITING a"), 2)
+        self.assertEqual(attempt["asks"], 2)
+        self.assertEqual(state["a"]["state"], "started")
+
+    def test_agy_permission_detection_uses_last_lines(self):
+        run, _, attempt, state = self.settled_worker(screen="Allow access to this file?\n" + "new output\n" * 11)
+        job = self.job("a", "nothing", harness="agy")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"), patch.object(
+            pm_run.time, "time", return_value=1100
+        ), patch.object(pm_run, "QUIET_S", 0):
+            run.tick([job], state, {})
+        self.assertEqual(attempt["nudges"], 1, "an old permission question is not a current one")
+
+    def test_agy_permission_question_waits_even_with_a_completed_artifact(self):
+        run, _, attempt, state = self.settled_worker(screen="Allow access to this file?")
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir(exist_ok=True)
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(run, "status_of", return_value="done"), patch.object(
+            run, "stop", return_value=True
+        ) as stop, patch.object(pm_run, "SETTLE_S", 0):
+            run.tick([self.job("a", "nothing", harness="agy")], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        self.assertTrue(attempt["asking"])
+        stop.assert_not_called()
 
     def test_limit_banner_with_a_reset_time_is_a_used_up_quota(self):
         run, log, attempt, state = self.settled_worker("500", "You've hit your limit · resets 3am (Europe/Istanbul)\n")
@@ -1574,6 +1967,13 @@ class HerdrSafetyTest(unittest.TestCase):
         for code, expected in (("agent_not_found", None), ("server_timeout", "unknown"), ("other", "unknown")):
             with self.subTest(code=code), patch.object(pm_run, "herdr", return_value={"error": {"code": code}}):
                 self.assertEqual(run.status_of({"name": "worker"}), expected)
+
+    def test_stop_does_not_confirm_a_failed_pane_close_even_if_agent_is_gone(self):
+        run = pm_run.Run(".")
+        with patch.object(pm_run, "herdr", return_value={"error": {"code": "timeout"}}), patch.object(
+            run, "status_of", return_value=None
+        ):
+            self.assertFalse(run.stop({"name": "worker", "pane": "p1"}))
 
     def test_stop_does_not_confirm_a_query_error(self):
         with patch.object(pm_run, "herdr", return_value={"error": {"code": "timeout"}}), patch.object(
