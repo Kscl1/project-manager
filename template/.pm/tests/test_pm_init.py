@@ -196,6 +196,18 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(edited.read_text(encoding="utf-8"), before)
         self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
 
+    def test_an_install_into_a_checkout_with_autocrlf_leaves_no_crlf_noise(self):
+        # Git for Windows often sets core.autocrlf=true; every file pm_init writes says eol=lf, or "git add" warns.
+        subprocess.run([GIT, "config", "core.autocrlf", "true"], cwd=self.root, check=True)
+        self.assertEqual(self.run_init().returncode, 0)
+
+        added = subprocess.run(
+            [GIT, "add", "-A"], cwd=self.root, capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.assertNotIn("LF will be replaced by CRLF", added.stderr + added.stdout)
+
     def test_a_clone_with_autocrlf_reports_no_skill_as_edited(self):
         # Git for Windows often sets core.autocrlf=true; the manifest hashes bytes, so CRLF copies looked edited.
         self.assertEqual(self.run_init().returncode, 0)

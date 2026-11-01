@@ -57,10 +57,17 @@ GITIGNORE = [".pm/local/", ".pm-report.md", ".worktrees/", "__pycache__/"]
 # ripgrep skips hidden folders, so a plain search misses decisions, tasks and worklogs. .pm/local/ is named again
 # because ripgrep reads .gitignore only inside a git repository.
 IGNORE = ["!.pm/", ".pm/local/"]
-# LF everywhere in the package: the hook is a shell script and breaks with CRLF on Windows.
+# LF everywhere the installer writes: a hook is a shell script and breaks with CRLF on Windows, and a CRLF copy of a
+# package file looks edited next to the manifest's hash. Git is told so for each file pm_init writes, the root files
+# included, or "git add" warns about every one of them in a project with core.autocrlf=true.
 GITATTRIBUTES = [
     ".pm/** text eol=lf",
     ".agents/skills/pm-*/** text eol=lf",
+    ".claude/** text eol=lf",
+    ".gitignore text eol=lf",
+    ".gitattributes text eol=lf",
+    ".ignore text eol=lf",
+    ".mcp.json text eol=lf",
     "AGENTS.md text eol=lf",
     "CLAUDE.md text eol=lf",
     "backlog.config.yml text eol=lf",
