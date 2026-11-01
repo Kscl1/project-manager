@@ -42,6 +42,7 @@ WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-ta
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
+NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
 # task files use it.
 NOTHING_NEEDED = {"none", "nothing", "yok", "-", "?", "n/a"}
@@ -142,7 +143,7 @@ def closed_lines(tasks):
     done.sort(key=lambda task: (task["updated"][:16].replace("T", " "), task_order(task)), reverse=True)
     lines = []
     for task in done[:CLOSED_SHOWN]:
-        lines.append(f"- {task['id']} · {task['title']} ({local_day(task['updated']) or '?'})")
+        lines.append(f"- {task['id']} · {task['title']} ({local_day(task['updated']) or NOT_SET})")
         first, rest = task["summary"][0], task["summary"][1:]
         lines.append(f"  {shorten(first, 300)}")
         lines.extend(f"  {shorten(line, 200)}" for line in rest if SUMMARY_LINE.match(line))
@@ -665,13 +666,18 @@ def asks_something(value):
     return bool(value) and value.split()[0].strip(".,;:").lower() not in NOTHING_NEEDED
 
 
+def shown(value):
+    """A live-block value in plain words: a missing or empty line reads `not set`, never `?`."""
+    return NOT_SET if value is None or value == "?" else value
+
+
 def brief_task_lines(tasks):
     """Each open task with its next step, and its blocker or owner ask only when there is one."""
     lines = []
     for task in tasks:
         live = task["live"]
         lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
-        lines.append(f"  Next: {live['Next'] if live['Next'] is not None else '?'}")
+        lines.append(f"  Next: {shown(live['Next'])}")
         lines.extend(f"  {name}: {live[name]}" for name in ("Blocker", "Needs owner") if asks_something(live[name]))
     return lines
 
@@ -682,8 +688,7 @@ def full_task_lines(tasks):
     for task in tasks:
         lines.append(f"- {task['id']} · {task['title']} [{task['status']}]")
         for name in LIVE_FIELDS:
-            value = task["live"][name]
-            lines.append(f"  {name}: {value if value is not None else '?'}")
+            lines.append(f"  {name}: {shown(task['live'][name])}")
         for worker in task["live"]["Worker"]:
             lines.append(f"  Worker: {worker}")
     return lines

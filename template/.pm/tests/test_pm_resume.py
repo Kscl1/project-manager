@@ -827,7 +827,7 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("- ⚠️ Orphan worktree: .worktrees/orphan", section)
         self.assertNotIn("Pending report", section)
 
-    def test_missing_live_fields_show_question_mark(self):
+    def test_missing_live_fields_read_not_set(self):
         self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1.2", "Package B: resume summary", "Active", notes="Next: Run tests")
 
@@ -836,9 +836,10 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = result.stdout
         self.assertIn("Next: Run tests", out)
-        self.assertIn("Evidence: ?", out)
-        self.assertIn("Blocker: ?", out)
-        self.assertIn("Needs owner: ?", out)
+        self.assertIn("Evidence: not set", out)
+        self.assertIn("Blocker: not set", out)
+        self.assertIn("Needs owner: not set", out)
+        self.assertNotIn(": ?", out, "a question mark reads as an error to a beginner")
 
     def test_malformed_task_file_does_not_crash(self):
         self.commit_subjects(["setup"])
