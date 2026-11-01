@@ -2,7 +2,7 @@
 
 You talk to your AI coding assistant in plain words; it keeps your project's tasks, decisions and notes as files in your project, so the next session continues where you stopped.
 
-You do not learn a new tool: it uses files and programs you already have. Your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
+You do not have to learn a new tool: it uses files and programs you already have. Your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
 
 ## What you need
 
@@ -58,6 +58,8 @@ git clone --branch v0.1.0-alpha.6 https://github.com/Kscl1/project-manager.git
 cd project-manager
 python -m venv tools/setup/.venv
 ```
+
+The last line makes a private folder for this tool's Python libraries.
 
 Windows PowerShell:
 

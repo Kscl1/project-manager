@@ -25,7 +25,7 @@ project-manager keeps **tasks, decisions and working rules next to your code**. 
 
 Words such as task, Epic, board or MCP server: the [glossary](glossary.md) explains each in one sentence.
 
-It is not a new coding agent, a hosted project tracker or a framework for your application. It combines existing open tools with Markdown records and Python checks. You can read the records in an editor, review their changes in Git and take them with you when you switch agents.
+It is not a new coding agent, a hosted project tracker, or a set of rules for how your application should be written. It combines existing open tools with Markdown records and Python checks. You can read the records in an editor, review their changes in Git and take them with you when you switch agents.
 
 ## Who is it for?
 
