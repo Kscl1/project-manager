@@ -100,6 +100,11 @@ def rel(path):
     return path.relative_to(ROOT).as_posix()
 
 
+def plural(count, word):
+    """A number with its counted word: `1 problem`, `2 problems`."""
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
 def git(*args):
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
@@ -1006,7 +1011,10 @@ def main():
     for problem in problems:
         print(problem)
     bad_files = len({p.split(":")[0] for p in problems})
-    print(f"\n{len(problems)} problems in {bad_files} files" if problems else "No problems found")
+    if problems:
+        print(f"\n{plural(len(problems), 'problem')} in {plural(bad_files, 'file')}")
+    else:
+        print("No problems found")
     return 1 if problems else 0
 
 

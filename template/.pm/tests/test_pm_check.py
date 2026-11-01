@@ -1249,6 +1249,24 @@ class AuditOutcomesTest(RepoTestCase):
                 self.assert_problem("exactly one non-empty 'Audit report:' line")
 
 
+class SummaryLineTest(RepoTestCase):
+    """The closing line counts problems and files in plain words."""
+
+    def test_one_problem_in_one_file(self):
+        self.write("docs/bad.md", "[gone](missing.md)\n")
+
+        result = self.run_check()
+
+        self.assertIn("\n1 problem in 1 file", result.stdout)
+
+    def test_two_problems_in_one_file(self):
+        self.write("docs/bad.md", "[gone](missing.md)\n\n[also](gone.md)\n")
+
+        result = self.run_check()
+
+        self.assertIn("\n2 problems in 1 file", result.stdout)
+
+
 class HelpTest(RepoTestCase):
     def test_help_names_every_mode_and_exits_zero(self):
         result = self.run_check("--help")
