@@ -1332,10 +1332,29 @@ class WriteIndexMessageTest(RepoTestCase):
 
         result = self.run_check("--write-index")
 
-        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
         self.assertIn("is not saved as UTF-8", result.stderr)
         self.assertNotIn("Traceback", result.stderr + result.stdout)
         self.assertEqual(log.read_bytes(), "# Kararlar\n\nŞifre\n".encode("cp1254"))
+
+    def test_a_partial_write_reports_what_was_written_but_exits_one(self):
+        self.git_init()
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        page = self.write_bytes("docs/README.md", "# Belgeler\n\nŞifre\n".encode("cp1254"))
+        before = page.read_bytes()
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Wrote the decision index in .pm/decisions.md (1 decision)", result.stdout)
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("docs/README.md is not saved as UTF-8", result.stderr)
+        self.assertIn("[D-01](decisions/D-01.md)", (self.root / ".pm/decisions.md").read_text(encoding="utf-8"))
+        self.assertEqual(page.read_bytes(), before)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
 
 
 class WindowsEncodingTest(RepoTestCase):

@@ -1128,7 +1128,7 @@ def main():
         elif not any(result is None for result in results):
             print("Nothing to write: no decision files and no catalogue markers")
         report_bad_encodings(file=sys.stderr)
-        return 1 if BAD_ENCODINGS else 0
+        return 1 if BAD_ENCODINGS or any(result is None for result in results) else 0
 
     # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
     # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
