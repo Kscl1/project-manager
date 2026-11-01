@@ -86,8 +86,11 @@ RECORD = Path(".pm") / "local" / "setup.json"  # in the project: what setup did 
 
 def load(path=BOM):
     """The [[item]] tables of bom.toml, in file order. Raises ValueError with a plain message on a bad entry."""
-    with open(path, "rb") as f:
-        items = tomllib.load(f).get("item", [])
+    try:
+        with open(path, "rb") as f:
+            items = tomllib.load(f).get("item", [])
+    except OSError as error:  # missing or unreadable: the TUI and the plain output say so instead of a traceback
+        raise ValueError(f"bom.toml could not be read: {error}") from error
     seen = set()
     for item in items:
         where = f"bom.toml item {item.get('id') or item.get('name') or '?'}"

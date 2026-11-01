@@ -237,6 +237,12 @@ class Load(unittest.TestCase):
         self.assertEqual(self.load_text(GOOD + 'folder = "~/x"\n')[0]["folder"], "~/x")
         self.assert_rejected(GOOD + "folder = 1\n", "folder is where")
 
+    def test_missing_file_is_a_plain_message(self):
+        missing = Path(tempfile.gettempdir()) / "no-such-folder" / "bom.toml"
+        with self.assertRaises(ValueError) as caught:
+            bom.load(missing)
+        self.assertIn("bom.toml could not be read", str(caught.exception))
+
 
 def item(item_id, layer="core", **extra):
     return {"id": item_id, "name": item_id.title(), "kind": "command", "layer": layer, "check": [item_id], **extra}
