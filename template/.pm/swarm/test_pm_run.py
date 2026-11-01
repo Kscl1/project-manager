@@ -1735,7 +1735,15 @@ USAGE = {
     "totalTokens": 115,
     "cost": {"input": 0.1, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.12},
 }
-USED_115 = {"input": 100, "output": 10, "cache_read": 5, "cache_write": 0, "total_tokens": 115, "cost_usd": 0.12}
+USED_115 = {
+    "input": 100,
+    "output": 10,
+    "cache_read": 5,
+    "cache_write": 0,
+    "total_tokens": 115,
+    "turns": 1,
+    "cost_usd": 0.12,
+}
 
 
 def log_stamp(seconds):
@@ -1785,8 +1793,27 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         )
         self.assertEqual(
             self.usage(),
-            {"input": 110, "output": 12, "cache_read": 5, "cache_write": 0, "total_tokens": 127, "cost_usd": None},
+            {
+                "input": 110,
+                "output": 12,
+                "cache_read": 5,
+                "cache_write": 0,
+                "total_tokens": 127,
+                "turns": 2,
+                "cost_usd": None,
+            },
         )
+
+    def test_turns_count_the_assistant_messages_summed_in_this_attempt(self):
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(900), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1200), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1300), "message": {"role": "toolResult"}},
+            )
+        )
+        self.assertEqual(self.usage()["turns"], 2, "one turn per assistant message inside this attempt; no tool result")
 
     def test_no_log_for_this_attempt_means_no_usage(self):
         self.assertIsNone(self.usage(), "no log is no evidence, not zero")
@@ -1820,16 +1847,29 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         self.assertIn("skipped 2 unreadable line(s)", said[0])
 
     def test_totals_add_the_attempts_of_two_jobs_and_leave_an_unknown_cost_unknown(self):
-        used = {"input": 1000, "output": 100, "cache_read": 0, "cache_write": 0, "total_tokens": 1100, "cost_usd": 0.25}
+        used = {
+            "input": 1000,
+            "output": 100,
+            "cache_read": 0,
+            "cache_write": 0,
+            "total_tokens": 1100,
+            "turns": 2,
+            "cost_usd": 0.25,
+        }
         jobs = [{"id": "a", "model": "cheap-a"}, {"id": "b", "model": "big-b"}]
         state = {
             "a": {"state": "verified", "attempts": [{"usage": used}, {"usage": {**used, "total_tokens": 900}}]},
-            "b": {"state": "failed", "attempts": [{"usage": {**used, "cost_usd": None}}]},
+            # An older receipt, written before turns were counted, says nothing about its turns.
+            "b": {"state": "failed", "attempts": [{"usage": {**used, "turns": None, "cost_usd": None}}]},
             "_herdr_workspace": "w1",
         }
         per_model, per_job = pm_run.usage_tally(jobs, state)
-        self.assertEqual(per_job["a"], {"tokens": 2000, "cost": 0.5, "known": True}, "both attempts were paid for")
-        self.assertEqual(per_job["b"], {"tokens": 1100, "cost": 0.0, "known": False})
+        self.assertEqual(
+            per_job["a"],
+            {"tokens": 2000, "turns": 4, "cost": 0.5, "known": True, "turns_known": True},
+            "both attempts were paid for",
+        )
+        self.assertEqual(per_job["b"], {"tokens": 1100, "turns": 0, "cost": 0.0, "known": False, "turns_known": False})
         self.assertEqual(sorted(per_model), ["big-b", "cheap-a"])
         with patch("builtins.print") as printed:
             pm_run.Run(self.run_dir).print_totals(per_model)

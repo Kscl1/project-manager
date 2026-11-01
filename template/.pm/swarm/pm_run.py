@@ -33,10 +33,11 @@ is copied to <stem>.kept<suffix> first, so a finished report is never lost to a 
 A brief that changes while its worker runs is logged as BRIEF-CHANGED when the job is judged, and the receipt keeps
 brief_changed: the report answers the brief the worker read, which may no longer be the job's.
 Each ended attempt keeps what it used: the attempt's `usage` holds "input", "output", "cache_read", "cache_write",
-"total_tokens" and "cost_usd", summed from the assistant messages the attempt's Pi session log wrote after the attempt
-started; a message without cost.total makes cost_usd null, and a log that is not found leaves usage out altogether (never
-a guess). Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job. `--status` shows
-tokens and cost per job, then one line per model and a grand total; the end of the loop prints the same totals.
+"total_tokens", "turns" (how many assistant messages were summed) and "cost_usd", summed from the assistant messages
+the attempt's Pi session log wrote after the attempt started; a message without cost.total makes cost_usd null, and a
+log that is not found leaves usage out altogether (never a guess). Claude Code's log is not read: it carries no cost and
+pm_run does not know the file for a job. `--status` shows tokens and cost per job, then one line per model and a grand
+total; the end of the loop prints the same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch every brief must exist as a file; a missing one fails the job without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
@@ -381,10 +382,10 @@ def short_cost(money):
 
 
 def usage_tally(jobs, state):
-    """Tokens and cost per model and per job id, over every attempt in the receipts.
+    """Tokens, turns and cost per model and per job id, over every attempt in the receipts.
 
-    A row's cost is unknown when any attempt that counted for it did not report one, so a partial sum is never
-    shown as the truth. A job that is no longer in jobs.json still counts: its attempts were paid for too.
+    A row's turns or cost are unknown when any attempt that counted for it did not report them, so a partial sum is
+    never shown as the truth. A job that is no longer in jobs.json still counts: its attempts were paid for too.
     """
     models = {job["id"]: job.get("model") for job in jobs}
     per_model, per_job = {}, {}
@@ -397,8 +398,12 @@ def usage_tally(jobs, state):
                 continue
             model = attempt.get("model") or models.get(jid) or "unknown model"
             for key, bucket in ((model, per_model), (jid, per_job)):
-                row = bucket.setdefault(key, {"tokens": 0, "cost": 0.0, "known": True})
+                row = bucket.setdefault(key, {"tokens": 0, "turns": 0, "cost": 0.0, "known": True, "turns_known": True})
                 row["tokens"] += usage.get("total_tokens") or 0
+                if usage.get("turns") is None:  # a receipt written before turns were counted
+                    row["turns_known"] = False
+                else:
+                    row["turns"] += usage["turns"]
                 if usage.get("cost_usd") is None:
                     row["known"] = False
                 else:
@@ -545,8 +550,9 @@ def usage_of(job, attempt, repo, log=None):
     """What this attempt's Pi session log says it used, or None when there is no log or nothing in it.
 
     Sums come from the assistant messages written after the attempt started, so a log that also holds earlier turns
-    counts only this one. cost_usd is null unless every message reported cost.total. A line that does not parse is
-    skipped and named once through `log`, never raised: reading the log must not break a run.
+    counts only this one; `turns` is how many of those messages were summed. cost_usd is null unless every message
+    reported cost.total. A line that does not parse is skipped and named once through `log`, never raised: reading the
+    log must not break a run.
     """
     found = pi_log(job, attempt, repo)
     if not found:
@@ -592,7 +598,7 @@ def usage_of(job, attempt, repo, log=None):
         return None
     if not totals_known:  # a message without the field: the parts still add up to what was used
         sums["total_tokens"] = sum(sums[name] for name, _ in keys)
-    return {**sums, "cost_usd": round(cost, 9) if cost_known else None}
+    return {**sums, "turns": counted, "cost_usd": round(cost, 9) if cost_known else None}
 
 
 class Run:
