@@ -388,6 +388,21 @@ class ResumeSummaryTest(unittest.TestCase):
         for absent in ("TASK-1", "TASK-5", "TASK-6"):
             self.assertNotIn(absent, section)
 
+    def test_recently_closed_shows_a_self_check_review_line(self):
+        self.commit_subjects(["setup"])
+        path = write_task(self.root, "TASK-1", "Self-checked", "Done")
+        text = path.read_text(encoding="utf-8").replace("labels: []", "labels: []\nupdated_date: '2025-06-04 09:00'")
+        text += (
+            "\n## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\nReview: lead self-check\n"
+            "Evidence: not shown here\n<!-- SECTION:FINAL_SUMMARY:END -->\n"
+        )
+        path.write_text(text, encoding="utf-8")
+
+        section = self.run_resume().stdout.split("## Recently closed tasks", 1)[1].split("\n## ", 1)[0]
+
+        self.assertIn("  Review: lead self-check", section)
+        self.assertNotIn("Evidence: not shown here", section)
+
     def commit_with(self, subject, body, day):
         (self.root / "history.txt").write_text(subject, encoding="utf-8")
         run_git(self.root, "add", "history.txt")

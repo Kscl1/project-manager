@@ -30,8 +30,9 @@ TASKS_DIR = ROOT / ".pm" / "backlog" / "tasks"
 CLOSED_DIRS = (ROOT / ".pm" / "backlog" / "completed", ROOT / ".pm" / "backlog" / "archive" / "tasks")
 CLOSED_SHOWN = 3  # a one-goal session writes no worklog, so the next one reads the last closing summaries
 # The closing-summary lines shown under the first line; the owner line carries the owner's name or the word Owner.
-# A name may start with a Turkish capital: records keep English keys in any project language.
-SUMMARY_LINE = re.compile(r"(?:[A-ZÇĞİÖŞÜ][\w'-]* said|Found|Next):")
+# A name may start with a Turkish capital: records keep English keys in any project language. `Review:` says a
+# close was self-checked, so the next session sees it.
+SUMMARY_LINE = re.compile(r"(?:[A-ZÇĞİÖŞÜ][\w'-]* said|Found|Next|Review):")
 DRAFTS_DIR = ROOT / ".pm" / "backlog" / "drafts"  # private work items (Backlog drafts); shown only when present
 ARCHIVED_DRAFTS_DIR = ROOT / ".pm" / "backlog" / "archive" / "drafts"  # archived drafts still record their commits
 WORKTREES_DIR = ROOT / ".worktrees"
