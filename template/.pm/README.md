@@ -10,7 +10,7 @@ The project's work system, installed inside its own repository. Start at the roo
 | Lanes, WIP, hierarchy | `board.md` |
 | Resume an interrupted session | `python .pm/tools/pm_board.py --resume`, then the active task |
 | What to do now | `python .pm/tools/pm_board.py --next` |
-| Project intent and Epic scope | `charter.md`, then `specs/<epic>/requirements.md` |
+| Project intent and Epic scope | `charter.md` if it exists, then `specs/<epic>/requirements.md` if it exists |
 | Roles and delegation | `roles/lead.md`, `roles/worker.md`, `templates/brief.md`, `templates/report.md`, `templates/doc-audit.md` |
 | Model assignment and design principles | `models.md`, `principles.md` |
 | Why a choice was made | `decisions/`, one file per decision; `decisions.md` is the index (cite IDs; do not copy decisions) |
