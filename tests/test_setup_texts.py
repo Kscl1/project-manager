@@ -55,6 +55,20 @@ class FixedTexts(unittest.TestCase):
         self.assertIn("## Lead only: teaching", agents)
         self.assertIn("hinted", agents)
 
+    def test_what_you_can_say_matches_the_phrases_the_lead_handles(self):
+        """The finish line promises phrases; the root AGENTS.md table must say what the lead does for each."""
+        agents = AGENTS.read_text(encoding="utf-8")
+        self.assertIn("## Lead only: talking to the user", agents)
+        en = re.search(r"^- EN: From now on you can just say: (.*)$", self.texts, re.M)
+        self.assertTrue(en, "the EN 'what you can say' line")
+        self.assertRegex(self.texts, r"(?m)^- TR: Bundan sonra şunları demen yeter: ")
+        promised = re.findall(r'"([^"]+)"', en.group(1))
+        table = [p for p in promised if p != "stop teaching"]
+        self.assertEqual(table, ["continue", "what next?", "show the board", "explain <word>"])
+        for phrase in table:
+            self.assertIn(f'"{phrase}', agents, phrase)
+        self.assertIn("pm_board.py --next", agents)
+
 
 if __name__ == "__main__":
     unittest.main()
