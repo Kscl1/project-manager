@@ -150,8 +150,9 @@ def main(argv=None):
             f"{INSTALL.get(command[0], 'install it, then run this command again.')} Nothing was started."
         )
         return 1
-    package = next((argument for argument in command if argument.startswith("likec4@")), None)
-    if args.name == "map" and package and not args.download:
+    if args.name == "map" and Path(command[0]).stem.lower() == "npx" and not args.download:
+        # Whatever the entry names (pinned or not), npx would fetch it: the first argument that is not a flag.
+        package = next((argument for argument in command[1:] if not argument.startswith("-")), "likec4")
         if not downloaded(package):
             print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
             print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
@@ -178,6 +179,14 @@ def main(argv=None):
             print("Read that file, then run this command again.")
             return 1
         time.sleep(POLL_SECONDS)
+    if process.poll() is not None:  # the port answers, but what this command started has quit: someone else answers
+        print(
+            f"Something answers at {address}, but the {args.name} I started stopped (exit code {process.returncode})."
+        )
+        print(
+            f"Another program may hold port {port}; the {args.name}'s output is in {log.relative_to(ROOT).as_posix()}."
+        )
+        return 1
     webbrowser.open(address)
     print(f"The {args.name} is open at {address}")
     print(f"Command: {' '.join(command)}")

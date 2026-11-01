@@ -210,6 +210,24 @@ class OpenTest(unittest.TestCase):
             "without --download the start itself may not download, so -y becomes --no-install",
         )
 
+    def test_a_map_entry_without_a_pinned_version_still_asks_before_a_download(self):
+        self.write_launch(dict(MAP, runtimeArgs=["-y", "likec4", "start", "--port", "5173"]))
+        self.check_code = 1
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 2)
+        self.assertIn("--download", out)
+        self.assertEqual(self.checks, [["/bin/npx", "--no-install", "likec4", "--version"]])
+        self.assertEqual(self.runs, [])
+
+    def test_a_port_that_answers_after_the_started_server_quit_is_not_reported_open(self):
+        self.answers = [False, True]  # free before the start, then something answers
+        self.exit_code = 1  # but what was started has already quit
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("Another program may hold port 6420", out)
+        self.assertNotIn("is open", out)
+        self.assertEqual(self.opened, [])
+
     def test_launch_file_wins_over_the_built_in_defaults(self):
         self.write_launch(
             {
