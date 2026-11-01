@@ -1177,8 +1177,9 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(self.receipts()["a"]["attempts"][0]["stall"])
         with patch("builtins.print") as printed:
             run.status([job], state)
-        self.assertIn("stall=True", printed.call_args.args[0])
-        self.assertIn("loop=False", printed.call_args.args[0])
+        shown = "\n".join(call.args[0] for call in printed.call_args_list)  # the table, then the totals
+        self.assertIn("stall=True", shown)
+        self.assertIn("loop=False", shown)
 
     def test_first_observation_uses_prompted_as_silence_start(self):
         _, _, _, _, log = self.watch(["quiet"], [1300])
@@ -1424,6 +1425,41 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.usage(log=said.append)["input"], 200, "both readable messages still count")
         self.assertEqual(len(said), 1, "one line, however many lines were unreadable")
         self.assertIn("skipped 2 unreadable line(s)", said[0])
+
+    def test_totals_add_the_attempts_of_two_jobs_and_leave_an_unknown_cost_unknown(self):
+        used = {"input": 1000, "output": 100, "cache_read": 0, "cache_write": 0, "total_tokens": 1100, "cost_usd": 0.25}
+        jobs = [{"id": "a", "model": "cheap-a"}, {"id": "b", "model": "big-b"}]
+        state = {
+            "a": {"state": "verified", "attempts": [{"usage": used}, {"usage": {**used, "total_tokens": 900}}]},
+            "b": {"state": "failed", "attempts": [{"usage": {**used, "cost_usd": None}}]},
+            "_herdr_workspace": "w1",
+        }
+        per_model, per_job = pm_run.usage_tally(jobs, state)
+        self.assertEqual(per_job["a"], {"tokens": 2000, "cost": 0.5, "known": True}, "both attempts were paid for")
+        self.assertEqual(per_job["b"], {"tokens": 1100, "cost": 0.0, "known": False})
+        self.assertEqual(sorted(per_model), ["big-b", "cheap-a"])
+        with patch("builtins.print") as printed:
+            pm_run.Run(self.run_dir).print_totals(per_model)
+        text = "\n".join(call.args[0] for call in printed.call_args_list)
+        self.assertIn("cheap-a", text)
+        self.assertIn(f"{'cheap-a':<24}{'2.0k':>10}{'$0.50':>10}", text)
+        self.assertIn(f"{'big-b':<24}{'1.1k':>10}{'-':>10}", text, "one attempt without a cost leaves the row unknown")
+        self.assertIn(f"{'total':<24}{'3.1k':>10}{'-':>10}", text)
+
+    def test_status_shows_tokens_and_cost_for_a_job_and_the_same_total_per_model(self):
+        self.env["FAKE_PI_USAGE"] = json.dumps(USAGE)
+        self.jobs(self.job("a", "ok"))
+        done = self.run_pm()
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["usage"], USED_115)
+        self.assertRegex(done.stdout, r"(?m)^ok +115 +\$0\.12$", "the loop prints the totals once when it ends")
+        out = self.run_pm("--status").stdout
+        self.assertRegex(out, r"(?m)^a +verified +1 +115 +\$0\.12 +", "one row: tokens and money of the job")
+        self.assertRegex(out, r"(?m)^ok +115 +\$0\.12$")
+        self.assertRegex(out, r"(?m)^total +115 +\$0\.12$")
+
+    def test_status_shows_a_dash_when_no_attempt_reported_usage(self):
+        out = self.run_pm("--status").stdout
+        self.assertRegex(out, r"(?m)^total +- +-$")
 
 
 class LockedFileTest(unittest.TestCase):

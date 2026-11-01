@@ -35,7 +35,8 @@ brief_changed: the report answers the brief the worker read, which may no longer
 Each ended attempt keeps what it used: the attempt's `usage` holds "input", "output", "cache_read", "cache_write",
 "total_tokens" and "cost_usd", summed from the assistant messages the attempt's Pi session log wrote after the attempt
 started; a message without cost.total makes cost_usd null, and a log that is not found leaves usage out altogether (never
-a guess). Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+a guess). Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job. `--status` shows
+tokens and cost per job, then one line per model and a grand total; the end of the loop prints the same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -43,7 +44,7 @@ Each question pm_run sees is logged as WAITING, a later one in the same session 
 before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
-       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table and exit
+       python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and cost, then exit
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
@@ -347,6 +348,50 @@ def output_stamp(path):
         return f"{st.st_size}:{st.st_mtime_ns}"
     except OSError:
         return None
+
+
+def short_tokens(count):
+    """A token count as people read it: 950, 8.4k, 1.2M; "-" when no attempt reported one."""
+    if count is None:
+        return "-"
+    if count >= 1_000_000:
+        return f"{count / 1_000_000:.1f}M"
+    if count >= 1_000:
+        return f"{count / 1_000:.1f}k"
+    return str(int(count))
+
+
+def short_cost(money):
+    """Money as people read it: $0.04, or $0.0013 for a cheap job; "-" when nothing is known."""
+    if money is None:
+        return "-"
+    return f"${money:.4f}" if 0 < money < 0.01 else f"${money:.2f}"
+
+
+def usage_tally(jobs, state):
+    """Tokens and cost per model and per job id, over every attempt in the receipts.
+
+    A row's cost is unknown when any attempt that counted for it did not report one, so a partial sum is never
+    shown as the truth. A job that is no longer in jobs.json still counts: its attempts were paid for too.
+    """
+    models = {job["id"]: job.get("model") for job in jobs}
+    per_model, per_job = {}, {}
+    for jid, s in state.items():
+        if jid.startswith("_"):
+            continue
+        for attempt in s.get("attempts", []):
+            usage = attempt.get("usage")
+            if not isinstance(usage, dict):
+                continue
+            model = attempt.get("model") or models.get(jid) or "unknown model"
+            for key, bucket in ((model, per_model), (jid, per_job)):
+                row = bucket.setdefault(key, {"tokens": 0, "cost": 0.0, "known": True})
+                row["tokens"] += usage.get("total_tokens") or 0
+                if usage.get("cost_usd") is None:
+                    row["known"] = False
+                else:
+                    row["cost"] += usage["cost_usd"]
+    return per_model, per_job
 
 
 def session_log(attempt, now):
@@ -1043,7 +1088,16 @@ class Run:
         s["attempts"][-1]["why"] = why
 
     def status(self, jobs, state):
-        print(f"{'job':<16}{'state':<18}{'tries':>6}  last attempt")
+        per_model, per_job = usage_tally(jobs, state)
+
+        def used(jid):
+            """The job's tokens and cost as two printed columns; "-" where no attempt recorded them."""
+            row = per_job.get(jid)
+            tokens = short_tokens(row["tokens"] if row else None)
+            cost = short_cost(row["cost"] if row and row["known"] else None)
+            return f"{tokens:>10}{cost:>10}"
+
+        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'cost':>10}  last attempt")
         for job in jobs:
             s = state.get(job["id"], {"state": "pending", "attempts": []})
             a = s["attempts"][-1] if s["attempts"] else {}
@@ -1054,11 +1108,25 @@ class Run:
             )
             if a.get("wait_until", 0) > time.time():  # a running quota wait, as a clock time
                 detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
-            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}  {detail}")
+            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
             if not jid.startswith("_") and jid not in ids:
-                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}")
+                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
+        self.print_totals(per_model)
+
+    def print_totals(self, per_model):
+        """One line per model and the grand total; a cost any attempt did not report stays "-"."""
+        print(f"{'model':<24}{'tokens':>10}{'cost':>10}")
+        for model in sorted(per_model):
+            row = per_model[model]
+            print(
+                f"{model:<24}{short_tokens(row['tokens']):>10}{short_cost(row['cost'] if row['known'] else None):>10}"
+            )
+        tokens = sum(row["tokens"] for row in per_model.values())
+        known = per_model and all(row["known"] for row in per_model.values())
+        cost = sum(row["cost"] for row in per_model.values()) if known else None
+        print(f"{'total':<24}{short_tokens(tokens if per_model else None):>10}{short_cost(cost):>10}")
 
     def request_stop(self, jobs, state, job_id):
         """Mark a job "stop" in jobs.json; the running loop stops it on its next tick."""
@@ -1120,6 +1188,7 @@ def main():
         # the run ends only once its final receipts are on disk
         if saved and all(state.get(j["id"], {}).get("state") in ENDED for j in jobs):
             run.log("pm_run done: " + ", ".join(f"{j['id']}={state[j['id']]['state']}" for j in jobs))
+            run.print_totals(usage_tally(jobs, state)[0])
             unconfirmed = any(a.get("stopped_confirmed") is False for j in jobs for a in state[j["id"]]["attempts"])
             # a handed-over session stays open, and so does the pane of a job deleted while it ran
             handed = any(s["state"] in ("handed-over", "removed") for k, s in state.items() if not k.startswith("_"))
