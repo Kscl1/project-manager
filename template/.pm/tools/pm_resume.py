@@ -799,7 +799,8 @@ def main(brief=False):
 
 if __name__ == "__main__":
     if "--did" in sys.argv:
-        sys.exit(did_main(sys.argv[sys.argv.index("--did") + 1]))
+        index = sys.argv.index("--did") + 1
+        sys.exit(did_main(sys.argv[index] if index < len(sys.argv) else date.today().isoformat()))
     if "--commits" in sys.argv:
         sys.exit(commits_main(sys.argv[sys.argv.index("--commits") + 1]))
     sys.exit(main(brief="--brief" in sys.argv))

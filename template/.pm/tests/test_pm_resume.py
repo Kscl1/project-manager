@@ -428,6 +428,16 @@ class ResumeSummaryTest(unittest.TestCase):
             self.assertNotIn(absent, out)
         self.assertIn("- (no task closed on 2025-07-01)", self.run_tool("--did", "2025-07-01").stdout)
 
+    def test_did_without_a_day_reads_today_instead_of_crashing(self):
+        self.commit_subjects(["setup"])
+
+        result = self.run_tool("--did")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertIn("## Did", result.stdout)
+        self.assertIn(date.today().isoformat(), result.stdout)
+
     def write_closed_late(self):
         # 20:00 UTC on 4 June is 5 June at UTC+9, in the old form and in the 'T...Z' form Backlog writes since 1.55.
         for task_id, stamp in (("TASK-1", "2025-06-04T20:00:00Z"), ("TASK-2", "2025-06-04 20:00")):
