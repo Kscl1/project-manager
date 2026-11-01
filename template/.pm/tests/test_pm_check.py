@@ -916,6 +916,14 @@ class AcceptanceCriteriaTest(RepoTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_open_task_type_message_uses_the_real_id(self):
+        self.task(kind=None)
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("backlog task edit REQ-12 --type <epic|package|task|bug>", result.stdout)
+
     def test_a_task_without_an_id_keeps_the_placeholder(self):
         path = self.task()
         path.write_text(

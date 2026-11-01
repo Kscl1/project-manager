@@ -608,7 +608,9 @@ def check_open_task_type(name, lines):
     kind = next((value for _, value in fields.get("type", [])), "").strip("'\"")
     if status == "Done" or kind:
         return []
-    return [f"{name}: open task without a type\n    → backlog task edit <id> --type <epic|package|task|bug>"]
+    return [
+        f"{name}: open task without a type\n    → backlog task edit {task_id(fields)} --type <epic|package|task|bug>"
+    ]
 
 
 def acceptance_criteria(lines):
