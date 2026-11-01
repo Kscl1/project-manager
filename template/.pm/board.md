@@ -17,7 +17,7 @@ Ready → Active → Owner check → Done
 ```
 
 - **Ready:** acceptance criteria make the task actionable.
-- **Active:** someone is doing the work, including the review by a different model family (in a project with one model family, a fresh session of that model; lead card, step 7); its `Implementation Notes` has a current live block.
+- **Active:** someone is doing the work, including a review the lead card's step 7 asks for (by a different model family; in a project with one model family, a fresh session of that model); its `Implementation Notes` has a current live block.
 - **Owner check:** only a code change immediately before merge, or an action only the owner can do. Evidence-backed research or discussion goes straight to `Done`.
 - **Done:** final summary names evidence. Keep `Done` **last** in Backlog's configured status list; Backlog treats the last status as complete.
 

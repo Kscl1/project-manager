@@ -11,7 +11,7 @@ Which model fills which role in this project. This file names roles and what eac
 | worker (scoped, cheap) | Reliable tool calling on a small brief; low cost per run; follows the stop condition in the brief. |
 | worker (hard or subtle) | Deeper reasoning at a higher thinking level; used when a cheap worker failed or the leaf is tricky. |
 | researcher | Reads and cites sources; marks unverified claims. |
-| reviewer | Always a different family from the author; a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family). |
+| reviewer | Always a different family from the author; a new session of that model in a clean context when `.pm/models.md` has only one model family (the task says the review was same-family). Which changes need a reviewer: lead card, step 7. |
 | test-writer | Works in parallel with the coder; no family rule. |
 
 Which data may go to which provider is a separate project decision; record it as a decision in `.pm/decisions/` (index: `.pm/decisions.md`).
