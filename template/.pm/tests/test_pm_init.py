@@ -35,6 +35,14 @@ def move(src, dst, *args, **kwargs):
 
 pm_init.shutil.move = move
 """
+# A filesystem without POSIX modes (an exFAT stick, a network share) refuses the exec bit on the hooks.
+CHMOD_FAILS = """
+def boom(self, *args, **kwargs):
+    raise OSError(95, "Operation not supported")
+
+
+pm_init.Path.chmod = boom
+"""
 
 
 def _remove_readonly(func, path, _exc_info):
@@ -243,6 +251,19 @@ class PmInitTest(unittest.TestCase):
             check=True,
         )
         self.assertEqual(hooks_path.stdout.strip(), ".pm/hooks")
+
+    def test_a_filesystem_without_exec_bits_never_stops_the_install(self):
+        # An exFAT stick or a network share refuses chmod; the hooks are still staged as executable.
+        result = self.run_with(CHMOD_FAILS)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / ".pm" / "hooks" / "pre-commit").is_file())
+        staged = subprocess.run(
+            [GIT, "ls-files", "-s", ".pm/hooks"], cwd=self.root, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        self.assertEqual(len(staged), 2, staged)
+        for line in staged:
+            self.assertTrue(line.startswith("100755 "), line)
 
     def test_hooks_are_staged_as_executable(self):
         result = self.run_init()

@@ -922,7 +922,10 @@ def main(argv=None):
         # disk, so set it on the files and stage them with it; the first commit then records them as executable.
         for hook in hook_names():
             path = target / hook
-            path.chmod(path.stat().st_mode | 0o111)
+            try:
+                path.chmod(path.stat().st_mode | 0o111)
+            except OSError:
+                pass  # a filesystem without POSIX modes (an exFAT stick, a network share): git records the bit anyway
         names = hooks_to_stage(target)
         if names:
             run(["git", "add", "--chmod=+x", "--", *names], cwd=target)
