@@ -27,10 +27,10 @@ Yardımcı, sohbet kapanınca konuşulanların çoğunu unutur. project-manager 
 
 ## Kurulum
 
-Proje klasörünü yardımcıda aç. Adımlar [Yardımcınla kur](install-with-agent.md) sayfasında; onlardan sonra aynı sohbet kutusuna `/pm-setup` yaz.
-
-Bu metni, yani işi anlatan yazıyı, o sohbet kutusuna yapıştır:
+Proje klasörünü yardımcıda aç ve işi anlatan şu metni sohbet kutusuna yapıştır:
 
 ```text
 project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku, adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
 ```
+
+Yardımcı [Yardımcınla kur](install-with-agent.md) sayfasını izler. Bitince projeyi yeni bir sohbette aç ve oraya `/pm-setup` yaz (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).

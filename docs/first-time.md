@@ -27,10 +27,10 @@ The assistant forgets most of a chat when it closes. project-manager keeps the w
 
 ## Install
 
-Open your project folder in the assistant. The steps are in [Install with your agent](install-with-agent.md); after them, type `/pm-setup` in the same chat box.
-
-Paste this prompt, the text that asks for the work, into that chat box:
+Open your project folder in the assistant and paste this prompt, the text that asks for the work, into its chat box:
 
 ```text
 Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md, follow it step by step, ask me before every change, and stop where it says to stop.
 ```
+
+The assistant follows [Install with your agent](install-with-agent.md). When it is done, open the project in a new chat and type `/pm-setup` there (Pi: `/skill:pm-setup`, Codex: `$pm-setup`).
