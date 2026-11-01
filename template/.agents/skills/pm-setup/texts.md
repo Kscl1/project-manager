@@ -23,7 +23,7 @@ Show these as written, in the project language: do not shorten, reword or add to
 > Çalışırken proje yönetimi tarafını nasıl anlatayım? Bu seçim, seninle nasıl çalışacağımı belirler; istediğin an değiştirebilirsin.
 >
 > 1. **Kısa ipucu** (önerilen): İşi ben yaparım. Yeni bir şey ilk kez çıktığında, mesela ilk görevi açtığımda, ne olduğunu tek cümleyle söyler ve işe devam ederim. Aynı şeyi en fazla iki kez anlatırım. Proje yönetimini iş yaparken yavaş yavaş tanımak istiyorsan bunu seç.
-> 2. **Birlikte dene**: Yeni bir şey çıktığında adımı sana bırakır, yol gösteririm. Komut yazmazsın; örneğin bir görev açarken "bu iş bitince ne doğru olacak?" sorusunu sen cevaplarsın, ben kaydederim. Daha yavaş ilerler ama sistemin nasıl çalıştığını daha iyi görürsün. İşin mantığını gerçekten anlamak istiyorsan bunu seç.
+> 2. **Birlikte dene**: Yeni bir şey çıktığında adımı sana bırakır, yol gösteririm. Komut yazmazsın; örneğin bir görev açarken "bu iş bittiğinde ne değişmiş ya da çalışıyor olacak?" sorusunu sen cevaplarsın, ben kaydederim. Daha yavaş ilerler ama sistemin nasıl çalıştığını daha iyi görürsün. İşin mantığını gerçekten anlamak istiyorsan bunu seç.
 > 3. **Kapalı**: Açıklama yapmam, yalnız işi yaparım. Dosyalarında bir şeyi değiştirmeden önce yine sana sorarım. Görev, pano ve karar dosyası gibi şeyleri zaten biliyorsan bunu seç.
 >
 > 1, 2 ya da 3 yaz; cevap vermezsen 1 ile giderim. Kapalı'yı seçmezsen ilk işi birlikte yaparız, sistemi en hızlı böyle görürsün. İstediğin an "anlatmayı bırak", "X'i açıkla" ya da "X'i biliyorum" diyebilirsin.
@@ -35,33 +35,33 @@ Each comes after the action, as the last paragraph of the reply that did it.
 **task**: when the first task is created, after its ID.
 
 - EN: I opened a task for this (<ID>): one file that says what we are doing and what counts as done, so the next session continues from it, not from this chat.
-- TR: Bunun için bir görev açtım (<ID>): ne yaptığımızı ve neyin "bitti" sayılacağını yazan tek bir dosya; sonraki oturum bu sohbetten değil, oradan devam eder.
+- TR: Bunun için bir görev açtım (<ID>): ne yaptığımızı ve işin ne zaman bitmiş sayılacağını yazan tek bir dosya; sonraki oturum bu sohbetten değil, doğrudan o dosyadan devam eder.
 
 **board**: the first time two tasks exist, or the user asks what is left; not before.
 
 - EN: Every task sits on a board and moves through the columns Ready, Active and Done. `backlog browser` opens it if you want to look; keeping it current is my job.
-- TR: Her görev bir panoda durur ve Ready, Active, Done sütunları arasında ilerler. Bakmak istersen `backlog browser` açar; güncel tutmak benim işim.
+- TR: Her görev bir panoda durur ve Ready, Active, Done sütunları arasında ilerler. Bakmak istersen `backlog browser` komutu panoyu açar; güncel tutmak benim işim.
 
 **resume**: at the close of the first session, with the prompt for the next one.
 
 - EN: Next time, open this folder and say "continue". I read the task's `Next:` line and git first, not this chat, so nothing is lost.
-- TR: Bir dahaki sefere bu klasörü açıp "devam" demen yeter. Önce görevin `Next:` satırını ve git'i okurum, bu sohbeti değil; hiçbir şey kaybolmaz.
+- TR: Bir dahaki sefere bu klasörü açıp "devam" demen yeter. Bu sohbeti değil, önce görevin `Next:` satırını ve git durumunu okurum; böylece hiçbir şey kaybolmaz.
 
 ## The task moment in try-together mode
 
 Before the first task is created:
 
 - EN: We open a task for this: one file that says what we are doing and what counts as done. Give me one sentence: when this is done, what will be true? I open the task with it.
-- TR: Bu iş için bir görev açacağız: ne yaptığımızı ve neyin "bitti" sayılacağını yazan tek bir dosya. Sen tek cümle söyle: bu iş bitince ne doğru olacak? Görevi o cümleyle açarım.
+- TR: Bu iş için bir görev açacağız: ne yaptığımızı ve işin ne zaman bitmiş sayılacağını yazan tek bir dosya. Tek bir cümleyle söyle: bu iş bittiğinde ne değişmiş ya da çalışıyor olacak? Görevi o cümleyle açacağım.
 
 After it is created with that sentence as its acceptance criterion, show the ID and the line, then:
 
 - EN: This is your criterion. When the work is done, we check it against this and close the task.
-- TR: Bu senin ölçütün. Bitince buna bakıp görevi kapatırız.
+- TR: Bu senin kabul ölçütün. İş bitince sonucu buna göre kontrol edip görevi kapatacağız.
 
 ## When a step the user did becomes known
 
 - EN: You wrote the task's done-condition yourself, so I stop explaining tasks. Say "explain tasks" if you want it back.
-- TR: Görevin "bitti" ölçütünü sen yazdın; artık görevleri anlatmıyorum. İstersen "görevleri açıkla" de.
+- TR: Görevin bitiş ölçütünü kendin yazdın, bu yüzden artık görevlerin ne olduğunu anlatmayacağım. Tekrar anlatmamı istersen "görevleri açıkla" demen yeter.
 
 For another concept, the same sentence with that step and that concept.
