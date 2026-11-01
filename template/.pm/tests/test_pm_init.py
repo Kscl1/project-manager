@@ -491,6 +491,14 @@ class PmInitTest(unittest.TestCase):
         index = subprocess.run([GIT, "ls-files", "-s"], cwd=self.root, capture_output=True, text=True).stdout
         return files, index
 
+    def empty_folders(self):
+        """The folders under the project that hold no file, .git aside: what the summary calls empty folders."""
+        return {
+            p.relative_to(self.root).as_posix()
+            for p in self.root.rglob("*")
+            if p.is_dir() and ".git" not in p.relative_to(self.root).parts and not any(p.iterdir())
+        }
+
     def test_second_run_changes_nothing(self):
         self.assertEqual(self.run_init().returncode, 0)
         before = self.snapshot()
@@ -500,6 +508,18 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         self.assertEqual(self.snapshot(), before)
         self.assertNotIn("  write ", second.stdout)
+
+    def test_a_run_that_only_sets_git_says_so_and_counts_no_file(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        subprocess.run([GIT, "config", "--unset", "core.hooksPath"], cwd=self.root, check=True)
+        before = self.snapshot()
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.snapshot(), before, "a setting is not a file: nothing on disk changed")
+        self.assertIn("Set 1 git setting.\n", result.stdout)
+        self.assertNotIn("Nothing to change", result.stdout)
 
     def test_session_hooks_and_mcp_are_written(self):
         self.assertEqual(self.run_init().returncode, 0)
@@ -618,20 +638,52 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], f"Project: {self.root.resolve()}")
 
-    def test_a_real_install_prints_a_short_result_and_the_next_steps(self):
-        planned = self.run_init(self.root, "--check")
-        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
-        actions = [line.split()[0] for line in planned.stdout.splitlines() if line.startswith("  ")]
-        added = sum(1 for action in actions if action in ("copy", "write", "create"))
+    def test_a_real_install_counts_the_files_it_wrote(self):
+        before, folders_before = self.snapshot()[0], self.empty_folders()
 
         result = self.run_init()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        folders = self.empty_folders() - folders_before
+        self.assertGreater(len(written), 1, "a copied package folder is many files, not one plan line")
+        self.assertIn(f"Added {len(written)} files and {len(folders)} empty folders.", result.stdout)
+        self.assertIn("Set 2 git settings.", result.stdout)
         self.assertNotIn("Plan for", result.stdout, "the whole plan is what --check is for")
-        self.assertIn(f"Added {added} files.", result.stdout)
         self.assertIn("\nNext:", result.stdout)
         self.assertIn("run /pm-setup", result.stdout)
         self.assertIn("backlog browser", result.stdout)
+        # The number a beginner can check: the commit that follows holds exactly those files.
+        subprocess.run([GIT, "add", "-A"], cwd=self.root, check=True)
+        staged = subprocess.run([GIT, "diff", "--cached", "--name-only"], cwd=self.root, capture_output=True, text=True)
+        self.assertEqual(len(staged.stdout.split()), len(written))
+
+    def test_an_added_folder_counts_every_file_in_it(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        before = self.snapshot()[0]
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        written = set(self.snapshot()[0]) - set(before)
+        self.assertGreater(len(written), 1, "the map skill folder is several files")
+        self.assertIn(f"Added {len(written)} files.", result.stdout)
+
+    def test_an_upgrade_counts_the_files_it_replaces(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        tool = self.root / ".pm" / "tools" / "pm_check.py"
+        tool.write_text("old\n", encoding="utf-8")
+        before = self.snapshot()[0]
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        after = self.snapshot()[0]
+        # The backup copy in .pm/local/ is not a change to the project, so it is left out of the count.
+        changed = {name for name in after if not name.startswith(".pm/local/") and before.get(name) != after[name]}
+        self.assertEqual(changed, {".pm/tools/pm_check.py"})
+        self.assertIn("Changed 1 file.", result.stdout)
+        self.assertNotIn("Added ", result.stdout, "the manifest is the same, so nothing was added")
 
     def test_a_rerun_says_what_it_kept_of_the_users(self):
         self.assertEqual(self.run_init().returncode, 0)

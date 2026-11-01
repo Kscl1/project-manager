@@ -50,6 +50,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 PKG = Path(__file__).resolve().parent.parent  # the .pm/ folder this script belongs to
 PACKAGE = ["tools", "tests", "hooks", "roles", "templates"]  # refreshed by --upgrade
@@ -198,14 +199,28 @@ def package_parts(target, map_layer=False, swarm=False):
         yield skill, target / ".agents" / "skills" / skill.name, f".agents/skills/{skill.name}"
 
 
+def installed_parts(target):
+    """The (folder, part) pairs the manifest records where they are installed, skipping a part that is not there."""
+    return [(folder, part) for _, folder, part in package_parts(target) if folder.exists()]
+
+
+def manifest_lines(folders):
+    """Each manifest line for these (folder, part) pairs: a file's hash and its path in the project."""
+    return [
+        f"{sha256(folder / rel)}  {(Path(part) / rel).as_posix()}"
+        for folder, part in folders
+        for rel in sorted(files_in(folder), key=str)
+    ]
+
+
+def manifest_text(folders):
+    """The manifest write_manifest writes for these (folder, part) pairs, so a plan can tell whether it will change."""
+    return "\n".join(manifest_lines(folders)) + "\n"
+
+
 def write_manifest(target):
-    lines = []
-    for _, folder, part in package_parts(target):
-        if not folder.exists():
-            continue
-        for rel in sorted(files_in(folder), key=str):
-            lines.append(f"{sha256(folder / rel)}  {(Path(part) / rel).as_posix()}")
-    path, text = target / ".pm" / MANIFEST, "\n".join(lines) + "\n"
+    path, lines = target / ".pm" / MANIFEST, manifest_lines(installed_parts(target))
+    text = "\n".join(lines) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") == text:
         say("keep", path)
         return
@@ -716,24 +731,48 @@ def set_hooks_path(target):
     return is_repo(target) and not hook_conflicts(target) and not git_out(["config", "--get", "core.hooksPath"], target)
 
 
+class Change(NamedTuple):
+    """One line of the plan, with the real files it writes: the summary counts files, not plan lines."""
+
+    action: str
+    path: str  # relative to the project
+    note: str
+    files: int  # 0 for an empty folder and for a git setting, which are no file at all
+    added: bool  # the files are new, not files the project already had
+
+
+def file_count(action, path, files):
+    """(how many real files this line writes, whether they are new): a copied or replaced folder hands in its own
+    count, an empty folder and a git setting write none, and every other line writes the one file it names, unless
+    the project already had it."""
+    if files is None:
+        files = 1 if isinstance(path, Path) and action != "create" else 0
+    return files, not isinstance(path, Path) or not path.exists()
+
+
 def plan(target, args, conflicts):
-    """Every change the install makes, as (action, path relative to the project, note), before anything is written.
-    main() makes exactly these changes; the tests check that no file is written outside this list."""
-    entries, copies = [], 0
+    """Every change the install makes, as Change(action, path, note, files, added), before anything is written. The
+    file count is the one the summary prints, so a copied folder counts every file in it. main() makes exactly these
+    changes; the tests check that no file is written outside this list."""
+    entries, counts, after = [], {}, []
     for src, dst, part in package_parts(target, args.map, args.swarm):
-        if not dst.exists():
-            entries.append(("copy", dst, ""))
-        elif args.upgrade and not same_files(src, dst, part):
-            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
-        else:
+        same = dst.exists() and (not args.upgrade or same_files(src, dst, part))
+        after.append((dst if same else src, part))  # the copy the manifest reads once this run is done
+        if same:
             continue
-        copies += 1
+        if dst.exists():
+            entries.append(("upgrade", dst, "old copy to .pm/local/backup/"))
+            counts[dst] = sum(1 for _ in classify(src, dst, part, {}))  # the files a commit will show
+        else:
+            entries.append(("copy", dst, ""))
+            counts[dst] = len(files_in(src))
     for skill in shipped_skills(target, args.map):
         pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
         if not pointer.exists() or (args.upgrade and pointer.read_text(encoding="utf-8") != pointer_text(skill)):
             entries.append(("write", pointer, "points Claude Code to the skill"))
-    if copies or not (target / ".pm" / "VERSION").exists() or not (target / ".pm" / MANIFEST).exists():
-        entries.append(("write", target / ".pm" / MANIFEST, "what each package file looked like"))
+    recorded = target / ".pm" / MANIFEST
+    if not recorded.exists() or recorded.read_text(encoding="utf-8") != manifest_text(after):
+        entries.append(("write", recorded, "what each package file looked like"))
     for part in [*SEED, "decisions.md"]:
         if not (target / ".pm" / part).exists():
             entries.append(("write", target / ".pm" / part, ""))
@@ -766,7 +805,11 @@ def plan(target, args, conflicts):
         entries.append(("set", "git core.hooksPath", ".pm/hooks"))
     if is_repo(target) and not hook_conflicts(target) and hooks_to_stage(target):
         entries.append(("stage", "git index", "the .pm hooks as executable"))
-    return [(action, shown(target, path), note) for action, path, note in entries]
+    changes = []
+    for action, path, note in entries:
+        files, added = file_count(action, path, counts.get(path))
+        changes.append(Change(action, shown(target, path), note, files, added))
+    return changes
 
 
 def shown(target, path):
@@ -781,14 +824,32 @@ def counted(count, word):
     return f"{count} {word}{'' if count == 1 else 's'}"
 
 
+def phrase(count, word):
+    """'3 files', or nothing at all when the run has none of them."""
+    return counted(count, word) if count else ""
+
+
+def listed(parts):
+    """A short list as a person says it: 'a', 'a and b', 'a, b and c'."""
+    parts = [part for part in parts if part]
+    return parts[0] if len(parts) == 1 else f"{', '.join(parts[:-1])} and {parts[-1]}"
+
+
 def result_lines(target, entries, conflicts, merge):
     """The few lines a real install prints instead of the whole plan: what it added or changed, what it kept of the
-    user's, and where the rest waits. --check still prints the plan itself."""
-    added = sum(1 for action, _, _ in entries if action in {"copy", "write", "create"})
-    changed = sum(1 for action, _, _ in entries if action in {"upgrade", "append", "update", "set"})
-    lines = [f"Added {counted(added, 'file')}."] if added else []
+    user's, and where the rest waits. --check still prints the plan itself. The counts are files, not plan lines: a
+    copied folder counts every file in it, so the number is one a person can check on disk."""
+    added = sum(change.files for change in entries if change.added)
+    changed = sum(change.files for change in entries if not change.added)
+    folders = sum(1 for change in entries if change.action == "create")
+    settings = sum(1 for change in entries if not change.files and change.action in {"set", "stage"})
+    lines = []
+    if added or folders:
+        lines.append(f"Added {listed([phrase(added, 'file'), phrase(folders, 'empty folder')])}.")
     if changed:
         lines.append(f"Changed {counted(changed, 'file')}.")
+    if settings:
+        lines.append(f"Set {counted(settings, 'git setting')}.")
     if not lines:
         lines.append("Nothing to change: the package and your files are as they are.")
     kept = [name for name in dict.fromkeys([item for item, _ in conflicts] + YOURS) if (target / name).exists()]
@@ -860,8 +921,8 @@ def main(argv=None):
         # files. A real install prints a few lines at the end instead, so the next step is not buried.
         if args.check or (stops and not args.keep_existing):
             print(f"Plan for {target} ({len(entries)} change(s)):")
-            for entry in entries:
-                say(*entry)
+            for change in entries:
+                say(change.action, change.path, change.note)
             if conflicts:
                 print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
                 for item, why in conflicts:
