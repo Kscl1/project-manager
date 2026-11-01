@@ -534,10 +534,14 @@ def needs(command, system=None):
 
 
 def shell_args(command, system=None):
-    """The argument list that runs one bom.toml command line through the platform shell (DESIGN.md)."""
+    """The argument list that runs one bom.toml command line through the platform shell (DESIGN.md).
+
+    bash where it is installed, otherwise sh: Alpine and some NixOS setups have no bash, and an install line
+    that runs in neither says only "sh: not found".
+    """
     if (system or this_os()) == "windows":
         return ["powershell", "-NoProfile", "-Command", command]
-    return ["bash", "-c", command]
+    return ["bash" if shutil.which("bash") else "sh", "-c", command]
 
 
 def refresh_path():

@@ -431,7 +431,13 @@ class Running(unittest.TestCase):
         self.assertEqual(
             bom.shell_args("irm x | iex", "windows"), ["powershell", "-NoProfile", "-Command", "irm x | iex"]
         )
-        self.assertEqual(bom.shell_args("curl x | bash", "linux"), ["bash", "-c", "curl x | bash"])
+        with patch.object(bom.shutil, "which", return_value="/bin/bash"):
+            self.assertEqual(bom.shell_args("curl x | bash", "linux"), ["bash", "-c", "curl x | bash"])
+
+    def test_shell_falls_back_to_sh_where_bash_is_missing(self):
+        with patch.object(bom.shutil, "which", return_value=None):
+            self.assertEqual(bom.shell_args("curl x | bash", "linux"), ["sh", "-c", "curl x | bash"])
+            self.assertEqual(bom.needs("irm x | iex", "windows"), "powershell")  # Windows always runs PowerShell
 
     def test_outcome_from_exit_code_and_recheck(self):
         self.assertEqual(bom.outcome(0, row("Git", bom.OK, "2.54.0"))[0], "done")
