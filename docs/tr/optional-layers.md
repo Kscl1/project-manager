@@ -15,7 +15,7 @@ Katmanı kurulum ekranında işaretle ya da kurucu komutuna `--map` / `--swarm` 
 
 ## Map katmanı (isteğe bağlı)
 
-[LikeC4](https://likec4.dev/tooling/cli/), yazılım mimarinin modelini tarayıcıda gezebileceğin şemalara dönüştürür: proje klasöründe `npx likec4@1.60.0 start` komutuyla açılır. [MCP sunucusu](https://likec4.dev/tooling/mcp/) (MCP server, Model Context Protocol üzerinden ajanının veri sorabildiği küçük sunucu) sayesinde ajanın bu modeli okur; `pm-likec4-dsl` becerisi (skill, LikeC4'ün kendi `likec4-dsl` becerisinin v1.60.0 sürümünden kopyalanmış hâli) ise ajana şema dilinin yazım kurallarını öğretir. Kurulum ekranında Map'i işaretle ya da kurucu komutuna `--map` ekle. Projede zaten bir `.mcp.json` dosyası varsa (örneğin daha önce yalnızca çekirdek katman kurulduysa), sunucu doğrudan dosyana yazılmaz; `/pm-setup` sırasında eklenmek üzere listelenir.
+[LikeC4](https://likec4.dev/tooling/cli/), yazılım mimarinin modelini tarayıcıda gezebileceğin şemalara dönüştürür: proje klasöründe `npx likec4@1.60.0 start` komutuyla açılır. İlk harita önizlemesi, sabitlenmiş LikeC4 paketini indirebilir; ajanın bundan önce senden onay ister. [MCP sunucusu](https://likec4.dev/tooling/mcp/) (MCP server, Model Context Protocol üzerinden ajanının veri sorabildiği küçük sunucu) sayesinde ajanın bu modeli okur; `pm-likec4-dsl` becerisi (skill, LikeC4'ün kendi `likec4-dsl` becerisinin v1.60.0 sürümünden kopyalanmış hâli) ise ajana şema dilinin yazım kurallarını öğretir. Kurulum ekranında Map'i işaretle ya da kurucu komutuna `--map` ekle. Projede zaten bir `.mcp.json` dosyası varsa (örneğin daha önce yalnızca çekirdek katman kurulduysa), sunucu doğrudan dosyana yazılmaz; `/pm-setup` sırasında eklenmek üzere listelenir.
 
 ## Swarm katmanı (isteğe bağlı)
 

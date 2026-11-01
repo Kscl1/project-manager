@@ -15,7 +15,7 @@ Tick a layer in the setup screen, or add `--map` / `--swarm` to the installer co
 
 ## Map layer (optional)
 
-[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.60.0 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) (Model Context Protocol: a small server your agent can ask for data) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.60.0) teaches it the syntax; tick Map in the setup screen, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
+[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.60.0 start` in the project. The first map preview may download the pinned LikeC4 package; your assistant asks before that. Its [MCP server](https://likec4.dev/tooling/mcp/) (Model Context Protocol: a small server your agent can ask for data) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.60.0) teaches it the syntax; tick Map in the setup screen, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
 
 ## Swarm layer (optional)
 
