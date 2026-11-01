@@ -32,6 +32,10 @@ file that already exists when a job's first attempt starts (another run dir, or 
 is copied to <stem>.kept<suffix> first, so a finished report is never lost to a relaunch.
 A brief that changes while its worker runs is logged as BRIEF-CHANGED when the job is judged, and the receipt keeps
 brief_changed: the report answers the brief the worker read, which may no longer be the job's.
+Each ended attempt keeps what it used: the attempt's `usage` holds "input", "output", "cache_read", "cache_write",
+"total_tokens" and "cost_usd", summed from the assistant messages the attempt's Pi session log wrote after the attempt
+started; a message without cost.total makes cost_usd null, and a log that is not found leaves usage out altogether (never
+a guess). Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -391,15 +395,15 @@ def launch_prompt(job):
     return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also, helpers=helpers)
 
 
-def turn_end(job, attempt, repo):
-    """Read bounded head/tail samples of this repo's recent Pi sessions, then cache the matching path.
+def pi_log(job, attempt, repo):
+    """This attempt's Pi session log as (path, a head/tail sample of its entries), or None.
 
     --name is a session_info entry near the start. Only files created for this attempt count; names repeat
-    across runs. Large/missing/unreadable logs are diagnostic gaps, never proof that a worker stopped.
+    across runs. Large/missing/unreadable logs are diagnostic gaps, never proof that a worker stopped. The sample
+    is enough for the last turn and its error, not for a usage sum: `usage_of` reads the whole file.
     """
     if job.get("harness", "pi") != "pi":
-        return "session log not found (only Pi logs supported)"
-    attempt.update(stopReason=None, errorMessage=None)  # an earlier turn's error is no evidence for this one
+        return None
     root = Path(os.environ.get("PM_RUN_PI_SESSIONS", Path.home() / ".pi" / "agent" / "sessions"))
     folder = root / ("--" + re.sub(r"[/\\:]", "-", str(repo).lstrip("/\\")) + "--")
     try:
@@ -427,18 +431,98 @@ def turn_end(job, attempt, repo):
                 ):
                     continue
                 attempt["session_log"] = str(path)
-                messages = [e.get("message") for e in entries if e.get("type") == "message"]
-                last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
-                attempt["stopReason"] = last.get("stopReason")
-                attempt["errorMessage"] = last.get("errorMessage")
-                if last.get("stopReason") == "error":
-                    return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
-                return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+                return path, entries
             except (OSError, ValueError, TypeError):
                 continue
     except OSError:
         pass
-    return "session log not found for this attempt (bounded Pi log lookup)"
+    return None
+
+
+def turn_end(job, attempt, repo):
+    """The last assistant message of this attempt's Pi session log: its stop reason or provider error."""
+    if job.get("harness", "pi") != "pi":
+        return "session log not found (only Pi logs supported)"
+    attempt.update(stopReason=None, errorMessage=None)  # an earlier turn's error is no evidence for this one
+    found = pi_log(job, attempt, repo)
+    if not found:
+        return "session log not found for this attempt (bounded Pi log lookup)"
+    messages = [e.get("message") for e in found[1] if e.get("type") == "message"]
+    last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
+    attempt["stopReason"] = last.get("stopReason")
+    attempt["errorMessage"] = last.get("errorMessage")
+    if last.get("stopReason") == "error":
+        return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
+    return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+
+
+def log_time(entry):
+    """Epoch seconds of a Pi log line, from its own timestamp or its message's (ms); None when it has neither."""
+    stamp = entry.get("timestamp")
+    if isinstance(stamp, str):
+        try:
+            return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            pass
+    message = entry.get("message") if isinstance(entry.get("message"), dict) else {}
+    for value in (stamp, message.get("timestamp")):
+        if isinstance(value, (int, float)):
+            return value / 1000 if value > 1e11 else float(value)  # Pi keeps message times in milliseconds
+    return None
+
+
+def usage_of(job, attempt, repo, log=None):
+    """What this attempt's Pi session log says it used, or None when there is no log or nothing in it.
+
+    Sums come from the assistant messages written after the attempt started, so a log that also holds earlier turns
+    counts only this one. cost_usd is null unless every message reported cost.total. A line that does not parse is
+    skipped and named once through `log`, never raised: reading the log must not break a run.
+    """
+    found = pi_log(job, attempt, repo)
+    if not found:
+        return None
+    path = found[0]
+    keys = (("input", "input"), ("output", "output"), ("cache_read", "cacheRead"), ("cache_write", "cacheWrite"))
+    sums = {name: 0 for name, _ in keys}
+    sums["total_tokens"], totals_known, cost, cost_known, counted, skipped = 0, True, 0.0, True, 0, 0
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                except ValueError:
+                    if line.strip():
+                        skipped += 1
+                    continue
+                message = entry.get("message") if isinstance(entry, dict) else None
+                usage = message.get("usage") if isinstance(message, dict) else None
+                if not isinstance(usage, dict) or message.get("role") != "assistant":
+                    continue
+                written = log_time(entry)
+                if written is not None and written < attempt["started"]:
+                    continue
+                counted += 1
+                for name, key in keys:
+                    value = usage.get(key)
+                    if isinstance(value, (int, float)):
+                        sums[name] += value
+                total = usage.get("totalTokens")
+                totals_known = totals_known and isinstance(total, (int, float))
+                if isinstance(total, (int, float)):
+                    sums["total_tokens"] += total
+                part = usage.get("cost")
+                reported = part.get("total") if isinstance(part, dict) else None
+                cost_known = cost_known and isinstance(reported, (int, float))
+                cost += reported if isinstance(reported, (int, float)) else 0
+    except OSError:
+        return None
+    if skipped and log:
+        log(f"USAGE {job['id']}: skipped {skipped} unreadable line(s) in {path.name}; the rest was counted")
+    if not counted:
+        return None
+    if not totals_known:  # a message without the field: the parts still add up to what was used
+        sums["total_tokens"] = sum(sums[name] for name, _ in keys)
+    return {**sums, "cost_usd": round(cost, 9) if cost_known else None}
 
 
 class Run:
@@ -753,6 +837,7 @@ class Run:
                     if not a["stopped_confirmed"]:
                         self.fail_or_retry(job, s, "artifact present but the worker could not be confirmed stopped")
                         continue
+                    self.count_usage(job, a)
                     rc, verify_why = run_verify(job, self.repo)
                     a["verify_rc"] = rc
                     if rc is None:
@@ -839,12 +924,23 @@ class Run:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
         return state
 
+    def count_usage(self, job, attempt):
+        """Keep what the attempt's session log says it used; a log that cannot be read costs a log line, never a run."""
+        try:
+            usage = usage_of(job, attempt, self.repo, self.log)
+        except Exception as exc:  # noqa: BLE001 - reading usage must not break the loop that reads it
+            self.log(f"USAGE {job['id']}: not read ({type(exc).__name__}: {exc}); the run goes on")
+            return
+        if usage:
+            attempt["usage"] = usage
+
     def stop_on_request(self, job, s):
         """`--stop <job>` set "stop" in jobs.json: close a live worker's pane; a pending job never starts."""
         how = "it never started"
         if s["state"] == "started":
             a = s["attempts"][-1]
             a.update(stopped_confirmed=self.stop(a), ended=time.time(), why="stopped on request")
+            self.count_usage(job, a)
             how = f"Herdr pane {a.get('pane')} closed" if a["stopped_confirmed"] else "its pane could not be closed"
         s["state"] = "stopped"
         self.log(f"STOPPED {job['id']}: on request, {how}; its successors are blocked")
@@ -927,6 +1023,7 @@ class Run:
         a = s["attempts"][-1]
         s["state"] = "handed-over"
         a.update(why=why, ended=time.time())
+        self.count_usage(job, a)
         self.log(f"HANDED-OVER {job['id']}: {why}; the session stays open in Herdr pane {a.get('pane')}, no relaunch")
 
     def fail_or_retry(self, job, s, why):
@@ -934,6 +1031,7 @@ class Run:
         if "stopped_confirmed" not in a:
             a["stopped_confirmed"] = self.stop(a)
         a["ended"] = time.time()
+        self.count_usage(job, a)
         if not a["stopped_confirmed"]:
             why += "; worker could not be confirmed stopped; no retry"
         if not a["stopped_confirmed"] or len(s["attempts"]) >= MAX_TRIES:

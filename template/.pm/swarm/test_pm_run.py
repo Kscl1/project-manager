@@ -17,6 +17,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -114,6 +115,23 @@ if cmd == ["agent", "prompt"]:
             {"type": "message", "message": {"role": "toolResult", "content": "not an assistant"}},
         ]
         (sessions / (name + ".jsonl")).write_text("\n".join(json.dumps(e) for e in entries) + '\n{"partial":', encoding="utf-8")
+    if os.environ.get("FAKE_PI_USAGE"):
+        # Two assistant messages with the same usage: one from an hour before this attempt, one from it. Only the
+        # second counts, so a doubled sum shows up at once.
+        sessions = Path(os.environ["PM_RUN_PI_SESSIONS"]) / ("--" + re.sub(r"[/\\:]", "-", str(REPO).lstrip("/\\")) + "--")
+        sessions.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        def stamp(when):
+            return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(when)) + ".%03dZ" % (int(when * 1000) % 1000)
+        entries = [
+            {"type": "session", "timestamp": stamp(now), "cwd": str(REPO)},
+            {"type": "session_info", "name": name},
+            {"type": "message", "timestamp": stamp(now - 3600),
+             "message": {"role": "assistant", "stopReason": "stop", "usage": json.loads(os.environ["FAKE_PI_USAGE"])}},
+            {"type": "message", "timestamp": stamp(now),
+             "message": {"role": "assistant", "stopReason": "stop", "usage": json.loads(os.environ["FAKE_PI_USAGE"])}},
+        ]
+        (sessions / (name + ".jsonl")).write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
     if agent["behaviour"] != "lost" or len(agent["prompts"]) > 1:
         agent["completion_seq"] = agent.get("completion_seq", 0) + 1
     if agent["behaviour"] == "ok" or agent["behaviour"] == "lost" and len(agent["prompts"]) > 1:
@@ -1312,6 +1330,100 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
                 run.tick([job], state, {})
         self.assertEqual(len(self.herdr_state()["calls"]), before)
         self.assertIn("STALLED", log)
+
+
+# A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
+USAGE = {
+    "input": 100,
+    "output": 10,
+    "cacheRead": 5,
+    "cacheWrite": 0,
+    "totalTokens": 115,
+    "cost": {"input": 0.1, "output": 0.02, "cacheRead": 0, "cacheWrite": 0, "total": 0.12},
+}
+USED_115 = {"input": 100, "output": 10, "cache_read": 5, "cache_write": 0, "total_tokens": 115, "cost_usd": 0.12}
+
+
+def log_stamp(seconds):
+    """A Pi log timestamp for a fixed epoch second, written as Pi writes it."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(seconds))
+
+
+class UsageTest(PmRunFixture, unittest.TestCase):
+    """What an attempt used, read from its Pi session log; a log is evidence, never a guess."""
+
+    def folder(self):
+        folder = self.tmp / "sessions" / ("--" + re.sub(r"[/\\:]", "-", str(self.tmp).lstrip("/\\")) + "--")
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+
+    def write_log(self, *entries, name="worker"):
+        path = self.folder() / f"{name}.jsonl"
+        path.write_text("\n".join(json.dumps(e) for e in entries) + "\n", encoding="utf-8")
+        return path
+
+    def usage(self, started=1000, name="worker", log=None):
+        job = {"id": "a", "model": "cheap-a", "out": "out/a.md"}
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "sessions")}):
+            return pm_run.usage_of(job, {"name": name, "started": started}, self.tmp, log)
+
+    def session(self, *messages, started=1000):
+        """A session header for an attempt that started at `started`, then the given message entries."""
+        header = {"type": "session", "timestamp": log_stamp(started + 1)}
+        return [header, {"type": "session_info", "name": "worker"}, *messages]
+
+    def test_only_messages_written_after_the_attempt_started_count(self):
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(900), "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}},
+            )
+        )
+        self.assertEqual(self.usage(), USED_115)
+
+    def test_a_message_without_a_cost_counts_its_tokens_and_leaves_the_money_null(self):
+        no_cost = {"input": 10, "output": 2, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 12}
+        self.write_log(
+            *self.session(
+                {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+                {"type": "message", "message": {"role": "assistant", "usage": no_cost}},
+            )
+        )
+        self.assertEqual(
+            self.usage(),
+            {"input": 110, "output": 12, "cache_read": 5, "cache_write": 0, "total_tokens": 127, "cost_usd": None},
+        )
+
+    def test_no_log_for_this_attempt_means_no_usage(self):
+        self.assertIsNone(self.usage(), "no log is no evidence, not zero")
+        self.write_log(
+            *self.session(
+                {"type": "message", "timestamp": log_stamp(1100), "message": {"role": "assistant", "usage": USAGE}}
+            )
+        )
+        self.assertIsNone(self.usage(started=2000), "a session that began before the attempt is not this attempt's")
+        self.assertEqual(self.usage(), USED_115, "the attempt that did start it reads it")
+
+    def test_a_finished_run_without_a_session_log_keeps_no_usage(self):
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        self.assertNotIn("usage", self.receipts()["a"]["attempts"][0])
+
+    def test_an_unreadable_line_is_skipped_and_named_once(self):
+        entries = self.session(
+            {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+            {"type": "message", "message": {"role": "assistant", "usage": USAGE}},
+        )
+        broken = '\n{"message": cut\n{"type": "message", cut again\n'
+        (self.folder() / "worker.jsonl").write_text(
+            "\n".join(json.dumps(e) for e in entries[:2]) + broken + "\n".join(json.dumps(e) for e in entries[2:]),
+            encoding="utf-8",
+        )
+        said = []
+        self.assertEqual(self.usage(log=said.append)["input"], 200, "both readable messages still count")
+        self.assertEqual(len(said), 1, "one line, however many lines were unreadable")
+        self.assertIn("skipped 2 unreadable line(s)", said[0])
 
 
 class LockedFileTest(unittest.TestCase):
