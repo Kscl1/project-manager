@@ -48,6 +48,7 @@ python .pm/tools/pm_board.py --next      # the one task to work on now
 python .pm/tools/pm_board.py --resume
 python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
+python .pm/tools/pm_open.py board       # the board in your browser, started once; 'map' opens the map
 backlog browser
 python .pm/tools/pm_check.py --stale
 python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
