@@ -401,7 +401,11 @@ class RecordTypeTest(RepoTestCase):
 
     def test_unknown_type_is_reported_but_backlog_tasks_are_skipped(self):
         self.write("docs/odd.md", '---\ntype: memo\ntitle: "Odd"\n---\n\n# Odd\n')
-        self.write(".pm/backlog/tasks/task-1 - X.md", "---\nid: TASK-1\ntitle: X\nstatus: Ready\ntype: epic\n---\n")
+        self.write(
+            ".pm/backlog/tasks/task-1 - X.md",
+            "---\nid: TASK-1\ntitle: X\nstatus: Ready\ntype: epic\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n",
+        )
 
         out = self.run_check().stdout
 
@@ -849,6 +853,80 @@ class DoneTaskTest(RepoTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
 
+class AcceptanceCriteriaTest(RepoTestCase):
+    """An open task says what will be true when it is done, before any work starts."""
+
+    def task(
+        self,
+        status="Ready",
+        body="## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 the check catches it\n<!-- AC:END -->\n",
+        ident="REQ-12",
+        kind="task",
+    ):
+        parts = [
+            "---",
+            f"id: {ident}",
+            "title: Demo",
+            f"status: {status}",
+            *([] if kind is None else [f"type: {kind}"]),
+            "---",
+            "",
+            body,
+        ]
+        return self.write(".pm/backlog/tasks/task-1 - Demo.md", "\n".join(parts))
+
+    def test_open_task_without_acceptance_criteria_reported_with_its_id(self):
+        self.task(body="## Acceptance Criteria\n<!-- AC:BEGIN -->\n<!-- AC:END -->\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria (what will be true when it is done?)", result.stdout)
+        self.assertIn('backlog task edit REQ-12 --ac "<what will be true>"', result.stdout)
+
+    def test_open_task_without_an_acceptance_criteria_section_reported(self):
+        self.task(body="## Description\n\nThe work to do.\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria", result.stdout)
+
+    def test_criteria_outside_the_markers_do_not_count(self):
+        self.task(body="## Acceptance Criteria\n- [ ] #1 above the marker\n<!-- AC:BEGIN -->\n<!-- AC:END -->\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria", result.stdout)
+
+    def test_open_task_with_a_checked_or_unchecked_criterion_passes(self):
+        for item in ("- [ ] #1 ready", "- [x] #1 done"):
+            with self.subTest(item=item):
+                self.task(body=f"## Acceptance Criteria\n<!-- AC:BEGIN -->\n{item}\n<!-- AC:END -->\n")
+
+                result = self.run_check()
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_done_task_without_acceptance_criteria_passes(self):
+        self.task("Done", body="## Description\n\nShipped.\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_a_task_without_an_id_keeps_the_placeholder(self):
+        path = self.task()
+        path.write_text(
+            "---\ntitle: Demo\nstatus: Ready\ntype: task\n---\n\n## Description\n\nWork.\n", encoding="utf-8"
+        )
+
+        result = self.run_check()
+
+        self.assertIn('backlog task edit <id> --ac "<what will be true>"', result.stdout)
+
+
 ENGLISH_NOTES = (
     "The worker writes the report after the check passes, and the lead reads it before the merge. "
     "When a check fails, the lead sends the evidence back to the worker with the command that failed. "
@@ -871,7 +949,8 @@ class ProjectLanguageTest(RepoTestCase):
         return self.write(
             relpath,
             "---\nid: TASK-1\ntitle: Demo\nstatus: Active\ntype: task\n---\n\n## Description\n\n"
-            f"{notes}\n\n## Definition of Done\n<!-- DOD:BEGIN -->\n{dod}\n<!-- DOD:END -->\n\n"
+            f"{notes}\n\n## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n\n"
+            f"## Definition of Done\n<!-- DOD:BEGIN -->\n{dod}\n<!-- DOD:END -->\n\n"
             "## Implementation Notes\n\nNext: Needs owner: none\n",
         )
 
@@ -922,13 +1001,17 @@ class AuditOutcomesTest(RepoTestCase):
             notes = f"Audit report: {self.REPORT}\n\nAudit outcomes:\n" + table
         return self.write(
             directory + "/audit.md",
-            f"---\nid: REQ-1\nstatus: {status}\ntype: task\n---\n\n## Implementation Notes\n\n" + notes + tail,
+            f"---\nid: REQ-1\nstatus: {status}\ntype: task\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [x] #1 the outcomes are checked\n<!-- AC:END -->\n\n"
+            "## Implementation Notes\n\n" + notes + tail,
         )
 
     def target(self, task_id="REQ-2", notes=FOLLOW_UP, directory=".pm/backlog/tasks"):
         return self.write(
             directory + "/unrelated-filename.md",
-            f"---\nid: '{task_id}'\nstatus: Ready\ntype: task\nassignee: []\n---\n\n## Implementation Notes\n{notes}",
+            f"---\nid: '{task_id}'\nstatus: Ready\ntype: task\nassignee: []\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n\n"
+            f"## Implementation Notes\n{notes}",
         )
 
     def assert_problem(self, message):

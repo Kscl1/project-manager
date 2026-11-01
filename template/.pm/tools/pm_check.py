@@ -6,8 +6,9 @@ Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
-an open task keeps its live Next and Evidence lines short, so the resume summary stays short,
-and an owner ask that offers lettered options (`Needs owner: pick A or B`) has each option written out.
+an open task names at least one acceptance criterion, keeps its live Next and Evidence lines short,
+so the resume summary stays short, and an owner ask that offers lettered options
+(`Needs owner: pick A or B`) has each option written out.
 A file path written in backticks must exist: in a living doc any repo path, in a decision in force a path into
 a repository next to this one (`../repo/file`). A deleted file passes when its deleting commit is named beside it.
 A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
@@ -90,6 +91,7 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TASK_DIRS = (".pm/backlog/tasks/", "backlog/tasks/")
 DRAFT_DIRS = (".pm/backlog/drafts/", "backlog/drafts/")
 UNCHECKED = re.compile(r"^\s*-\s+\[ \]")
+ACCEPTANCE_ITEM = re.compile(r"^\s*-\s+\[[ xX]\]")  # an acceptance criterion, checked or not
 
 
 def rel(path):
@@ -452,6 +454,7 @@ def check_file(path, decisions):
         problems += check_done_task(name, lines)
     if name.startswith(TASK_DIRS):
         problems += check_open_task_type(name, lines)
+        problems += check_open_task_acceptance(name, lines)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_live_lines(name, lines)
         problems += check_owner_options(name, lines)
@@ -593,6 +596,11 @@ def check_done_task(name, lines):
     return problems
 
 
+def task_id(fields):
+    """A task's own ID from its frontmatter, or `<id>` when the frontmatter carries none."""
+    return next((value for _, value in fields.get("id", [])), "").strip("'\"") or "<id>"
+
+
 def check_open_task_type(name, lines):
     """An open task carries a type (epic, package, task or bug)."""
     fields = read_frontmatter(lines)
@@ -601,6 +609,30 @@ def check_open_task_type(name, lines):
     if status == "Done" or kind:
         return []
     return [f"{name}: open task without a type\n    → backlog task edit <id> --type <epic|package|task|bug>"]
+
+
+def acceptance_criteria(lines):
+    """The `- [ ]` and `- [x]` items under `## Acceptance Criteria`, between its markers when it has them."""
+    body = sections(lines).get("Acceptance Criteria", [])
+    begin = next((index for index, line in enumerate(body) if line.strip() == "<!-- AC:BEGIN -->"), None)
+    if begin is None:
+        return [line for line in body if ACCEPTANCE_ITEM.match(line)]
+    end = next(
+        (index for index, line in enumerate(body[begin + 1 :], begin + 1) if line.strip() == "<!-- AC:END -->"), None
+    )
+    return [line for line in body[begin + 1 : end] if ACCEPTANCE_ITEM.match(line)]
+
+
+def check_open_task_acceptance(name, lines):
+    """An open task says what will be true when it is done, before any work starts."""
+    fields = read_frontmatter(lines)
+    status = next((value for _, value in fields.get("status", [])), "").strip("'\"")
+    if status == "Done" or acceptance_criteria(lines):
+        return []
+    return [
+        f"{name}: task has no acceptance criteria (what will be true when it is done?)\n"
+        f'    → backlog task edit {task_id(fields)} --ac "<what will be true>"'
+    ]
 
 
 def check_live_lines(name, lines):
