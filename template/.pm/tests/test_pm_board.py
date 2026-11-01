@@ -573,6 +573,17 @@ class FrontmatterAndExitCodeTest(PmBoardTestCase):
         self.assertNotIn("no_frontmatter", result.stdout)
         self.assertNotIn("Meeting Notes", result.stdout)
 
+    def test_a_task_saved_in_a_windows_code_page_is_still_listed(self):
+        """One cp1254 byte (0xfd, a Turkish dotless i) must not make the board drop the whole task."""
+        (self.tasks_dir / "task-1.md").write_bytes(
+            b"---\nid: TASK-1\ntitle: I\xfdlk ad\xfdm\xfd\nstatus: Ready\nlabels: []\n---\n"
+        )
+
+        result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("- TASK-1 · I", result.stdout)
+
     def test_empty_tasks_directory_exits_0(self):
         """Empty DIR produces empty board with empty sections showing '- (none)'."""
         result = self.run_board("--tasks", str(self.tasks_dir), "--today", "2026-09-22")
@@ -663,6 +674,23 @@ class CommandLineInterfaceTest(PmBoardTestCase):
             "## Done\n- (none)\n"
         )
         self.assertEqual(result.stdout, expected)
+
+
+class StdoutGuardTest(PmBoardTestCase):
+    def test_main_prints_when_stdout_cannot_be_reconfigured(self):
+        """A replaced stdout without reconfigure (a test harness, a wrapped console) must not crash the board."""
+        import io
+        from unittest import mock
+
+        buffer = io.StringIO()
+        plain = type("Plain", (), {"encoding": "utf-8", "write": buffer.write, "flush": buffer.flush})()
+        argv = ["pm_board.py", "--tasks", str(self.tasks_dir), "--today", "2026-09-22"]
+
+        with mock.patch.object(sys, "stdout", plain), mock.patch.object(sys, "argv", argv):
+            code = pm_board.main()
+
+        self.assertEqual(code, 0)
+        self.assertIn("# Status board (2026-09-22)", buffer.getvalue())
 
 
 class NextCommandTest(PmBoardTestCase):

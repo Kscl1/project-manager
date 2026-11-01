@@ -137,7 +137,8 @@ def resume_tool():
 
 
 def read_task(path):
-    lines = path.read_text(encoding="utf-8-sig").splitlines()
+    # A task saved in a Windows code page must not crash the board: the odd byte reads as a replacement mark.
+    lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
     fields = read_frontmatter(lines)
     if fields is None:
         return None
@@ -370,7 +371,11 @@ def closed_done_ids(tasks_dir):
 
 
 def main():
-    sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except (OSError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="Print an English status board from Backlog tasks.")
     parser.add_argument("--tasks", default=None)
     parser.add_argument("--today", default=date.today().isoformat())
