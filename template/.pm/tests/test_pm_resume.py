@@ -576,6 +576,22 @@ class ResumeSummaryTest(unittest.TestCase):
     def held_section(self, out):
         return out.split("## Waiting and ageing work", 1)[1].split("\n## ", 1)[0]
 
+    def test_no_weekly_audit_warning_in_the_first_week_after_install(self):
+        self.commit_subjects(["setup"])
+        version = self.root / ".pm" / "VERSION"
+        version.write_text("0.1.0\n", encoding="utf-8")
+
+        self.assertNotIn("Weekly doc audit", self.run_resume().stdout)
+
+        old = (datetime.now() - timedelta(days=8)).timestamp()
+        os.utime(version, (old, old))
+        self.assertIn("Weekly doc audit due (never ran)", self.warnings_section(self.run_resume().stdout))
+
+        # The first commit that added .pm/VERSION wins over the file's mtime; here it is old, so the warning stays.
+        run_git(self.root, "add", ".pm/VERSION")
+        run_git(self.root, "commit", "-m", "package", "--date", "2025-01-05T12:00:00")
+        self.assertIn("Weekly doc audit due (never ran)", self.warnings_section(self.run_resume().stdout))
+
     def test_held_section_lists_stale_ready_tasks_and_passed_review_dates(self):
         self.commit_subjects(["setup"])
         future = (date.today() + timedelta(days=30)).isoformat()

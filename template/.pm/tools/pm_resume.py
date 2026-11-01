@@ -322,11 +322,36 @@ def collect_warnings(tasks):
     return warnings
 
 
+def install_date():
+    """The day the package arrived: the first commit that added .pm/VERSION, else the file's modification date.
+
+    A brand-new project has no docs to audit yet, so its first week stays quiet.
+    """
+    version = ROOT / ".pm" / "VERSION"
+    try:
+        if not version.is_file():
+            return None
+        added = git_stdout(
+            ["log", "--reverse", "--format=%ad", "--date=short", "--diff-filter=A", "--", ".pm/VERSION"], ""
+        )
+        for line in (added or "").splitlines():
+            found = as_date(line)
+            if found:
+                return found
+        return datetime.fromtimestamp(version.stat().st_mtime).date()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
 def weekly_audit_warning(today):
     """Warn when no weekly doc audit (.pm/local/audits/weekly-YYYY-MM-DD) was verified in the last seven days.
 
     Only a folder with a non-empty lead-verification.md counts: an empty or unverified folder does not.
+    The first week after the package was installed stays silent: there is nothing to audit yet.
     """
+    installed = install_date()
+    if installed is not None and (today - installed).days < WEEKLY_AUDIT_DAYS:
+        return None
     dates = []
     try:
         for folder in AUDITS_DIR.glob("weekly-*"):
