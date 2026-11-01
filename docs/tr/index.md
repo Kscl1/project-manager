@@ -4,7 +4,7 @@ description: Git deponun içinde, senin ve kodlama ajanlarının birlikte kullan
 template: splash
 hero:
   title: project-manager
-  tagline: Görevler, kararlar ve çalışma kuralları kodunun yanında; her ajan oturumu bir öncekinin kaldığı yerden başlar.
+  tagline: Görevler, kararlar ve çalışma kuralları kodunun yanında; bir sonraki sohbetin bıraktığın yerden başlar.
   image:
     file: ../../src/assets/logo.svg
     alt: project-manager logosu
@@ -27,9 +27,9 @@ Bu paket yeni bir kodlama ajanı, internette çalışan bir proje takip servisi 
 
 ## Kimler için?
 
-Kodlama ajanlarıyla yazılım geliştiren ama her oturumda projeyi sıfırdan anlatmak istemeyenler için. Tek bir proje, tek bir ajan ve çekirdek katmanla (temel paketle) başla. Mimari şemalar ve çalışırken izleyebildiğin işçi ajanlar (`worker`, tek bir alt işi yapan yardımcı ajan) isteğe bağlıdır. Bir görevi (yapılacak tek bir iş kaydını) yönetmek için ajan sürüsü (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) kurman gerekmez.
+Kodlama ajanlarıyla yazılım geliştiren ama her oturumda projeyi sıfırdan anlatmak istemeyenler için. Tek bir proje, tek bir ajan ve çekirdek katmanla (temel paketle) başla. Mimari şemalar ve çalışırken izleyebildiğin işçi ajanlar (`worker`, tek bir alt işi yapan yardımcı ajan) isteğe bağlıdır; bir görevi yönetmek için ajan sürüsü (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) kurman gerekmez. İsteğe bağlı katmanları iş ihtiyaç duyduğunda [bu sayfada](optional-layers.md) bulursun.
 
-Terminal açmaya ve bir Git deposunda çalışmaya alışkın olman beklenir. Kurulumda kodlama ajanın ya da kurulum ekranı sana yol gösterir. `/pm-setup` komutu da ajanın paketi senin projene uyarlamasını sağlar. Ürün hâlâ alfa aşamasındadır (erken deneme sürümüdür); her şeyi kendi başına yürüten tam otomatik bir proje yöneticisi değildir.
+Ajanla kurulum yolu terminal bilgisi istemez: tek bir prompt yapıştırır, birkaç soruyu cevaplarsın. Kurulum ekranı ve elle kurulum yolu ise terminal açmaya ve bir Git deposunda çalışmaya alışkın olmanı bekler. Ürün hâlâ alfa aşamasındadır (erken deneme sürümüdür); her şeyi kendi başına yürüten tam otomatik bir proje yöneticisi değildir.
 
 ## Projende ne değişir?
 
@@ -39,9 +39,9 @@ Yeni bir oturum eski sohbet geçmişinden değil, doğrudan Git deposundan ve o 
 
 ## Küçük başla
 
-1. İş akışını ve hangi aracın nerede çalıştığını görmek için [nasıl çalışır](how-it-works.md) sayfasını oku.
-2. Çekirdek katmanı projene kurmak için [ajanınla kur](install-with-agent.md) sayfasındaki promptu kodlama ajanına yapıştır ya da [başlangıç rehberini](getting-started.md) izle.
-3. Projeni kodlama ajanında aç ve `/pm-setup` komutunu çalıştır.
+1. [Ajanınla kur](install-with-agent.md) sayfasındaki promptu kodlama ajanına yapıştır. En kısa yol budur ve terminal bilgisi istemez.
+2. Projeni kodlama ajanında aç ve sohbet kutusuna `/pm-setup` yaz. Komut paketi projene uyarlar ve sonunda küçük ama gerçek bir görevle biter.
+3. Bütün resmi görmek istediğinde [nasıl çalışır](how-it-works.md) sayfasını oku. Kurulum ekranı ve elle kurulum yolu [başlangıç rehberinde](getting-started.md).
 
 Paket tek bir yapay zekâ model sağlayıcısına (modeli çalıştıran şirkete) bağlı değildir. Bugünkü kurulum Claude Code'u yükler; isteğe bağlı sürü katmanı ise Pi işçi ajanlarını kullanır. Model hesapların ve varsa API (servis kullanım) ücretleri, MIT lisanslı bu paketten ayrıdır.
 
