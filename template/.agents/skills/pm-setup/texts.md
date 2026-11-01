@@ -44,8 +44,8 @@ Each comes after the action, as the last paragraph of the reply that did it.
 
 **resume**: at the close of the first session, with the prompt for the next one.
 
-- EN: Next time, open this folder and say "continue". I read the task's `Next:` line and git first, not this chat, so nothing is lost.
-- TR: Bir dahaki sefere bu klasörü açıp "devam" demen yeter. Bu sohbeti değil, önce görevin `Next:` satırını ve git durumunu okurum; böylece hiçbir şey kaybolmaz.
+- EN: Next time, open this folder and say "continue". I read the saved notes and check the current files first, not this chat.
+- TR: Bir dahaki sefere bu klasörü açıp "devam" demen yeter. Bu sohbeti değil, önce kayıtlı notları okur ve dosyaların şimdiki hâline bakarım.
 
 ## The task moment in try-together mode
 
