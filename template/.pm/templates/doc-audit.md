@@ -1,13 +1,13 @@
 # Brief: doc truth audit
 
-The lead gives this brief to a cheap worker model. The worker reads, compares and reports; it never edits. The lead verifies every finding before anything is changed or shown to the owner, because a clean `pm_check` means consistent, not correct.
+The lead normally gives this brief to a cheap worker model. The worker reads, compares and reports; it never edits. When no worker can run, the lead runs the audit itself and labels it `Lead-run audit` in the report and audit task. The lead verifies every finding before anything is changed or shown to the owner, because a clean `pm_check` means consistent, not correct. Apply the risk rule in the lead card, step 7, to the audit and any resulting changes; record `Review: lead self-check` when independent review is not required.
 
 Two kinds, same brief:
 
 - **delivery:** before a delivery closes. Audits only the living docs and decision cites the delivered change touched; the lead lists them in the brief.
-- **weekly:** when `pm_board --resume` says the weekly check is due, or any time the owner or lead asks (for example after a heavy day). Audits the living docs plus the extra scope below. A second worker from another model family (in a project with one model family, a fresh session of that model; lead card, step 7) runs `decision-audit.md` at the same time.
+- **weekly:** when `pm_board --resume` says the weekly check is due, or any time the owner or lead asks (for example after a heavy day). Audits the living docs plus the extra scope below. Also run `decision-audit.md`; choose its reviewer under the same risk rule.
 
-Fill `<kind>` and `<date>`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief and the line "Kind: <kind>. Date: <date>. Do the task in the attached brief." Ask it to write the report in small edits.
+Fill `<kind>` and `<date>`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief and the line "Kind: <kind>. Date: <date>. Do the task in the attached brief." Ask it to write the report in small edits. When no worker can run, follow the brief yourself and write the same report.
 
 ```text
 GOAL        Find every place where a living doc says something that the repo's real state contradicts, with evidence for each.

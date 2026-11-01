@@ -1,6 +1,6 @@
 # Project charter: <project name>
 
-The entry door of the project file: why the project exists, what it will not do, how it is accepted, and where every other answer lives. The lead writes it; the owner approves intent and acceptance; a different-family frontier model challenges the assumptions. Copy into `.pm/charter.md` once, then keep it as project data.
+The entry door of the project file: why the project exists, what it will not do, how it is accepted, and where every other answer lives. The lead writes it; the owner confirms intent and acceptance. Review the charter under the risk rule in the lead card, step 7. Copy into `.pm/charter.md` only when missing, then keep it as project data.
 
 **Status:** Draft · version 0.1 (<date>) · owner approval pending
 
@@ -42,9 +42,11 @@ Each carries a readiness level: Draft → Intent approved → Ready to implement
 
 ## Review gate
 
-- Owner: <intent and acceptance approved, with date or link>
-- Independent review: <model family and counterexample or unresolved question, with link>
-- Reading test: <date, model, result link>
+Mark a gate passed only when it was actually done. Otherwise leave it pending with an owner and a review point. A lead self-check is not an independent review.
+
+- Owner: <intent and acceptance confirmed, with date or link; or pending · owner · review point>
+- Review: <`Review: lead self-check` and evidence for low-risk work; or independent reviewer, family, result and evidence when step 7 requires it; or pending · owner · review point>
+- Reading test: <date, model and result link; or pending · owner · review point>
 - Open product choice: <owner decision needed, or none>
 
 ## Self-check before approval

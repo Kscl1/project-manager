@@ -1,8 +1,8 @@
 # Brief: decision audit
 
-The weekly partner of `doc-audit.md`: a second cheap worker, from a different model family than the doc auditor (in a project with one model family, a fresh session of that model; lead card, step 7), checks whether the recorded decisions and the project's practice still agree. The worker reads and reports; it never edits. The lead verifies every finding; a finding that changes something the owner decided, or that the two leads disagree on, goes to the owner.
+The weekly partner of `doc-audit.md` checks whether the recorded decisions and the project's practice still agree. A cheap worker normally reads and reports; it never edits. When no worker can run, the lead runs the audit itself and labels it `Lead-run audit` in the report and audit task. The lead verifies every finding; a finding that changes something the owner decided, or that the two leads disagree on, goes to the owner. Apply the risk rule in the lead card, step 7, to the audit and any resulting changes; record `Review: lead self-check` when independent review is not required.
 
-Fill `<date>`, copy the lead's notes that live outside git (if any) into `.pm/local/audits/weekly-<date>/memory/`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief.
+Fill `<date>`, copy the lead's notes that live outside git (if any) into `.pm/local/audits/weekly-<date>/memory/`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief. When no worker can run, follow the brief yourself and write the same report.
 
 ```text
 GOAL        Find every place where a file or the practice contradicts an active decision (a file in .pm/decisions/, or an entry of an older single log), with evidence.
