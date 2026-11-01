@@ -155,6 +155,9 @@ class FeedbackTest(unittest.TestCase):
         self.assertEqual(len(reports), 1)
         return reports[0], out
 
+    def display(self, path):
+        return path.relative_to(self.root).as_posix()
+
     def assertClean(self, text):
         for value in FORBIDDEN:
             self.assertNotIn(value.lower(), text.lower(), f"{value!r} leaked")
@@ -237,6 +240,7 @@ class FeedbackTest(unittest.TestCase):
         self.assertEqual(args[:5], ["gh", "issue", "create", "--repo", pm_feedback.HOME_REPO])
         self.assertTrue(args[args.index("--title") + 1].startswith("[feedback] pm_check crashes on"))
         self.assertIn("### Error excerpt", body)
+        self.assertIn(self.display(report), out)  # the owner sees which file went out
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
 
@@ -265,7 +269,7 @@ class FeedbackTest(unittest.TestCase):
             code, out = self.run_tool("--send", str(report), "--yes")
         self.assertEqual(code, 1)
         self.assertIn("gh is missing or not signed in", out)
-        self.assertIn(report.as_posix(), out)
+        self.assertIn(self.display(report), out)
         self.assertEqual(self.gh.calls, [])
 
     def test_apostrophes_in_prose_stay(self):
@@ -277,17 +281,36 @@ class FeedbackTest(unittest.TestCase):
             self.assertIn("<text>", text)
         self.assertEqual(pm_feedback.redact("KeyError: 'status'", self.root, private), "KeyError: 'status'")
 
+    def test_redacted_copy_sits_next_to_the_report_and_is_what_gets_sent(self):
+        report, _ = self.write_report()
+        with report.open("a", encoding="utf-8") as extra:
+            extra.write(f"hand edit: {TASK_TITLE}\n")
+        edited = report.read_text(encoding="utf-8")
+        code, out = self.run_tool("--send", str(report), answer="y")
+        self.assertEqual(code, 0)
+        redacted = report.with_name(f"{report.stem}.redacted.md")
+        self.assertIn(self.display(redacted), out)  # says which file was sent
+        self.assertEqual(report.read_text(encoding="utf-8"), edited)  # the owner's file stays as it was
+        self.assertClean(redacted.read_text(encoding="utf-8"))
+        self.assertEqual(len(self.gh.calls), 1)
+        args, body = self.gh.calls[0]
+        self.assertClean(" ".join(args) + body)
+
     def test_yes_never_sends_text_the_owner_did_not_see(self):
         report, _ = self.write_report()
         with report.open("a", encoding="utf-8") as extra:
             extra.write(f"\nadded by hand: {TASK_TITLE} {GITHUB_TOKEN} {self.root / 'src' / 'billing'}\n")
+        edited = report.read_text(encoding="utf-8")
         code, out = self.run_tool("--send", str(report), "--yes")
         self.assertEqual(code, 1)
-        self.assertIn("nothing sent", out)
+        self.assertIn("Nothing sent", out)
         self.assertEqual(self.gh.calls, [])
-        shown = report.read_text(encoding="utf-8")
-        self.assertClean(shown)  # the file now holds the redacted text, ready to show again
-        self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(report.read_text(encoding="utf-8"), edited)  # the hand-edited report is not overwritten
+        redacted = report.with_name(f"{report.stem}.redacted.md")
+        self.assertIn(self.display(redacted), out)  # says where the text that would be sent sits
+        shown = redacted.read_text(encoding="utf-8")
+        self.assertClean(shown)  # the redacted copy is clean, ready to show again
+        self.run_tool("--send", str(redacted), "--yes")
         self.assertEqual(len(self.gh.calls), 1)
         args, body = self.gh.calls[0]
         title, _, rest = shown.partition("\n")

@@ -9,7 +9,8 @@ The report has five fields (.pm/templates/feedback.md): package version, harness
 and at most 20 lines of the error. Everything passes the redaction below.
 The second form shows the report again and opens an issue in the package's home repo with `gh issue create`.
 Without --yes it asks on the terminal; anything but "y" or "yes", or no answer at all, sends nothing.
-With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text back and stops.
+With --yes it sends only if redaction leaves the file unchanged; otherwise it writes the redacted text to
+`<name>.redacted.md` next to the report, leaves that report alone, and stops.
 
 Redaction is best effort, which is why the owner previews the report before it leaves: it replaces this project's
 task and decision titles of two or more words, project and user names, paths outside the package's own files, e-mail
@@ -147,8 +148,8 @@ def tool_version(name):
     if not path:
         return "not found"
     try:
+        # utf-8, not the console's code page: a tool that prints an arrow or a non-Latin name must not crash.
         out = subprocess.run(
-            # utf-8, not the console's code page: a tool that prints an arrow or a non-Latin name must not crash.
             [path, "--version"],
             capture_output=True,
             text=True,
@@ -172,6 +173,14 @@ def excerpt(text):
     return "\n".join(lines)[-MAX_CHARS:]
 
 
+def display(path, root):
+    """The path to print: relative to the project when it sits inside it, so no home folder or user name shows."""
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return path.as_posix()
+
+
 def build(root, command, error, harness, title):
     """The report as Markdown: the issue form's labels as headings, the redacted values below them."""
     version = root / ".pm" / "VERSION"
@@ -189,10 +198,13 @@ def send(root, report, yes, repo):
     text = redact(shown, root, private_strings(root))  # again: the file may be edited
     title, _, body = text.partition("\n")
     print(text)
+    source = report
+    if text != shown:  # never overwrite the owner's own file: the redacted copy sits next to it
+        source = report.with_name(f"{report.stem}.redacted.md")
+        source.write_text(text, encoding="utf-8", newline="\n")
+        print(f"Redaction changed the report; the text that would be sent is in {display(source, root)}.")
     if yes and text != shown:  # the owner said yes to the file, so send only the file as it was shown
-        report.write_text(text, encoding="utf-8", newline="\n")
-        print(f"Redaction changed the report the owner saw; nothing sent. {report.as_posix()} now holds the text")
-        print("that would be sent: show it to the owner again and ask again.")
+        print("Nothing sent: show the owner that file and ask again.")
         return 1
     if not yes:
         try:
@@ -204,12 +216,15 @@ def send(root, report, yes, repo):
             print("Nothing sent.")
             return 0
     if not shutil.which("gh"):
-        print(f"gh is missing or not signed in; nothing sent. The report is saved at {report.as_posix()}.")
+        print(f"gh is missing or not signed in; nothing sent. The report is saved at {display(source, root)}.")
         return 1
     title = title.lstrip("# ").strip()
     command = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body-file", "-"]
     # utf-8, not the locale's code page: on Windows that is cp1252, which cannot write pm_check's arrows
-    return subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
+    code = subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
+    if code == 0:
+        print(f"Issue opened with the text from {display(source, root)}.")
+    return code
 
 
 def main(argv=None):
