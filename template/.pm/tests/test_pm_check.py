@@ -1283,5 +1283,42 @@ class HelpTest(RepoTestCase):
         self.assertEqual(self.run_check("-h").stdout, self.run_check("--help").stdout)
 
 
+class WriteIndexMessageTest(RepoTestCase):
+    """--write-index says what it wrote and where, in one line."""
+
+    INDEX = "# Decisions\n\n<!-- decision-index:begin -->\n<!-- decision-index:end -->\n"
+    DECISION = "---\nid: D-01\ntitle: A choice\nstatus: accepted\ndate: 2026-10-01\n---\n"
+
+    def test_one_line_names_the_index_and_where_it_is(self):
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 1, result.stdout)
+        self.assertIn("Wrote the decision index in .pm/decisions.md (1 decision)", lines[0])
+
+    def test_the_catalogue_is_named_in_the_same_line(self):
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        self.write("docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n")
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 1, result.stdout)
+        self.assertIn(".pm/decisions.md", lines[0])
+        self.assertIn("the record catalogue in docs/README.md", lines[0])
+
+    def test_nothing_to_write_says_so(self):
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Nothing to write", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

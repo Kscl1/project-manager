@@ -3,7 +3,7 @@
 Usage: python .pm/tools/pm_check.py                check every doc
        python .pm/tools/pm_check.py --staged       check only docs staged for commit (the pre-commit hook)
        python .pm/tools/pm_check.py --stale        list docs whose described code changed since review (never blocks)
-       python .pm/tools/pm_check.py --write-index  rewrite the generated part of the decision index
+       python .pm/tools/pm_check.py --write-index  rewrite the generated decision index and record catalogue
        python .pm/tools/pm_check.py --help         print these modes and exit
 Exit code 1 when a consistency problem is found, so hooks and CI can block on it.
 Task files are checked too: a Done task needs every box checked and a `Doc impact:` line;
@@ -248,7 +248,7 @@ def write_index():
     else:
         text = text[:start] + render_index() + text[end + len(INDEX_END) :]
     DECISIONS.write_text(text, encoding="utf-8", newline="\n")
-    print(f"Wrote the index in {rel(DECISIONS)}: {len(decision_files())} decisions")
+    return f"the decision index in {rel(DECISIONS)} ({plural(len(decision_files()), 'decision')})"
 
 
 def records():
@@ -332,16 +332,17 @@ def check_catalogue():
 
 
 def write_catalogue():
+    """Rewrite the generated part of the catalogue page; say what was written, or '' when the page has no markers."""
     if not CATALOGUE.exists():
-        return
+        return ""
     text = CATALOGUE.read_text(encoding="utf-8")
     start, end = text.find(CATALOGUE_BEGIN), text.find(CATALOGUE_END)
     if start < 0 or end < 0:
-        return
+        return ""
     CATALOGUE.write_text(
         text[:start] + render_catalogue() + text[end + len(CATALOGUE_END) :], encoding="utf-8", newline="\n"
     )
-    print(f"Wrote the record catalogue in {rel(CATALOGUE)}")
+    return f"the record catalogue in {rel(CATALOGUE)}"
 
 
 def read_frontmatter(lines):
@@ -971,7 +972,9 @@ def main():
     parser.add_argument(
         "--stale", action="store_true", help="list docs whose described code changed since review (never blocks)"
     )
-    parser.add_argument("--write-index", action="store_true", help="rewrite the generated part of the decision index")
+    parser.add_argument(
+        "--write-index", action="store_true", help="rewrite the generated decision index and record catalogue"
+    )
     args = parser.parse_args()
 
     if args.stale:
@@ -989,9 +992,11 @@ def main():
         return 0
 
     if args.write_index:
-        if decision_files():
-            write_index()
-        write_catalogue()
+        written = [what for what in (write_index() if decision_files() else "", write_catalogue()) if what]
+        if written:
+            print(f"Wrote {' and '.join(written)}")
+        else:
+            print("Nothing to write: no decision files and no catalogue markers")
         return 0
 
     decisions, problems = load_decisions()
