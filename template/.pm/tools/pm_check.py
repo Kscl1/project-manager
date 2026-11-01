@@ -15,8 +15,8 @@ a repository next to this one (`../repo/file`). A deleted file passes when its d
 A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
 
 A clean result means the docs are consistent, not that they are correct.
-A doc saved in a Windows code page or with a byte-order mark is read anyway: its encoding never stops the check
-with a traceback.
+The first line of a normal run names the folder it checked, so a wrong folder is visible at once. A doc saved in a
+Windows code page or with a byte-order mark is read anyway: its encoding never stops the check with a traceback.
 """
 
 import argparse
@@ -31,14 +31,22 @@ from urllib.parse import unquote
 
 
 def find_root(start):
-    """The project root holds backlog.config.yml or .git; the tools live in <root>/.pm/tools."""
+    """The project root holds backlog.config.yml or .git; the tools live in <root>/.pm/tools.
+    Also say whether a marker was found: without one, .pm/ alone is checked and the run says so."""
     for folder in [start, *start.parents]:
         if (folder / "backlog.config.yml").exists() or (folder / ".git").exists():
-            return folder
-    return start.parent
+            return folder, True
+    root = start.parent
+    # .pm/*.md alone would report "No problems found" for a project that never ran git init: say what is checked.
+    print(
+        f"No git repository or backlog.config.yml above {root.parent}; checking .pm/ only. "
+        "Run git init in your project folder.",
+        file=sys.stderr,
+    )
+    return root, False
 
 
-ROOT = find_root(Path(__file__).resolve().parent)
+ROOT, FOUND_ROOT = find_root(Path(__file__).resolve().parent)
 # Decisions live in .pm/decisions.md: either the whole log, or an index of .pm/decisions/D-n.md files (one per
 # decision; replaced ones in .pm/decisions/archive/). Older projects keep the log in docs/decisions.md.
 DECISIONS = next((p for p in (ROOT / ".pm" / "decisions.md", ROOT / "docs" / "decisions.md") if p.exists()), None)
@@ -113,8 +121,32 @@ def read_text(path):
     return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
-def git(*args):
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+def git(*args, quiet=False):
+    """Run git in the project root. None, and one plain line on stderr, when git cannot run here at all: not
+    installed, not on PATH, or this folder is no git repository. A caller that reports the failure itself is quiet."""
+    try:
+        result = subprocess.run(
+            ["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace", check=True
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        if not quiet:
+            print(f"git is not available here: {git_reason(error)}", file=sys.stderr)
+        return None
+    return result.stdout
+
+
+def git_reason(error):
+    """The one line git or the system gave for a failed run, plain enough to read and act on."""
+    if isinstance(error, OSError):
+        return error.strerror or str(error)
+    detail = (error.stderr or "").strip().splitlines()
+    return detail[-1] if detail else f"git exited with code {error.returncode}"
+
+
+@functools.cache
+def git_works():
+    """True when git runs in the project root: installed, on PATH and pointed at a repository."""
+    return git("rev-parse", "--git-dir", quiet=True) is not None
 
 
 def load_decisions():
@@ -889,13 +921,15 @@ def stale_flags(path):
             f"    → read the doc against the code, then set reviewed:"
         ]
     since = [f"--since={reviewed}T23:59:59"] if DATE.match(reviewed) else [f"{reviewed}..HEAD"]
-    try:
-        commits = git("log", "--format=%h", *since, "--", *globs).split()
-    except subprocess.CalledProcessError:
+    listed = git("log", "--format=%h", *since, "--", *globs, quiet=True)
+    if listed is None:
+        if not git_works():  # git cannot run here at all; git_visible already said why in one line
+            return []
         return [
             f"{rel(path)}: reviewed: {reviewed} is not a commit git knows\n"
             f"    → set reviewed: to a commit hash or a YYYY-MM-DD date"
         ]
+    commits = listed.split()
     if not commits:
         return []
     return [
@@ -907,11 +941,9 @@ def stale_flags(path):
 @functools.cache
 def git_visible():
     """Files git tracks or would add (not ignored), or None outside a git repo."""
-    try:
-        listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    return {ROOT / name for name in listed.split("\0") if name}
+    # A fallback root has already said there is no repository here; repeating it for every git call is noise.
+    listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", quiet=not FOUND_ROOT)
+    return None if listed is None else {ROOT / name for name in listed.split("\0") if name}
 
 
 def tool_owned():
@@ -934,11 +966,10 @@ def markdown_files():
 
 def staged_markdown_files():
     """Docs in the commit. A changed decision log pulls in every doc, since any of them may depend on it."""
-    staged = {
-        ROOT / name
-        for name in git("diff", "--cached", "--name-only", "--diff-filter=ACMR").splitlines()
-        if name.endswith(".md")
-    }
+    listed = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", quiet=not FOUND_ROOT)
+    if listed is None:
+        return []  # git cannot run here: nothing is staged, and the reason is on stderr
+    staged = {ROOT / name for name in listed.splitlines() if name.endswith(".md")}
     if DECISIONS in staged or (DECISION_DIR and any(DECISION_DIR in path.parents for path in staged)):
         return list(markdown_files())
     return [path for path in markdown_files() if path in staged]
@@ -1011,6 +1042,7 @@ def main():
 
     if args.stale:
         docs = list(markdown_files())
+        print(f"Project: {ROOT}")
         covered = [path for path in docs if read_frontmatter(read_text(path).splitlines()).get("describes")]
         flags = [flag for path in covered for flag in stale_flags(path)]
         for flag in flags:
@@ -1030,6 +1062,10 @@ def main():
             print("Nothing to write: no decision files and no catalogue markers")
         return 0
 
+    # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
+    # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
+    if not args.staged:
+        print(f"Project: {ROOT}")
     decisions, problems = load_decisions()
     problems += check_index()
     problems += check_worklogs()
@@ -1049,7 +1085,7 @@ def main():
     bad_files = len({p.split(":")[0] for p in problems})
     if problems:
         print(f"\n{plural(len(problems), 'problem')} in {plural(bad_files, 'file')}")
-    else:
+    elif not args.staged:
         print("No problems found")
     return 1 if problems else 0
 

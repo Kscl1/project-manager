@@ -1393,5 +1393,90 @@ class ByteOrderMarkTest(RepoTestCase):
         self.assertIn("docs/gone.md does not exist", result.stdout)
 
 
+class RootFallbackTest(RepoTestCase):
+    """A project installed before git init checks .pm/ only; one line says so instead of a happy green."""
+
+    def test_no_git_and_no_backlog_config_says_what_is_checked(self):
+        (self.root / "backlog.config.yml").unlink()
+        self.write("docs/bad.md", "[gone](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(lines), 1, result.stderr)
+        self.assertIn("No git repository or backlog.config.yml above", lines[0])
+        self.assertIn("checking .pm/ only. Run git init in your project folder.", lines[0])
+
+    def test_a_problem_inside_pm_still_fails_the_check(self):
+        (self.root / "backlog.config.yml").unlink()
+        self.write(".pm/notes.md", "[gone](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("link to nope.md does not exist", result.stdout)
+
+
+class NoGitTest(RepoTestCase):
+    """Without git on PATH, --staged and --stale say one plain line instead of a traceback."""
+
+    def no_git_env(self):
+        empty = Path(tempfile.mkdtemp(prefix="pm_no_git_"))
+        self.addCleanup(shutil.rmtree, empty, True)
+        return {"PATH": str(empty)}
+
+    def test_staged_without_git_says_git_is_not_available(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+
+        result = self.run_check("--staged", env=self.no_git_env())
+
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.count("git is not available here:"), 1, result.stderr)
+
+    def test_stale_without_git_says_it_once_and_does_not_crash(self):
+        self.write("docs/guide.md", "---\ndescribes: [src/app.py]\nreviewed: 2020-01-03\n---\n\nbody\n")
+
+        result = self.run_check("--stale", env=self.no_git_env())
+
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.count("git is not available here:"), 1, result.stderr)
+        self.assertIn("No stale docs", result.stdout)
+
+
+class ProjectLineTest(RepoTestCase):
+    """The first line of a normal run names the folder checked; the commit hook stays quiet."""
+
+    def test_first_line_names_the_project_folder(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(os.path.normcase(result.stdout.splitlines()[0]), os.path.normcase(f"Project: {self.root}"))
+
+    def test_the_project_line_comes_before_the_problems(self):
+        self.write("docs/bad.md", "[gone](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(result.stdout.startswith("Project: "), result.stdout)
+        self.assertIn("1 problem in 1 file", result.stdout)
+
+    def test_staged_with_nothing_to_report_prints_nothing(self):
+        self.git_init()
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("README.md", "# Readme\n")
+        self.git("add", "-A")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()
