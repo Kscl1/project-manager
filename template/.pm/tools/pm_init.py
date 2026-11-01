@@ -4,7 +4,10 @@ Usage: python .pm/tools/pm_init.py <target project> [--name NAME] [--map] [--swa
                                    [--check | --keep-existing | --upgrade]
 
 The package is the .pm/ folder this script lives in, so any installed project can install another one.
-- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them.
+- Package files (tools, tests, hooks, roles, templates) are copied; --upgrade replaces them. A replaced folder is
+  built beside the old one as <folder>.new and only then swapped in, so a copy that fails (a lock, antivirus, a full
+  disk) leaves the project with the tools it had; the run stops with one line saying where the old copy is and the
+  command that puts it back.
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
   --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
   deleted.
@@ -247,6 +250,57 @@ def same_files(src, dst, part):
     return not any(classify(src, dst, part, {}))
 
 
+def staged(dst):
+    """Where the new copy is built: beside the old folder, so putting it in place is one rename."""
+    return dst.parent / f"{dst.name}.new"
+
+
+def clear(path):
+    """Remove a half-made copy, so the next run can build it again."""
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def clear_quietly(path):
+    """A leftover copy only costs disk space; a run that stopped has a bigger problem to report."""
+    try:
+        clear(path)
+    except OSError:
+        pass
+
+
+def restore_command(entry, dst):
+    """The exact command that puts a backed-up folder back, the same on Windows and elsewhere."""
+    inner = f"import shutil; shutil.move(r'{entry}', r'{dst}')"
+    return f'python -c "{inner}"'
+
+
+class InstallStopped(Exception):
+    """One plain line when a package folder could not be replaced: what is left, and the way back."""
+
+    def __init__(self, dst, error, entry, moved):
+        super().__init__(str(error.strerror or error))
+        self.dst, self.error, self.entry, self.moved = dst, error, entry, moved
+
+    def __str__(self):
+        reason = self.error.strerror or self.error
+        if self.moved:  # the old folder sits in the backup: name it, and the command that puts it back
+            return (
+                f"Upgrade stopped: the new {self.dst.name} could not be put in place ({reason}). Your old copy is in "
+                f"{self.entry}; put it back with: {restore_command(self.entry, self.dst)}"
+            )
+        if self.dst.exists():
+            return (
+                f"Upgrade stopped: {self.dst} could not be copied ({reason}). The folder is as it was, and the backup "
+                f"folder is {self.entry.parent}."
+            )
+        return f"Upgrade stopped: {self.dst} could not be copied ({reason}). Nothing of the project's was removed."
+
+
 def copy_dir(src, dst, upgrade, backup, manifest, part):
     if dst.exists() and not upgrade:
         say("skip", dst, "exists; use --upgrade to refresh")
@@ -254,15 +308,22 @@ def copy_dir(src, dst, upgrade, backup, manifest, part):
     if dst.exists() and same_files(src, dst, part):
         say("keep", dst, "same as the package")  # no backup either: nothing would be lost
         return
+    new, entry, moved = staged(dst), backup / Path(part).parent / dst.name, False
     if dst.exists():
         report_changes(src, dst, part, manifest)
-        # Keep the old copy until the new one is in place: local edits stay recoverable.
-        backup = backup / Path(part).parent
-        backup.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(dst), str(backup / dst.name))
-        say("backup", backup / dst.name)
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(src, dst, ignore=SKIP)
+    try:
+        clear(new)  # a half-made copy from a run that stopped
+        new.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, new, ignore=SKIP)  # the project keeps its folder whole while this runs
+        if dst.exists():
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(dst), str(entry))  # the old copy, kept until the new one is in place
+            moved = True
+            say("backup", entry)
+        shutil.move(str(new), str(dst))  # one rename on the same disk, so the folder is never away for long
+    except OSError as error:
+        clear_quietly(new)
+        raise InstallStopped(dst, error, entry, moved) from error
     say("upgrade" if upgrade else "copy", dst)
 
 
@@ -382,6 +443,7 @@ def write_version(target):
 
 
 EXIT_CONFLICT = 3
+EXIT_FAILED = 1
 ROOT_TEMPLATES = PKG / "templates" / "root"
 HOOKS_HOW = "call .pm/hooks/pre-commit and .pm/hooks/commit-msg from your hooks, or move yours"
 MERGE_HOW = {
@@ -811,8 +873,12 @@ def main(argv=None):
     summary = result_lines(target, entries, conflicts, merge)  # the same: what the run found, not what it left
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
     quiet(True)  # one line per file is what --check is for; the run ends with a few lines instead
-    for src, dst, part in package_parts(target, args.map, args.swarm):
-        copy_dir(src, dst, args.upgrade, backup, manifest, part)
+    try:
+        for src, dst, part in package_parts(target, args.map, args.swarm):
+            copy_dir(src, dst, args.upgrade, backup, manifest, part)
+    except InstallStopped as stopped:
+        print(stopped)  # one plain line: what is left and the way back; the run stops here
+        return EXIT_FAILED
     for skill in shipped_skills(target, args.map):
         write_pointer(skill, target, args.upgrade)
     write_manifest(target)

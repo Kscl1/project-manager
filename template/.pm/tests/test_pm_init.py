@@ -15,6 +15,26 @@ SKILLS = PM_INIT.parent.parent.parent / ".agents" / "skills"
 GIT = shutil.which("git")
 # A project's own .pm/local (run folders, backups, nested repos) is no part of the package: never copy it.
 PACKAGE_ONLY = shutil.ignore_patterns("__pycache__", "local")
+# Runs pm_init with shutil patched, so a copy or a rename fails the way a lock, antivirus or a full disk does.
+COPY_FAILS = """
+def boom(*args, **kwargs):
+    raise OSError(28, "No space left on device")
+
+
+pm_init.shutil.copytree = boom
+"""
+RENAME_FAILS = """
+real_move = pm_init.shutil.move
+
+
+def move(src, dst, *args, **kwargs):
+    if str(src).endswith(".new"):
+        raise OSError(13, "Permission denied")
+    return real_move(src, dst, *args, **kwargs)
+
+
+pm_init.shutil.move = move
+"""
 
 
 def _remove_readonly(func, path, _exc_info):
@@ -44,6 +64,35 @@ class PmInitTest(unittest.TestCase):
             encoding="utf-8",
             errors="replace",
         )
+
+    def run_with(self, patch, *args):
+        """Run pm_init from a small driver that patches a stdlib call first, so a copy can fail inside a real run."""
+        driver_dir = Path(tempfile.mkdtemp(prefix="pm_driver_"))
+        self.addCleanup(shutil.rmtree, driver_dir, onerror=_remove_readonly)
+        driver = driver_dir / "driver.py"
+        driver.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(PM_INIT.parent)!r})\n"
+            "import pm_init\n"
+            f"{patch}\n"
+            f"sys.exit(pm_init.main([{str(self.root)!r}, *{list(args)!r}]))\n",
+            encoding="utf-8",
+        )
+        return subprocess.run(
+            [sys.executable, str(driver)],
+            env={**os.environ, "PM_BOM_TOOL": str(self.fake_bom)},
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def stopped_line(self, output):
+        """The one line a stopped run prints, checked for being one line."""
+        lines = [line for line in output.splitlines() if line.startswith("Upgrade stopped:")]
+        self.assertEqual(len(lines), 1, output)
+        return lines[0]
 
     def test_fresh_install_creates_package_and_named_config(self):
         result = self.run_init(self.root, "--name", "Example Project")
@@ -294,6 +343,50 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_text(encoding="utf-8"), "local package file\n")
         self.assertFalse(extra.exists())
+
+    def test_a_copy_that_fails_leaves_the_tools_in_place(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        edited = self.root / ".pm/tools/pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(COPY_FAILS, "--upgrade")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("# local change\n"))
+        self.assertNotIn("Traceback", result.stderr)
+        line = self.stopped_line(result.stdout)
+        self.assertIn("No space left on device", line)
+        self.assertIn(str(self.root / ".pm" / "local" / "backup"), line)  # nothing to restore, but it says where
+        self.assertFalse((self.root / ".pm" / "tools.new").exists(), "a half-made copy is cleared away")
+
+    def test_a_failed_copy_on_a_first_install_removes_nothing(self):
+        result = self.run_with(COPY_FAILS)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        line = self.stopped_line(result.stdout)
+        self.assertIn("Nothing of the project's was removed", line)
+        self.assertFalse((self.root / ".pm" / "tools").exists())
+        self.assertFalse((self.root / ".pm" / "VERSION").exists())
+        self.assertFalse((self.root / ".pm" / "tools.new").exists())
+
+    def test_a_rename_that_fails_names_the_backup_and_the_command_that_restores_it(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        edited = self.root / ".pm/tools/pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(RENAME_FAILS, "--upgrade")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertFalse((self.root / ".pm/tools").exists(), "the swap stopped between the two moves")
+        line = self.stopped_line(result.stdout)
+        backed_up = next((self.root / ".pm/local/backup").glob("*/tools"))
+        self.assertIn(str(backed_up), line)
+        self.assertIn("put it back with: python -c ", line)
+
+        command = line.split("put it back with: ", 1)[1].replace("python ", f'"{sys.executable}" ', 1)
+        subprocess.run(command, shell=True, cwd=self.root, check=True, capture_output=True)
+
+        self.assertTrue((self.root / ".pm/tools/pm_check.py").is_file(), "the line's command brings the tools back")
 
     def test_install_copies_every_pm_skill_with_a_claude_pointer(self):
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
