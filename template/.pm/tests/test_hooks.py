@@ -4,6 +4,7 @@ Each test builds a small git repo in a temp dir with the package hook and pm_che
 the way git does: with the repo root as the working directory.
 """
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -44,6 +45,24 @@ class HookTest(unittest.TestCase):
     def test_failing_project_pre_commit_blocks(self):
         self.project_hook("pre-commit", "exit 4")
         self.assertEqual(self.run_hook("pre-commit").returncode, 4)
+
+    def test_the_gate_asks_for_python_39(self):
+        # a python that is too old for the tools (and no python3): the hook must name the version it needs
+        fake = self.root / "bin"
+        fake.mkdir()
+        for name in ("python", "python3"):
+            script = fake / name
+            script.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+            script.chmod(0o755)
+        result = subprocess.run(
+            [SH, ".pm/hooks/pre-commit"],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PATH": str(fake)},
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Python 3.9+ not found", result.stderr)
 
     def test_commit_msg_without_project_hook_passes(self):
         self.assertEqual(self.run_hook("commit-msg", "MSG").returncode, 0)
