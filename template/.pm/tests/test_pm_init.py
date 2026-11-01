@@ -664,10 +664,9 @@ class PmInitTest(unittest.TestCase):
         result = self.run_init(self.root, "--upgrade")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(
-            "Your AGENTS.md lacks these package sections: Start here, Lead only: which tool when, Lead only: teaching.",
-            result.stdout,
-        )
+        template = (PM_INIT.parent.parent / "templates" / "root" / "AGENTS.md").read_text(encoding="utf-8")
+        sections = [line[3:] for line in template.splitlines() if line.startswith("## ")]
+        self.assertIn(f"Your AGENTS.md lacks these package sections: {', '.join(sections)}.", result.stdout)
         self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
 
     def test_an_upgrade_says_nothing_when_the_agents_sections_are_there(self):
