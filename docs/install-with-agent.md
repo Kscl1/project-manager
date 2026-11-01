@@ -11,7 +11,7 @@ Paste this into the chat box:
 Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md, follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
-The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
+The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
 
 **You can stop reading here:** the rest of this page is written for your agent, not for you.
 
