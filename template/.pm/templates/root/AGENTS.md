@@ -31,7 +31,7 @@ Workers: skip this section. Assume the user knows their project, not AI, Git or 
 | "continue" / "devam", in any language | the first-reply lines above, then the next step; `continue` never starts the later setup task, even after its `Review by:` date. When only setup or upkeep waits, say the last project task is done and ask what they want to build or fix today |
 | "what next?" / "sırada ne var?" | run `python .pm/tools/pm_board.py --next` and say its answer in one or two plain sentences |
 | "show the board" / "panoyu göster" | open the board: in the Claude desktop app the `board` entry of `.claude/launch.json` (a preview pane); elsewhere start `backlog browser` and give the address |
-| "show the map" | if the map layer is not installed, say so; otherwise in the Claude desktop app open the `map` entry of `.claude/launch.json`. Elsewhere, check whether `npx likec4@1.60.0 start` needs an install and ask before running it if so; then start it in the project and give the address it prints |
+| "show the map" | if the map layer is not installed, say so; otherwise, before the first map preview run `npx --no-install likec4@1.60.0 --version`: if it fails, ask before downloading and proceed only on a yes. In the Claude desktop app open the `map` entry of `.claude/launch.json`; elsewhere run `npx likec4@1.60.0 start` in the project and give the address it prints |
 | "explain <word>" / "<kelime> nedir?" | a full plain answer, even when the word is in `known` |
 | "stop teaching" / "anlatmayı bırak" | set `mode: off` in `.pm/local/teaching.md`, keep `known` and `hinted` (if the file is missing, create `known: []` and `hinted: {}`), and acknowledge in one line; safety asks stay and requested explanations still get a full answer |
 
@@ -39,12 +39,12 @@ Workers: skip this section. Assume the user knows their project, not AI, Git or 
 
 ## Lead only: which tool when
 
-Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and explains it as "Lead only: teaching" says. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
+Workers: skip this section; your brief names your tools. The lead picks the tool below without being asked, and explains it as "Lead only: teaching" says. Every row follows the consent rule above. Offer a thing once per situation; a "no" stands. The method for each tool lives in its skill or role card.
 
 | Situation | Do | Why |
 |---|---|---|
 | The user asks for a change, fix or study | On your own: a Backlog task with acceptance criteria first (`backlog task create`) | The work, its evidence and its result have one home |
-| A component, module, service or link between them was added, removed or renamed | On your own: update the LikeC4 map (DSL in the `pm-likec4-dsl` skill) and run `npx likec4 validate` | The next model reads the map, not this chat |
+| A component, module, service or link between them was added, removed or renamed | On your own: prepare the LikeC4 map update (DSL in the `pm-likec4-dsl` skill); show the diff and write it only after a yes when map files are outside `.pm/`. Before `npx likec4@1.60.0 validate`, ask before a needed download | The next model reads the map, not this chat |
 | You need a library's, framework's or API's syntax, config or setup | On your own: look it up with Context7 | Current docs beat a model's memory |
 | A piece of work or a long lookup can run apart from you | On your own, within the models in `.pm/models.md`: a worker or helper in a visible pane (`.pm/roles/lead.md`) | The user sees and can stop every agent |
 | A plan or design is about to be settled with questions still open | Offer once: `/pm-grill-me` | Gaps show up before the work, not after |
