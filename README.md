@@ -7,7 +7,7 @@ You do not have to learn a new tool: it uses files and programs you already have
 ## What you need
 
 - **A coding agent:** a chat window that can read and change your project, such as [Claude Code](https://code.claude.com). Do you not have one yet? Install it first, then come back.
-- **A project folder:** the folder that holds your code. It should be a Git repository; if it is not, run `git init` once inside it.
+- **A project folder:** the folder that holds your code. If it is not a Git repository yet, the agent offers to turn it into one during setup (a Git repository is a folder whose history Git keeps).
 - **About 15 minutes.** The agent path below needs no terminal skills; the other two ways ask you to type commands.
 
 You need five programs. The installer checks them and names what is missing. The badges show each program's minimum version; the installer itself pins a tested version, a little newer, and tells you when yours differs.
@@ -20,19 +20,27 @@ You need five programs. The installer checks them and names what is missing. The
 [![Backlog.md 1.52.0+](https://img.shields.io/badge/Backlog.md-1.52.0%2B-000000?logo=markdown&logoColor=white)](https://github.com/MrLesk/Backlog.md)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude_Code-2.1.296%2B-D97757?logo=claude&logoColor=white)](https://code.claude.com)
 
-[Getting started](docs/getting-started.md) · [Package guide](template/.pm/README.md) · [Principles](template/.pm/principles.md)
-
 ## Install
 
-Open your coding agent in the folder that holds your project and paste this:
+Open your project folder in a coding agent: in Claude Desktop, click **Code** and choose the folder; in a terminal, run `cd "<your project folder>"`, then `claude`. The only command you type yourself is `/pm-setup`, in that agent's chat box after the install (Pi: `/skill:pm-setup`, Codex: `$pm-setup`).
+
+Paste this into the chat box:
 
 ```text
 Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md, follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
-The agent asks which project and which optional parts you want, checks your machine, keeps its changes on a separate branch so you can undo them, and writes a short note for the next chat. Nothing changes without your yes. Then you open the project in a new session and type `/pm-setup`.
+Do you work in Turkish? Paste this one instead; it points the agent at the Turkish page:
+
+```text
+project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku, adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
+```
+
+The agent asks which project and which optional parts you want, checks your machine, keeps its changes on a separate branch so you can undo them, and writes a short note for the next chat. Nothing changes without your yes. Then you open the project again in a new chat and type `/pm-setup`.
 
 The steps your agent follows: [Install with your agent](docs/install-with-agent.md) ([Türkçe](docs/tr/install-with-agent.md)).
+
+[Getting started](docs/getting-started.md) · [Package guide](template/README.md) · [Principles](template/.pm/principles.md)
 
 ## After setup, just say
 
