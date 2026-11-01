@@ -446,6 +446,27 @@ class PmInitTest(unittest.TestCase):
 
         self.assertTrue((self.root / ".pm/tools/pm_check.py").is_file(), "the line's command brings the tools back")
 
+    def test_the_recovery_command_works_for_a_path_with_an_apostrophe(self):
+        # An apostrophe used to end the Python string in the printed command; a real project folder may hold one.
+        project = Path(tempfile.mkdtemp(prefix="pm_apostrophe_")) / "O'Brien's project"
+        self.addCleanup(shutil.rmtree, project.parent, onerror=_remove_readonly)
+        project.mkdir()
+        self.assertEqual(self.run_init(project).returncode, 0)
+        edited = project / ".pm" / "tools" / "pm_check.py"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# local change\n", encoding="utf-8")
+
+        result = self.run_with(RENAME_FAILS, "--upgrade", target=project)
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        line = self.stopped_line(result.stdout)
+        backed_up = next((project / ".pm/local/backup").glob("*/tools"))
+        self.assertIn(str(backed_up), line)
+
+        command = line.split("put it back with: ", 1)[1].replace("python ", f'"{sys.executable}" ', 1)
+        subprocess.run(command, shell=True, cwd=project, check=True, capture_output=True)
+
+        self.assertTrue(edited.read_text(encoding="utf-8").endswith("# local change\n"), "the command restores it")
+
     def test_install_copies_every_pm_skill_with_a_claude_pointer(self):
         source = Path(tempfile.mkdtemp(prefix="pm_pkg_"))
         self.addCleanup(shutil.rmtree, source, onerror=_remove_readonly)

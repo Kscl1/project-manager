@@ -46,6 +46,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -314,9 +315,12 @@ def clear_quietly(path):
 
 
 def restore_command(entry, dst):
-    """The exact command that puts a backed-up folder back, the same on Windows and elsewhere."""
-    inner = f"import shutil; shutil.move(r'{entry}', r'{dst}')"
-    return f'python -c "{inner}"'
+    """The exact command that puts a backed-up folder back. Each path is repr()'d into the payload, and the whole
+    payload is quoted for this machine's shell, so a path with a space or an apostrophe still works when pasted."""
+    payload = f"import shutil; shutil.move({str(entry)!r}, {str(dst)!r})"
+    if os.name == "nt":
+        return f"python {subprocess.list2cmdline(['-c', payload])}"
+    return f"python -c {shlex.quote(payload)}"
 
 
 class InstallStopped(Exception):
