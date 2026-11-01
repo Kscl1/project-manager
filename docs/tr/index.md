@@ -30,13 +30,15 @@ project-manager, **görevleri, kararları ve çalışma kurallarını kodunun ya
 
 Bu paket yeni bir kodlama ajanı, internette çalışan bir proje takip servisi ya da uygulamanın nasıl yazılacağını belirleyen bir kural dizisi değildir. Var olan açık araçları Markdown kayıtları ve Python kontrolleriyle bir araya getirir. Kayıtları istediğin editörde okuyabilir, değişiklikleri Git'te inceleyebilir ve başka bir ajana geçtiğinde olduğu gibi yanında götürebilirsin.
 
-**Yapay zekâyı yalnız telefonda mı kullandın?** [Buradan başla](first-time.md). Görev (task), Epic, pano (board) ya da MCP sunucusu (MCP server) gibi kelimelerin her biri [sözlükte](glossary.md) tek cümleyle açıklanır.
+**Yapay zekâyı yalnız telefonda mı kullandın?** [Buradan başla](first-time.md).
 
 ![Dört panel: küçük bir değişiklik istersin; yardımcı planını gösterir, sen onaylarsın, dosyayı değiştirir ve kontrolü çalıştırır; notlar projendeki .pm/ klasörüne kaydedilir; bir dahaki sefere yeni sohbet notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.](../../public/next-chat-tr.svg)
 
 **Yeni sohbet, eski yardımcının aklını değil kayıtlı dosyaları okur.** Sözlerle: küçük bir değişiklik istersin; onayından sonra yardımcı projeyi günceller ve `.pm/` klasörüne bir iş notu yazar; sohbeti kapatırsın; yeni bir sohbette aynı klasörü açıp "devam" dersin; yardımcı notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.
 
 `.pm/` klasörünü projenin iş defteri gibi düşün. Yardımcı iş listesini, seçimlerin nedenlerini ve nerede kaldığını oraya düz dosyalar olarak yazar. Bu bir iş defteridir, yapay zekânın belleği değildir ve bir sohbetin her kelimesini saklamaz: yardımcı her seferinde notları okur ve dosyaları kontrol eder.
+
+Görev (task), Epic, pano (board) ya da MCP sunucusu (MCP server) gibi kelimelerin her biri [sözlükte](glossary.md) tek cümleyle açıklanır.
 
 ## Kimler için?
 

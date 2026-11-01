@@ -30,13 +30,15 @@ project-manager keeps **tasks, decisions and working rules next to your code**. 
 
 It is not a new coding agent, a hosted project tracker, or a set of rules for how your application should be written. It combines existing open tools with Markdown records and Python checks. You can read the records in an editor, review their changes in Git and take them with you when you switch agents.
 
-**Only used AI on your phone?** [Start here](first-time.md). Words such as task, Epic, board or MCP server: the [glossary](glossary.md) explains each in one sentence.
+**Only used AI on your phone?** [Start here](first-time.md).
 
 ![Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.](../public/next-chat.svg)
 
 **The new chat reads saved files, not the old assistant's mind.** In words: you ask for a small change; after your yes the assistant updates the project and writes a work note in `.pm/`; you close the chat; in a new chat you open the same folder and say "continue"; the assistant reads the notes, checks the files and names the next action.
 
 Think of `.pm/` as the project's notebook. The assistant writes the job list, the reasons for choices and where you stopped there, in plain files you can open. It is not the AI's memory and it does not keep every word of a chat: the assistant reads the notes and checks the files each time.
+
+Words such as task, Epic, board or MCP server: the [glossary](glossary.md) explains each in one sentence.
 
 ## Who is it for?
 
