@@ -10,8 +10,8 @@ Görev, Epic, brief, commit gibi yeni kelimeler [sözlükte](glossary.md).
 1. **Hedefi sen anlatırsın.** Lider ajan (`lead`, işi planlayan ve çıktıları doğrulayan ana kodlama ajanı), işe başlamadan önce kabul ölçütleri (`acceptance criteria`, işin tamamlanmış sayılması için gereken koşullar) içeren bir görev (yapılacak iş kaydı) açar. Daha büyük hedefler, küçük ve sınırları belli alt görevlerden oluşan bir `Epic` (üst görev) hâline gelir.
 2. **Lider ajan bağlamı kontrol eder.** Mevcut görevi, ilgili proje kayıtlarını ve kodu okur; ardından işe yarayacak en küçük değişikliği seçer.
 3. **İş doğrudan depoda yapılır.** Lider ajan küçük bir işi kendi başına yapabilir. İsteğe bağlı sürü katmanı (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) açıksa bir işçi ajana (`worker`, tek bir alt işi yapan yardımcı ajan) kısa bir görev özeti (`brief`, yapılacak alt işin talimatı), yalıtılmış bir Git çalışma ağacı (`git worktree`, aynı deponun o iş için ayrılmış çalışma klasörü) ve ekranda görebileceğin bir terminal bölmesi verir.
-4. **Kanıtlar geri döner.** Derleme (`build`) çıktısı, testler ve kod denetimi (`lint`, yazım ve kural hatalarını yakalayan otomatik kontrol) değişikliği sınar. Farklı bir model ailesinden (başka bir yapay zekâ model serisinden) gelen bir inceleyici ajan (`reviewer`), görev özetini, kod farkını (`diff`, yapılan satır satır değişiklikleri) ve raporu inceler (tek modelli bir projede aynı modelin yeni bir oturumu inceler ve bu kaydedilir); otomatik kontrollerin geçmesi tek başına onay anlamına gelmez.
-5. **Sonucu sen onaylarsın.** Lider ajan kod farkını okur, kayıtları günceller; nelerin geçtiğini ve geriye ne kaldığını raporlar. Değişikliğin ne zaman birleştirileceğine (`merge`) sen karar verirsin.
+4. **Kanıtlar geri döner.** Lider ajan kod farkını (`diff`, satır satır değişiklikler) okur ve kanıtları kontrol eder. Ana dala (`main branch`) birleştirilecek kod ile güvenlik, veri, para, izinler veya herkese açık yayın içeren değişiklikler bağımsız inceleme alır. İnceleyici farklı bir model ailesi kullanır; tek aile varsa yeni bir oturum kullanır. Geri alınabilir diğer işler kayıtlı `Review: lead self-check` (liderin kendi kontrolü) ile kapanabilir.
+5. **Onay gereken yerde sen karar verirsin.** Lider ajan nelerin geçtiğini ve neyin kaldığını bildirir. Güvenlik sınırlarından önce, örneğin `.pm/` dışındaki dosyalarını değiştirmeden önce sorar. Ana dala ne zaman birleştirileceğine (`merge`) sen karar verirsin.
 
 ## Parçalar bir arada
 
@@ -53,7 +53,7 @@ flowchart TB
 | Lider (`Lead`) | Görevi çerçeveler, canlı kayıtları güncel tutar, sınırları belli görev özetleri (`brief`) yazar ve kanıtları doğrular. Yeterli her kodlama ajanı bu rolü üstlenebilir. |
 | İşçi (`Worker`) | Sınırları belli tek bir görev özetini tamamlar; işi büyütmez ve liderin kayıtlarını düzenlemez. |
 | Test yazıcı veya araştırmacı | Yazılan kodun doğru olduğunu varsaymak yerine, doğrudan görev özetine göre test yazar ya da kaynak göstererek bilgi toplar. |
-| İnceleyici (`Reviewer`) | Görev özetini, kod farkını (`diff`) ve kanıtları, kodu yazan ajandan farklı bir model ailesiyle ve temiz bir bağlamda (önceki sohbet geçmişinden etkilenmeden) okur; tek modelli projede aynı modelin yeni bir oturumu okur ve bu kaydedilir. |
+| İnceleyici (`Reviewer`) | Risk bağımsız inceleme gerektirdiğinde görev özetini, kod farkını (`diff`) ve kanıtları, yazardan farklı bir model ailesiyle ve temiz bir bağlamda okur; tek aileli projede aynı modelin yeni bir oturumu inceler ve bu kaydedilir. |
 
 ## Ne nerede çalışır?
 
