@@ -3,6 +3,8 @@ title: Sözlük
 description: Bu belgelerde geçen kelimeler, her biri bir iki sade cümleyle.
 ---
 
+**Projenin iş defteri.** `.pm/` klasörünü projenin iş defteri gibi düşün. Yardımcın iş listesini, seçimlerin nedenlerini ve nerede kaldığını oraya düz dosyalar olarak yazar. Bu, yapay zekânın belleği değildir ve bir sohbetin her kelimesini saklamaz: yardımcı eski bir nota güvenmeden önce defteri okur ve dosyaları kontrol eder.
+
 Yapay zekâ destekli kodlama araçlarıyla yeni mi tanışıyorsun? Diğer sayfalarda geçen kelimeleri burada, karşına çıkacakları sırayla bulabilirsin.
 
 **Kodlama ajanı (coding agent).** Bir klasördeki dosyaları okuyup değiştirebilen sohbet penceresi; Claude Code, Codex ya da Pi gibi. Ne istediğini günlük dille yazarsın, o da senin yerine komut çalıştırır ve dosyaları düzenler.
@@ -15,7 +17,7 @@ Yapay zekâ destekli kodlama araçlarıyla yeni mi tanışıyorsun? Diğer sayfa
 
 **Kabul ölçütü (acceptance criterion).** Görevin ne zaman bittiğini söyleyen, kontrol edilebilir tek cümle; örneğin "düğme kullanıcıya giriş yaptırır". Ajan işi bitti saymadan önce yaptığı işi bu ölçütlere göre kontrol eder.
 
-**Pano (board).** Görevlerin ve durumlarının listesi: Ready (kimse başlamadı), Active (yapılıyor) ve Done (bitti). Backlog.md bu panoyu okur ve ekranda da açar.
+**Pano (board).** Görevlerin ve durumlarının listesi: Ready (başlanabilir), Active (üzerinde çalışılıyor) ve Done (bitti). Backlog.md bu panoyu okur ve ekranda da açar.
 
 **Epic.** Daha küçük görevleri bir arada tutan üst görev. Hedef tek bir göreve sığmayacak kadar büyükse kullanılır; asıl yapılan işler alt görevlerdir.
 

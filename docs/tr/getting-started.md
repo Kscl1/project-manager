@@ -9,7 +9,7 @@ Kuruluma üç yoldan başlayabilirsin; ilki en kısa olanı: kurulumu **kodlama 
 
 ## Ajanınla kur
 
-Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler.
+Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler. Dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
 
 İş bitince projeni yeni bir sohbette aç ve `/pm-setup` yaz; gerisi aşağıdakiyle aynıdır.
 
@@ -91,7 +91,7 @@ Her projenin ihtiyaç duyduğu temel katman. Elle kuruyorsan tabloyu yukarıdan 
 | Araç | Ne işe yarar ve nasıl kurulur? |
 |---|---|
 | [Node.js](https://nodejs.org/en/download) | Aşağıdaki JavaScript araçlarını çalıştırır. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
-| [Backlog.md](https://github.com/MrLesk/Backlog.md) | Görevlerini projede Markdown dosyaları olarak ve bir kanban panosu (işleri Yapılacak, Yapılıyor, Bitti sütunlarında izleyen pano) düzeninde tutar. `npm i -g backlog.md@1.55.3`. npm `EACCES` yetki hatası verirse [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) adımlarını izle; komutun başına `sudo` ekleme. |
+| [Backlog.md](https://github.com/MrLesk/Backlog.md) | Görevlerini projede Markdown dosyaları olarak tutar ve bir kanban panosunda (işleri durumlarına göre sütunlarda gösteren pano) düzenler. Panonun sütunları Ready (başlanabilir), Active (üzerinde çalışılıyor) ve Done (bitti); bu adlar İngilizce kalır, çünkü araçlar onları okur. `npm i -g backlog.md@1.55.3`. npm `EACCES` yetki hatası verirse [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) adımlarını izle; komutun başına `sudo` ekleme. |
 | [Claude Code](https://code.claude.com/docs/en/setup) | Kodlama ajanın. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. İkisi de `claude` komutunu kullanıcı klasöründeki `.local\bin` (`~/.local/bin`) içine koyar. Windows'ta bu klasör `PATH`'e (sistemin komut aradığı klasör listesine) otomatik eklenmez. TUI bu klasörü kullanıcı `PATH` ayarına senin için ekler (elle kuruyorsan `%USERPROFILE%\.local\bin` yolunu ekle, ardından yeni bir terminal aç). `claude` komutunu ilk çalıştırdığında hesabına giriş yap. |
 | `.pm` paketi | Kurallar, karar kayıtları, kontroller ve `pm-` becerileri (`skill`, ajana belirli bir işi nasıl yapacağını öğreten hazır komut paketleri: `pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
 | Oturum kancaları (`session hooks`) | Oturum başladığında ve ajanın sohbet belleği özetlendiğinde (`compacted`, uzun sohbet geçmişinin yer açmak için kısaltılması) işin nerede kaldığını ajana gösterir. |

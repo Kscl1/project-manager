@@ -3,6 +3,8 @@ title: Glossary
 description: The words this documentation uses, each in one or two plain sentences.
 ---
 
+**The project's notebook.** Think of `.pm/` as the project's notebook. The assistant writes the job list, the reasons for choices and where you stopped there, as plain files. It is not the AI's memory and it does not keep every word of a chat: the assistant reads the notes and checks the files before it trusts an old note.
+
 New to AI coding assistants? These are the words the other pages use, in the order you meet them.
 
 **Coding agent.** A chat window that can read and change the files in a folder, such as Claude Code, Codex or Pi. You say what you want in plain words, and it runs commands and edits files for you.
