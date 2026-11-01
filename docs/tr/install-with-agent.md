@@ -3,10 +3,12 @@ title: Ajanınla kur
 description: Kodlama ajanının project-manager'ı projene kurarken izlediği adımlar; her değişiklikten önce sana sorar.
 ---
 
-project-manager'ı elle kurman gerekmez. Kodlama ajanını (coding agent: Claude Code, Codex, Pi ya da bir başkası) projenin durduğu klasörde aç ve şunu yapıştır:
+project-manager'ı elle kurman gerekmez. Kodlama ajanını (coding agent: Claude Code, Codex, Pi ya da bir başkası) projenin durduğu klasörde aç: Claude Desktop'ta **Code** sekmesine tıkla ve klasörü seç; terminalde `cd "<proje klasörün>"` yaz, ardından `claude` çalıştır. Kendi elinle yazacağın tek komut, kurulumdan sonra ajanın sohbet kutusuna yazacağın `/pm-setup` komutudur (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
+
+Şunu ajanın sohbet kutusuna yapıştır:
 
 ```text
-project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku (web aracın yalnız özet veriyorsa curl ile indir), adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
+project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku, adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
 ```
 
 Ajan birkaç soru sorar, bilgisayarını kontrol eder, kurulumu projende yeni bir dalda (branch) yapar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda (session) açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uyarlar. Demo proje kurmaz, koduna dokunmaz. Terminalde adım adım yol gösteren bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu (MCP server) gibi kelimeler [sözlükte](glossary.md) açıklanır.
@@ -17,6 +19,7 @@ Ajan birkaç soru sorar, bilgisayarını kontrol eder, kurulumu projende yeni bi
 
 project-manager'ı kullanıcının projesine kuruyorsun. Bu adımları sırayla izle.
 
+- Bu sayfanın tamamı yerine yalnızca bir özetini aldıysan 1. adımdan önce sayfayı eksiksiz indir (örneğin `curl` ile) ve tamamını oku.
 - Kullanıcıyla kendi dilinde, sade konuş; projesini bildiğini ama yapay zekâ ve proje yönetimi terimlerini bilmediğini varsay. Her seferinde tek bir soru sor.
 - Bir şeyi değiştiren her komuttan önce (paket kurulumu, yazma yapan bir git komutu ya da kurucu) ne işe yaradığını tek cümleyle söyle, komutu göster ve ancak kullanıcı açıkça onayladıktan sonra çalıştır. Salt okunur kontroller için onay gerekmez. npm komutlarına asla `sudo` ekleme.
 - Projenin kodunu düzenleme ve örnek dosyalar oluşturma. Bu sohbette `/pm-setup` çalıştırma.
@@ -37,7 +40,7 @@ Katmanlar `core` ve seçildiyse `map`, `swarm`, `evren` olur; `evren`'i (bazı k
 
 ### 2. Python'u ve Git'i kontrol et, project-manager'ı indir
 
-Python 3.11 veya daha yeni bir sürüm ile Git gerekir. `python --version` ya da `git --version` hata verirse kullanıcıya [Başlangıç](getting-started.md) sayfasındaki "Başlamadan önce" bölümünün komutlarını göster, onay verirse çalıştır; program hâlâ bulunamıyorsa yeni bir terminal açmasını iste. İkisi de çalışmadan devam etme.
+Python 3.11 veya daha yeni bir sürüm ile Git gerekir. `python --version` ya da `git --version` hata verirse kullanıcıya [Başlangıç](getting-started.md) sayfasındaki "Kurulum ekranına ya da elle kuruluma başlamadan önce" bölümünün komutlarını göster, onay verirse çalıştır; program hâlâ bulunamıyorsa yeni bir terminal açmasını iste. İkisi de çalışmadan devam etme.
 
 project-manager'ı projenin içine değil, **yanına** (projeyi barındıran üst klasöre) klonla:
 

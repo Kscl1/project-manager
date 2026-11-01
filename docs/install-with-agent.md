@@ -3,10 +3,12 @@ title: Install with your agent
 description: The steps a coding agent follows to install project-manager into your project, asking you before every change.
 ---
 
-You do not have to install project-manager by hand. Open your coding agent (Claude Code, Codex, Pi or another) in the folder that holds your project, and paste this:
+You do not have to install project-manager by hand. Open your coding agent (Claude Code, Codex, Pi or another) in the folder that holds your project: in Claude Desktop, click **Code** and choose the folder; in a terminal, run `cd "<your project folder>"`, then `claude`. The only command you type yourself is `/pm-setup`, in that agent's chat box after the install (Pi: `/skill:pm-setup`, Codex: `$pm-setup`).
+
+Paste this into the chat box:
 
 ```text
-Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md (download it with curl if your web tool only gives a summary), follow it step by step, ask me before every change, and stop where it says to stop.
+Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md, follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
 The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
@@ -17,6 +19,7 @@ The agent asks a few questions, checks your machine, installs on a new branch of
 
 You install project-manager into the user's project. Follow these steps in order.
 
+- If you received only a summary of this page instead of its full text, fetch it in full before step 1 (for example with `curl`) and read all of it.
 - Talk to the user in their language, plainly; assume they know their project, not AI or project-management words. Ask one question at a time.
 - Before each command that changes something (an install, a git command that writes, the installer), say in one sentence what it does, show it, and run it only after a clear yes. Read-only checks need no yes. Never add `sudo` to npm.
 - Do not edit the project's code and do not create example files. Do not run `/pm-setup` here.
@@ -37,7 +40,7 @@ The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren
 
 ### 2. Check Python and Git, and get project-manager
 
-It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found. Go on only when both work.
+It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start with the setup screen or by hand" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found. Go on only when both work.
 
 Clone project-manager **next to** the project, in the folder that holds it, never inside it:
 
