@@ -874,7 +874,8 @@ def main(argv=None):
                 " as they are, then merge them by hand."
             )
             return EXIT_CONFLICT
-    print(f"{'Upgrading' if args.upgrade else 'Installing'} the package from {PKG} into {target}")
+    print(f"Project: {target}")  # the folder this run changes, first, so a long log says where it went
+    print(f"{'Upgrading' if args.upgrade else 'Installing'} the package from {PKG}")
 
     manifest = read_manifest(target)
     if args.dry_run:

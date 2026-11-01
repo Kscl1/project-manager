@@ -612,6 +612,12 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("Your AGENTS.md lacks", result.stdout)
 
+    def test_a_real_install_names_the_project_first(self):
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], f"Project: {self.root.resolve()}")
+
     def test_a_real_install_prints_a_short_result_and_the_next_steps(self):
         planned = self.run_init(self.root, "--check")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
