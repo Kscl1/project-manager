@@ -121,10 +121,16 @@ def main(argv=None):
 
     found = entry(ROOT, args.name)
     if found is None:
-        print(
-            "The map is not installed: it is an optional layer, added with "
-            "`python .pm/tools/pm_init.py --map`. Nothing was started."
-        )
+        if (ROOT / ".agents" / "skills" / "pm-likec4-dsl").is_dir():  # the map layer's skill: the layer is there
+            print(
+                "The map layer is installed, but .claude/launch.json has no `map` entry to start it; upgrading the "
+                "package adds the entry (see the upgrade guide). Nothing was started."
+            )
+        else:
+            print(
+                "The map is not installed: it is an optional layer, added with "
+                "`python .pm/tools/pm_init.py --map`. Nothing was started."
+            )
         return 1
     command, port = found
     address = ADDRESS.format(port=port)
@@ -149,6 +155,11 @@ def main(argv=None):
     process = start([program, *command[1:]], ROOT, log)
     deadline = time.monotonic() + WAIT_SECONDS
     while not listening(port):
+        if process.poll() is not None:  # it stopped before it answered: waiting longer would not help
+            print(f"The {args.name} stopped before it answered at {address} (exit code {process.returncode}).")
+            print(f"I ran `{' '.join(command)}`; its output is in {log.relative_to(ROOT).as_posix()}.")
+            print("Read that file, then run this command again.")
+            return 1
         if time.monotonic() > deadline:
             print(f"The {args.name} did not answer at {address} within {WAIT_SECONDS} seconds.")
             print(f"I ran `{' '.join(command)}`; its output is in {log.relative_to(ROOT).as_posix()}.")

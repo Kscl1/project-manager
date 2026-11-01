@@ -36,9 +36,13 @@ MAP = {
 
 
 class FakeProcess:
-    """Stands in for a started server: only the process id is read."""
+    """Stands in for a started server: its process id, and whether it has stopped (None while it runs)."""
 
     pid = 4321
+    returncode = None
+
+    def poll(self):
+        return self.returncode
 
 
 class OpenTest(unittest.TestCase):
@@ -54,6 +58,7 @@ class OpenTest(unittest.TestCase):
         self.opened = []  # every address handed to the browser
         self.programs = {"backlog": "/bin/backlog", "npx": "/bin/npx"}
         self.check_code = 0
+        self.exit_code = None  # the started server's exit code; None while it runs
         for patch in (
             mock.patch.object(pm_open, "ROOT", self.root),
             mock.patch.object(pm_open, "WAIT_SECONDS", 0.05),
@@ -75,7 +80,9 @@ class OpenTest(unittest.TestCase):
 
     def spawn(self, command, **kwargs):
         self.runs.append((command, kwargs))
-        return FakeProcess()
+        process = FakeProcess()
+        process.returncode = self.exit_code
+        return process
 
     def check(self, command, **kwargs):
         self.checks.append(command)
@@ -149,6 +156,24 @@ class OpenTest(unittest.TestCase):
         self.assertEqual(self.runs, [])
         self.assertEqual(self.checks, [])
         self.assertEqual(self.opened, [])
+
+    def test_board_that_stops_at_once_is_reported_without_the_full_wait(self):
+        self.answers = [False]
+        self.exit_code = 3
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("stopped before it answered", out)
+        self.assertIn("exit code 3", out)
+        self.assertIn(".pm/local/open-board.log", out)
+        self.assertEqual(self.opened, [])
+
+    def test_map_layer_without_its_entry_points_to_the_upgrade(self):
+        (self.root / ".agents" / "skills" / "pm-likec4-dsl").mkdir(parents=True)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 1)
+        self.assertIn("map layer is installed", out)
+        self.assertIn("upgrading the package adds the entry", out)
+        self.assertEqual(self.runs, [])
 
     def test_map_that_is_not_downloaded_stops_before_starting(self):
         self.write_launch(MAP)
