@@ -38,7 +38,13 @@ class RepoTestCase(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def run_check(self, *args):
+    def write_bytes(self, relpath, data):
+        path = self.root / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def run_check(self, *args, env=None):
         return subprocess.run(
             [sys.executable, str(self.root / ".pm" / "tools" / "pm_check.py"), *args],
             cwd=self.root,
@@ -46,6 +52,7 @@ class RepoTestCase(unittest.TestCase):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env={**os.environ, **env} if env else None,
         )
 
     def git(self, *args, env=None):
@@ -1318,6 +1325,72 @@ class WriteIndexMessageTest(RepoTestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("Nothing to write", result.stdout)
+
+    def test_a_log_that_is_not_saved_as_utf8_is_left_alone(self):
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        log = self.write_bytes(".pm/decisions.md", "# Kararlar\n\nŞifre\n".encode("cp1254"))
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("is not saved as UTF-8", result.stderr)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(log.read_bytes(), "# Kararlar\n\nŞifre\n".encode("cp1254"))
+
+
+class WindowsEncodingTest(RepoTestCase):
+    """A doc a Windows editor saved in its own code page is read, never a UnicodeDecodeError traceback."""
+
+    def test_a_cp1254_doc_does_not_stop_the_check(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n\nŞifre ığüşç öğren.\n".encode("cp1254"))
+
+        result = self.run_check()
+
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("No problems found", result.stdout)
+
+    def test_a_cp1254_doc_is_still_checked(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n\n[eksik](yok.md)\n".encode("cp1254"))
+
+        result = self.run_check()
+
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("link to yok.md does not exist", result.stdout)
+
+
+class ByteOrderMarkTest(RepoTestCase):
+    """PowerShell 5.1 writes a byte-order mark; the frontmatter behind it still counts."""
+
+    def test_a_bom_doc_with_frontmatter_is_checked_as_a_living_doc(self):
+        self.write(
+            "docs/guide.md",
+            "\ufeff---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n\n`docs/gone.md`\n",
+        )
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("docs/gone.md does not exist", result.stdout)
+
+    def test_a_bom_does_not_hide_depends_on(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("docs/guide.md", "\ufeff---\ndepends_on: [D-99]\n---\n\nbody\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("depends on D-99, which does not exist", result.stdout)
+
+    def test_a_second_byte_order_mark_in_the_text_does_not_hide_it_either(self):
+        # A file written by one Windows tool and pasted through another can carry the mark twice.
+        self.write("docs/guide.md", "\ufeff\ufeff---\ntype: living_doc\ntitle: Guide\n---\n\n`docs/gone.md`\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("docs/gone.md does not exist", result.stdout)
 
 
 if __name__ == "__main__":

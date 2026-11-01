@@ -15,6 +15,8 @@ a repository next to this one (`../repo/file`). A deleted file passes when its d
 A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
 
 A clean result means the docs are consistent, not that they are correct.
+A doc saved in a Windows code page or with a byte-order mark is read anyway: its encoding never stops the check
+with a traceback.
 """
 
 import argparse
@@ -105,6 +107,12 @@ def plural(count, word):
     return f"{count} {word}" + ("" if count == 1 else "s")
 
 
+def read_text(path):
+    """A doc as text, whatever wrote it: a byte-order mark (PowerShell 5.1) or bytes from a Windows code page
+    (cp1254) must not stop the check, so undecodable bytes become replacement characters instead of a traceback."""
+    return path.read_text(encoding="utf-8-sig", errors="replace")
+
+
 def git(*args):
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
@@ -129,7 +137,7 @@ def load_decisions():
     for ident, replacement in list(decisions.items()):
         if replacement not in (None, ARCHIVED) and replacement not in decisions:
             problems.append(f"{ident}: replaced_by {replacement} does not exist\n    → name an existing decision")
-    for number, line in enumerate(DECISIONS.read_text(encoding="utf-8").splitlines(), start=1):
+    for number, line in enumerate(read_text(DECISIONS).splitlines(), start=1):
         match = DECISION.search(line)
         if not match:
             continue
@@ -156,7 +164,7 @@ def decision_files():
 
 def decision_meta(path):
     """The frontmatter fields of a decision file as plain strings, plus its first `# ` heading."""
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = read_text(path).splitlines()
     fields = read_frontmatter(lines)
     meta = {
         key: ", ".join(v for _, v in fields.get(key, [])) for key in ("id", "title", "status", "date", "replaced_by")
@@ -208,7 +216,7 @@ def check_index():
     """With one file per decision, the index must list exactly those files."""
     if not decision_files():
         return []
-    text = DECISIONS.read_text(encoding="utf-8")
+    text = read_text(DECISIONS)
     start, end = text.find(INDEX_BEGIN), text.find(INDEX_END)
     if start < 0 or end < 0 or text[start : end + len(INDEX_END)] != render_index():
         return [
@@ -220,7 +228,7 @@ def check_index():
 def check_worklogs():
     """Once one worklog carries frontmatter, every worklog must: type, title, date (the file's date), task, models."""
     logs = sorted(WORKLOG_DIR.glob("*.md")) if WORKLOG_DIR.is_dir() else []
-    fronts = {path: read_frontmatter(path.read_text(encoding="utf-8").splitlines()) for path in logs}
+    fronts = {path: read_frontmatter(read_text(path).splitlines()) for path in logs}
     if not any(("type", "worklog") in [(k, v) for k, vals in f.items() for _, v in vals] for f in fronts.values()):
         return []
     problems = []
@@ -240,8 +248,24 @@ def check_worklogs():
     return problems
 
 
+def rewrite_text(path):
+    """The text of a file this tool rewrites, or None when it is not saved as UTF-8, with one plain line why.
+    A rewrite would quietly destroy the bytes it could not decode, so that file is left alone."""
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        print(
+            f"Nothing written: {rel(path)} is not saved as UTF-8, so a rewrite would lose its characters. "
+            "Open it, save it as UTF-8, and run this again.",
+            file=sys.stderr,
+        )
+        return None
+
+
 def write_index():
-    text = DECISIONS.read_text(encoding="utf-8")
+    text = rewrite_text(DECISIONS)
+    if text is None:
+        return None
     start, end = text.find(INDEX_BEGIN), text.find(INDEX_END)
     if start < 0 or end < 0:
         text = text.rstrip("\n") + "\n\n" + render_index() + "\n"
@@ -257,7 +281,7 @@ def records():
     for path in markdown_files():
         if rel(path).startswith(TASK_DIRS + DRAFT_DIRS):
             continue
-        front = read_frontmatter(path.read_text(encoding="utf-8").splitlines())
+        front = read_frontmatter(read_text(path).splitlines())
         kind = front.get("type", [(0, "")])[0][1]
         if kind in found:
             found[kind].append((path, front))
@@ -320,7 +344,7 @@ def check_catalogue():
     """When the catalogue page carries the markers, its generated list must match the records."""
     if not CATALOGUE.exists():
         return []
-    text = CATALOGUE.read_text(encoding="utf-8")
+    text = read_text(CATALOGUE)
     start, end = text.find(CATALOGUE_BEGIN), text.find(CATALOGUE_END)
     if start < 0 or end < 0:
         return []
@@ -335,7 +359,9 @@ def write_catalogue():
     """Rewrite the generated part of the catalogue page; say what was written, or '' when the page has no markers."""
     if not CATALOGUE.exists():
         return ""
-    text = CATALOGUE.read_text(encoding="utf-8")
+    text = rewrite_text(CATALOGUE)
+    if text is None:
+        return None
     start, end = text.find(CATALOGUE_BEGIN), text.find(CATALOGUE_END)
     if start < 0 or end < 0:
         return ""
@@ -346,9 +372,10 @@ def write_catalogue():
 
 
 def read_frontmatter(lines):
-    """Return {key: [(line number, value), ...]} for `key: [a, b]`, `key: value` and `key:` + `- item` forms."""
+    """Return {key: [(line number, value), ...]} for `key: [a, b]`, `key: value` and `key:` + `- item` forms.
+    A byte-order mark in front of the opening `---` (PowerShell 5.1 writes one) does not hide the frontmatter."""
     fields, key = {}, None
-    if not lines or lines[0].strip() != "---":
+    if not lines or lines[0].strip("\ufeff").strip() != "---":
         return fields
     for number, line in enumerate(lines[1:], start=2):
         if line.strip() == "---":
@@ -406,7 +433,7 @@ def vendored(name):
 
 def check_file(path, decisions):
     name = rel(path)
-    lines = path.read_text(encoding="utf-8").splitlines()
+    lines = read_text(path).splitlines()
     problems = []
 
     for number, ref in read_frontmatter(lines).get("depends_on", []):
@@ -575,7 +602,12 @@ def deleted_on_line(repo, target, line):
     """True when a commit named on the line deleted the target (a rename counts as a delete) in that repo."""
     for commit in COMMIT.findall(line):
         show = ["git", "-C", str(repo), "-c", "core.quotePath=false", "show", "--no-renames", "--diff-filter=D"]
-        result = subprocess.run([*show, "--name-only", "--format=", commit], capture_output=True, encoding="utf-8")
+        try:
+            result = subprocess.run(
+                [*show, "--name-only", "--format=", commit], capture_output=True, encoding="utf-8", errors="replace"
+            )
+        except OSError:  # git is not installed here: no commit history to read, so nothing is proven deleted
+            return False
         gone = result.stdout.splitlines() if result.returncode == 0 else []
         if any(p == target or p.endswith("/" + target) for p in gone):
             return True
@@ -736,7 +768,7 @@ def audit_targets():
         for path in sorted((ROOT / directory).rglob("*.md")):
             if "archive" in path.relative_to(ROOT / directory).parts:
                 continue
-            lines = path.read_text(encoding="utf-8").splitlines()
+            lines = read_text(path).splitlines()
             task_id = next((value for _, value in read_frontmatter(lines).get("id", [])), "")
             if task_id:
                 targets[task_id.strip("'\"")] = list(section_lines(lines, "Implementation Notes"))
@@ -833,7 +865,7 @@ def check_audit_outcomes(name, lines):
         if report.is_file():
             findings = {
                 int(match.group(1))
-                for line in section_lines(report.read_text(encoding="utf-8").splitlines(), "Findings")
+                for line in section_lines(read_text(report).splitlines(), "Findings")
                 for match in [re.match(r"^\|\s*([0-9]+)\s*\|", line)]
                 if match
             }
@@ -846,7 +878,7 @@ def check_audit_outcomes(name, lines):
 
 def stale_flags(path):
     """Docs that declare `describes` are stale when the described paths changed after `reviewed`."""
-    fields = read_frontmatter(path.read_text(encoding="utf-8").splitlines())
+    fields = read_frontmatter(read_text(path).splitlines())
     globs = [value for _, value in fields.get("describes", [])]
     if not globs:
         return []
@@ -884,7 +916,7 @@ def git_visible():
 
 def tool_owned():
     """The files listed in .pm/tool-owned.txt: their tool keeps them current, so they are not checked here."""
-    lines = TOOL_OWNED.read_text(encoding="utf-8").splitlines() if TOOL_OWNED.is_file() else []
+    lines = read_text(TOOL_OWNED).splitlines() if TOOL_OWNED.is_file() else []
     return {ROOT / line.strip() for line in lines if line.strip() and not line.strip().startswith("#")}
 
 
@@ -928,7 +960,7 @@ KEY_PREFIX = re.compile(r"^\s*(?:[-*]\s+)?(?:\[[ xX]\]\s+)?(?:#\d+\s+)?(?:[A-ZÇ
 def project_language():
     """The code on the Language line of the root AGENTS.md, or '' when it is missing or English."""
     path = ROOT / "AGENTS.md"
-    text = FENCE.sub("", path.read_text(encoding="utf-8")) if path.is_file() else ""
+    text = FENCE.sub("", read_text(path)) if path.is_file() else ""
     found = LANGUAGE.search(text)
     code = found.group(1).lower() if found else ""
     return "" if code.split("-")[0] in ("", "en") else code
@@ -979,9 +1011,7 @@ def main():
 
     if args.stale:
         docs = list(markdown_files())
-        covered = [
-            path for path in docs if read_frontmatter(path.read_text(encoding="utf-8").splitlines()).get("describes")
-        ]
+        covered = [path for path in docs if read_frontmatter(read_text(path).splitlines()).get("describes")]
         flags = [flag for path in covered for flag in stale_flags(path)]
         for flag in flags:
             print(flag)
@@ -992,10 +1022,11 @@ def main():
         return 0
 
     if args.write_index:
-        written = [what for what in (write_index() if decision_files() else "", write_catalogue()) if what]
+        results = [write_index() if decision_files() else "", write_catalogue()]
+        written = [what for what in results if what]
         if written:
             print(f"Wrote {' and '.join(written)}")
-        else:
+        elif not any(result is None for result in results):
             print("Nothing to write: no decision files and no catalogue markers")
         return 0
 
@@ -1007,7 +1038,7 @@ def main():
     language = project_language()
     for path in files:
         problems += check_file(path, decisions)
-        if language and is_record(path) and reads_english(path.read_text(encoding="utf-8").splitlines()):
+        if language and is_record(path) and reads_english(read_text(path).splitlines()):
             print(
                 f"Info: {rel(path)}: reads as English, but AGENTS.md sets Language: {language}\n"
                 f"    → write the prose in the project language; keys such as Next: stay English (not a failure)"
