@@ -39,8 +39,8 @@ Each comes after the action, as the last paragraph of the reply that did it.
 
 **board**: the first time two tasks exist, or the user asks what is left; not before.
 
-- EN: Every task sits on a board and moves through the columns Ready, Active and Done. `backlog browser` opens it if you want to look; keeping it current is my job.
-- TR: Her görev bir panoda durur ve Ready, Active, Done sütunları arasında ilerler. Bakmak istersen `backlog browser` komutu panoyu açar; güncel tutmak benim işim.
+- EN: Every task sits on a board and moves through the columns Ready, Active and Done. Say "show the board" if you want to look; keeping it current is my job.
+- TR: Her görev bir panoda durur ve Ready, Active, Done sütunları arasında ilerler. Bakmak istersen "panoyu göster" de; güncel tutmak benim işim.
 
 **resume**: at the close of the first session, with the prompt for the next one.
 
@@ -58,6 +58,13 @@ After it is created with that sentence as its acceptance criterion, show the ID 
 
 - EN: This is your criterion. When the work is done, we check it against this and close the task.
 - TR: Bu senin kabul ölçütün. İş bitince sonucu buna göre kontrol edip görevi kapatacağız.
+
+## What you can say
+
+At the end of `/pm-setup`, after the resume hint (or alone when the mode is off), as written:
+
+- EN: From now on you can just say: "continue" (where we are, then on), "what next?" (the next job), "show the board" (the task board opens), "explain <word>" (a plain answer) or "stop teaching".
+- TR: Bundan sonra şunları demen yeter: "devam" (nerede kaldığımız, sonra devam), "sırada ne var?" (sıradaki iş), "panoyu göster" (görev panosu açılır), "<kelime> nedir?" (sade bir cevap) ya da "anlatmayı bırak".
 
 ## When a step the user did becomes known
 

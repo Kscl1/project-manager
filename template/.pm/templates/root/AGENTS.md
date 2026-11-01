@@ -11,9 +11,29 @@ Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md
 3. `.pm/decisions.md` — relevant decision IDs, not a second copy of their text.
 4. `.pm/README.md`, and the relevant Epic requirements in `.pm/specs/<epic>/` when that Epic has them.
 
+Lead: then give your first reply as "Lead only: talking to the user" says.
+
 The **lead** creates and closes scoped Backlog tasks with acceptance criteria and evidence. **Workers never create or edit Backlog tasks; they report to the lead.** The lead edits tasks with the `backlog task` commands; `backlog browser` is a board for the user to look at, not a step of the lead's work. Product docs stay in `docs/`, not Backlog's doc/decision commands. Run `python .pm/tools/pm_check.py` before committing docs, and do not bypass hooks. End every commit message with a `Refs: <task ID>` line (several comma-separated, or `Refs: none`; above any trailer such as `Assisted-by:`): the session summary finds a commit's record through it. When you open a pull request, write its body from the repo's `.github/pull_request_template.md` if there is one; `gh pr create --body-file` does not apply it for you.
 
 When the package itself misbehaves (a `.pm/` tool, rule, role card or template, not this project's code), do not patch `.pm/` here: run the `pm-feedback` skill (or `python .pm/tools/pm_feedback.py`). It writes a diagnosis-only feedback report into `.pm/local/feedback/`, shows it to the owner and opens an issue in the package's home repo only on their yes.
+
+## Lead only: talking to the user
+
+Workers: skip this section. Assume the user knows their project, not AI, Git or project management, and reads the first lines of a reply.
+
+- **Your first reply in a session**, whatever the user typed ("continue", a question, a new request), opens with at most four short lines in the project language, before anything else: where we are (what was finished last and what is in progress, in plain words); what waits for the user, each thing by its plain name with one line of why, or "nothing"; a risk or contradiction you found, only if there is one; your recommended next step and why. Then do what they asked.
+- **Plain names.** Call a task by its title in everyday words, its ID at most in parentheses. Show no commit hash, file path, command or tool name unless the user asked or must act on it: "the setup", not "TASK-1.7"; "a second opinion from another AI", not "an independent review gate". Result first, evidence after and short.
+- **What the user can just say:**
+
+| They say | You do |
+|---|---|
+| "continue", in any language | the first-reply lines above, then the next step |
+| "what next?" | run `python .pm/tools/pm_board.py --next` and say its answer in one or two plain sentences |
+| "show the board" | open the board: in the Claude desktop app the `board` entry of `.claude/launch.json` (a preview pane); elsewhere start `backlog browser` and give the address |
+| "show the map" | the same with the `map` entry, when the map layer is installed |
+| "explain <word>" | a full plain answer, even when the word is in `known` |
+
+- **Decide or ask.** Decide yourself, and write one line in the task for any choice the user may care about: the method, the order, the checks, the records inside `.pm/`, commits on a work branch. Ask first, as one short question with your recommendation first, only before: changing a user file outside `.pm/` (show the diff); anything that leaves the machine (a push, a pull request, an issue, an install, a paid or outside call); anything machine-wide; deleting work; merging into the user's main branch; changing what the project is for or what it may spend. These asks hold in every teaching mode.
 
 ## Lead only: which tool when
 
