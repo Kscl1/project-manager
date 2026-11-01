@@ -121,12 +121,29 @@ def open_criteria(lines):
     return criteria
 
 
+def resume_tool():
+    """The sibling pm_resume script, so both tools read a `Review by:` line the same way.
+
+    The two ship together; a lone copy of this file still prints the board, just without the hold dates.
+    """
+    tools = Path(__file__).resolve().parent
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    try:
+        import pm_resume
+    except ImportError:
+        return None
+    return pm_resume
+
+
 def read_task(path):
     lines = path.read_text(encoding="utf-8-sig").splitlines()
     fields = read_frontmatter(lines)
     if fields is None:
         return None
     labels = fields.get("labels", [])
+    resume = resume_tool()
+    review_by = resume.review_fields(resume.implementation_notes(lines))["review_by"] if resume else None
     return {
         "id": fields.get("id", ""),
         "title": fields.get("title", ""),
@@ -140,6 +157,7 @@ def read_task(path):
         "updated": fields.get("updated_date", "").strip(),
         "next": live_next(lines),
         "criteria": open_criteria(lines),
+        "review_by": resume.as_date(review_by) if resume else None,
     }
 
 
@@ -308,8 +326,15 @@ def start_lines(task):
     ]
 
 
-def next_lines(tasks, closed_done=()):
+def held_on_purpose(task, today):
+    """A `Review by:` date that has not passed yet: the lead parked this task on purpose."""
+    review_by = task["review_by"]
+    return review_by is not None and review_by >= today
+
+
+def next_lines(tasks, closed_done=(), today=None):
     """The one task to work on now in plain words, or one line saying there is nothing to start."""
+    today = today or date.today()
     tasks = [task for task in tasks if task["id"] and task["title"]]
     active = newest_first([task for task in tasks if task["status"] == ACTIVE])
     if active:
@@ -317,12 +342,21 @@ def next_lines(tasks, closed_done=()):
     done = {task["id"] for task in tasks if task["status"] == DONE} | set(closed_done)
     ready = [task for task in tasks if task["status"] == READY]
     startable = [task for task in ready if all(name in done for name in task["dependencies"])]
+    held = [task for task in startable if held_on_purpose(task, today)]
+    startable = [task for task in startable if task not in held]
     if startable:
         return start_lines(min(startable, key=start_key))
-    lines = ["Nothing is Ready to start. The lead can open a task from the user's next request."]
+    if held:
+        lines = [
+            f"Nothing to start; {len(held)} task(s) wait on purpose (Review by). "
+            "Ask the user what to build or fix next."
+        ]
+    else:
+        lines = ["Nothing is Ready to start. The lead can open a task from the user's next request."]
     for task in sorted(ready, key=order):
         waiting = ", ".join(name for name in task["dependencies"] if name not in done)
-        lines.append(f"- Ready but waiting for another task: {task['id']} (needs {waiting})")
+        if waiting:
+            lines.append(f"- Ready but waiting for another task: {task['id']} (needs {waiting})")
     return lines
 
 
@@ -366,7 +400,9 @@ def main():
     tasks_dir = args.tasks if args.tasks else default_tasks_dir()
     tasks = read_tasks(tasks_dir)
     if args.next:
-        print("\n".join(next_lines(tasks, closed_done_ids(tasks_dir))))
+        resume = resume_tool()
+        today = (resume.as_date(args.today) if resume else None) or date.today()
+        print("\n".join(next_lines(tasks, closed_done_ids(tasks_dir), today)))
         return 0
     if args.tree:
         print(tree_block(tasks, args.today))

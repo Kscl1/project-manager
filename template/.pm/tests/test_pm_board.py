@@ -845,6 +845,59 @@ class NextCommandTest(PmBoardTestCase):
 
         self.assertIn("Acceptance criteria: none written yet", self.run_next().stdout)
 
+    def test_a_ready_task_held_with_a_review_by_date_is_skipped(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2099-12-31 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Parked on purpose",
+            status="Ready",
+            priority="high",
+            ordinal="1",
+        )
+        self.task_file(
+            "task-2.md", "", id="TASK-2", title="Free to start", status="Ready", priority="low", ordinal="900"
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Free to start (TASK-2)", out)
+        self.assertNotIn("Parked on purpose", out)
+
+    def test_a_held_task_whose_review_date_passed_is_offered_again(self):
+        self.task_file(
+            "task-1.md",
+            "## Implementation Notes\nReview by: 2020-01-01 · Sam · after the design talk\n",
+            id="TASK-1",
+            title="Hold is over",
+            status="Ready",
+            priority="high",
+            ordinal="1",
+        )
+
+        out = self.run_next().stdout
+
+        self.assertIn("Start: Hold is over (TASK-1)", out)
+
+    def test_only_held_tasks_left_says_so_in_plain_words(self):
+        for number, review_by in ((1, "2099-12-31"), (2, "2099-11-30")):
+            self.task_file(
+                f"task-{number}.md",
+                f"## Implementation Notes\nReview by: {review_by} · Sam · after the design talk\n",
+                id=f"TASK-{number}",
+                title=f"Parked {number}",
+                status="Ready",
+                priority="high",
+            )
+
+        result = self.run_next()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "Nothing to start; 2 task(s) wait on purpose (Review by). Ask the user what to build or fix next.",
+        )
+
     def test_next_appears_in_the_help(self):
         result = self.run_board("--help")
 
