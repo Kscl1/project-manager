@@ -157,7 +157,12 @@ class ResumeSummaryTest(unittest.TestCase):
             self.assertIn(heading, out)
             positions.append(out.index(heading))
         self.assertEqual(positions, sorted(positions))
-        for line in expected_status.strip().splitlines():
+        branch, *changed_files = expected_status.strip().splitlines()
+        self.assertIn(branch.removeprefix("## "), out)
+        self.assertNotIn(
+            f"## {branch.removeprefix('## ')}", out, "the branch line reads as words, not as a Markdown heading"
+        )
+        for line in changed_files:
             self.assertIn(line.strip(), out)
         for subject in subjects[1:]:
             self.assertIn(subject, out)

@@ -658,6 +658,14 @@ def commits_main(task_id):
     return 0
 
 
+def git_status_lines(output):
+    """`git status -sb` as plain lines: the branch line loses git's `## ` marker so it reads as words."""
+    lines = output.splitlines() or [""]
+    if lines[0].startswith("## "):
+        lines[0] = lines[0][3:]
+    return lines
+
+
 def render_section(name, body):
     return f"## {name}\n{body}"
 
@@ -722,9 +730,9 @@ def main(brief=False):
 
     sections = []
     if brief:
-        status = status_output.splitlines() or [""]
+        status = git_status_lines(status_output)
         changed = f"\n{len(status) - 1} changed file(s)" if len(status) > 1 else ""
-        sections.append(("Git", status[0].removeprefix("## ") + changed))
+        sections.append(("Git", status[0] + changed))
         if closed:
             sections.append(("Recently closed", "\n".join(line for line in closed if line.startswith("- "))))
         sections.append(("Open tasks", "\n".join(brief_task_lines(tasks)) or "- (none)"))
@@ -733,7 +741,7 @@ def main(brief=False):
         if log_output is None:  # a new repository has no commits yet, which is not a failure
             no_commits = git_stdout(["rev-parse", "--git-dir"], None) is not None
             log_output = "(no commits yet)" if no_commits else "⚠️ Could not run `git log -5 --oneline`."
-        sections += [("Git status", status_output), ("Last 5 commits", log_output)]
+        sections += [("Git status", "\n".join(git_status_lines(status_output))), ("Last 5 commits", log_output)]
         if closed:
             sections.append(("Recently closed tasks", "\n".join(closed)))
         sections.append(("Open tasks", "\n".join(full_task_lines(tasks)) or "- (none)"))
