@@ -7,9 +7,9 @@ Project-specific product rules belong here; the portable work system lives in `.
 Workers: skip this list. Your brief is your whole world; see .pm/roles/worker.md.
 
 1. `python .pm/tools/pm_board.py --resume` — compare active task notes with git, worktrees and reports; do not trust an old transcript.
-2. `.pm/charter.md` — project intent, acceptance and where every answer lives.
+2. `.pm/charter.md` — project intent, acceptance and where every answer lives (`/pm-setup` writes it; until then there is none).
 3. `.pm/decisions.md` — relevant decision IDs, not a second copy of their text.
-4. `.pm/README.md` and the relevant Epic requirements in `.pm/specs/<epic>/`.
+4. `.pm/README.md`, and the relevant Epic requirements in `.pm/specs/<epic>/` when that Epic has them.
 
 The **lead** creates and closes scoped Backlog tasks with acceptance criteria and evidence. **Workers never create or edit Backlog tasks; they report to the lead.** The lead edits tasks with the `backlog task` commands; `backlog browser` is a board for the user to look at, not a step of the lead's work. Product docs stay in `docs/`, not Backlog's doc/decision commands. Run `python .pm/tools/pm_check.py` before committing docs, and do not bypass hooks. End every commit message with a `Refs: <task ID>` line (several comma-separated, or `Refs: none`; above any trailer such as `Assisted-by:`): the session summary finds a commit's record through it. When you open a pull request, write its body from the repo's `.github/pull_request_template.md` if there is one; `gh pr create --body-file` does not apply it for you.
 
