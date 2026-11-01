@@ -1,8 +1,16 @@
 # project-manager
 
-You talk to your AI coding assistant in plain words; it keeps your project's tasks, decisions and notes as files in your project, so the next session continues where you stopped.
+Used ChatGPT or Gemini on your phone? You already know how to ask for help in plain words. Here the same words work, and the assistant can also read and change the files in the project folder you open. project-manager helps it keep the work notes for the next chat.
 
-You do not have to learn a new tool: it uses files and programs you already have. Your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
+You do not have to learn a new tool: it uses files and programs you already have. It is not another AI model or a website you visit; your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
+
+**Only used AI on your phone?** [Start here](docs/first-time.md) · [Türkçe](docs/tr/index.md)
+
+![Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.](public/next-chat.svg)
+
+**The new chat reads saved files, not the old assistant's mind.** In words: you ask for a small change; after your yes the assistant updates the project and writes a work note in `.pm/`; you close the chat; in a new chat you open the same folder and say "continue"; the assistant reads the notes, checks the files and names the next action.
+
+**The project's notebook.** Think of `.pm/` as the project's notebook. The assistant writes the job list, the reasons for choices and where you stopped there, as plain text files you can open. It is not the AI's memory, and it does not keep every word of a chat: the assistant reads the notes and checks the files each time.
 
 ## What you need
 
@@ -36,7 +44,7 @@ Do you work in Turkish? Paste this one instead; it points the agent at the Turki
 project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku, adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
 ```
 
-The agent asks which project and which optional parts you want, checks your machine, keeps its changes on a separate branch so you can undo them, and writes a short note for the next chat. Nothing changes without your yes. Then you open the project again in a new chat and type `/pm-setup`.
+The agent asks which project and which optional parts you want, checks your machine, keeps its changes on a separate branch so you can undo them, and writes a short note for the next chat. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did. Then you open the project again in a new chat and type `/pm-setup`.
 
 The steps your agent follows: [Install with your agent](docs/install-with-agent.md) ([Türkçe](docs/tr/install-with-agent.md)).
 
