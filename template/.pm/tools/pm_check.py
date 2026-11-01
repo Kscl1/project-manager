@@ -15,11 +15,12 @@ a repository next to this one (`../repo/file`). A deleted file passes when its d
 A file another tool writes in its own format is listed in .pm/tool-owned.txt and not checked at all.
 
 A clean result means the docs are consistent, not that they are correct.
-The first line of a normal run names the folder it checked, so a wrong folder is visible at once. A doc saved in a
-Windows code page or with a byte-order mark is read anyway: its encoding never stops the check with a traceback.
+The first line of a normal run names the folder it checked, so a wrong folder is visible at once.
+UTF-8 and UTF-16 byte-order marks are read. Other invalid text is reported so it can be saved as UTF-8.
 """
 
 import argparse
+import codecs
 import functools
 import os
 import re
@@ -110,10 +111,38 @@ def plural(count, word):
     return f"{count} {word}" + ("" if count == 1 else "s")
 
 
+class InvalidDocumentEncoding(Exception):
+    def __init__(self, path):
+        self.path = path
+
+
+BAD_ENCODINGS = set()
+
+
 def read_text(path):
-    """A doc as text, whatever wrote it: a byte-order mark (PowerShell 5.1) or bytes from a Windows code page
-    (cp1254) must not stop the check, so undecodable bytes become replacement characters instead of a traceback."""
-    return path.read_text(encoding="utf-8-sig", errors="replace")
+    """Read UTF-8 or BOM-marked UTF-16 strictly; never check text with replacement characters."""
+    data = path.read_bytes()
+    if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        raise InvalidDocumentEncoding(path)
+    encoding = "utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
+    try:
+        return data.decode(encoding).replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeDecodeError:
+        raise InvalidDocumentEncoding(path) from None
+
+
+def checked(call, fallback):
+    """Skip a check whose input cannot be decoded, and report each affected file only once."""
+    try:
+        return call()
+    except InvalidDocumentEncoding as error:
+        BAD_ENCODINGS.add(error.path)
+        return fallback
+
+
+def report_bad_encodings(file=sys.stdout):
+    for path in sorted(BAD_ENCODINGS):
+        print(f"{rel(path)} is not saved as UTF-8; open it and save it as UTF-8, then run this again.", file=file)
 
 
 def git(*args, quiet=False, failure=None):
@@ -155,7 +184,9 @@ def load_decisions():
     if DECISIONS is None:
         return decisions, problems
     for path, archived in decision_files():
-        ident, meta = path.stem, decision_meta(path)
+        ident, meta = path.stem, checked(lambda: decision_meta(path), None)
+        if meta is None:
+            continue
         if ident in decisions:
             problems.append(f"{rel(path)}: {ident} is defined twice\n    → keep one file: in force or archived")
         problems += [f"{rel(path)}: {problem}" for problem in decision_problems(ident, meta, archived)]
@@ -166,7 +197,8 @@ def load_decisions():
     for ident, replacement in list(decisions.items()):
         if replacement not in (None, ARCHIVED) and replacement not in decisions:
             problems.append(f"{ident}: replaced_by {replacement} does not exist\n    → name an existing decision")
-    for number, line in enumerate(read_text(DECISIONS).splitlines(), start=1):
+    text = checked(lambda: read_text(DECISIONS), "")
+    for number, line in enumerate(text.splitlines(), start=1):
         match = DECISION.search(line)
         if not match:
             continue
@@ -178,7 +210,7 @@ def load_decisions():
         replaced = line.lstrip().startswith("- ~~")
         replacement = REPLACED_BY.search(line) if replaced else None
         decisions[match.group(1)] = replacement.group(1) if replacement else None
-    return decisions, problems
+    return (None if BAD_ENCODINGS else decisions), problems
 
 
 def decision_files():
@@ -246,8 +278,9 @@ def check_index():
     if not decision_files():
         return []
     text = read_text(DECISIONS)
+    expected = render_index()
     start, end = text.find(INDEX_BEGIN), text.find(INDEX_END)
-    if start < 0 or end < 0 or text[start : end + len(INDEX_END)] != render_index():
+    if start < 0 or end < 0 or text[start : end + len(INDEX_END)] != expected:
         return [
             f"{rel(DECISIONS)}: the decision index is out of date\n    → run python .pm/tools/pm_check.py --write-index"
         ]
@@ -257,7 +290,8 @@ def check_index():
 def check_worklogs():
     """Once one worklog carries frontmatter, every worklog must: type, title, date (the file's date), task, models."""
     logs = sorted(WORKLOG_DIR.glob("*.md")) if WORKLOG_DIR.is_dir() else []
-    fronts = {path: read_frontmatter(read_text(path).splitlines()) for path in logs}
+    fronts = {path: checked(lambda: read_frontmatter(read_text(path).splitlines()), None) for path in logs}
+    fronts = {path: front for path, front in fronts.items() if front is not None}
     if not any(("type", "worklog") in [(k, v) for k, vals in f.items() for _, v in vals] for f in fronts.values()):
         return []
     problems = []
@@ -465,7 +499,8 @@ def check_file(path, decisions):
     lines = read_text(path).splitlines()
     problems = []
 
-    for number, ref in read_frontmatter(lines).get("depends_on", []):
+    dependencies = read_frontmatter(lines).get("depends_on", []) if decisions is not None else []
+    for number, ref in dependencies:
         if ref not in decisions:
             problems.append(
                 f"{name}:{number}: depends on {ref}, which does not exist\n    → check the ID in the decision log"
@@ -1063,44 +1098,56 @@ def main():
         )
 
     if args.stale:
-        docs = list(markdown_files())
+        docs = checked(lambda: list(markdown_files()), [])
         print(f"Project: {ROOT}")
-        covered = [path for path in docs if read_frontmatter(read_text(path).splitlines()).get("describes")]
-        flags = [flag for path in covered for flag in stale_flags(path)]
+        covered = [
+            path
+            for path in docs
+            if checked(lambda: read_frontmatter(read_text(path).splitlines()), {}).get("describes")
+        ]
+        flags = [flag for path in covered for flag in checked(lambda: stale_flags(path), [])]
         for flag in flags:
             print(flag)
-        print(f"\n{len(flags)} docs may be stale" if flags else "No stale docs")
+        report_bad_encodings()
+        if flags:
+            print(f"\n{len(flags)} docs may be stale")
+        elif BAD_ENCODINGS:
+            print("Some docs could not be checked for staleness")
+        else:
+            print("No stale docs")
         print(
             f"Coverage: {len(covered)} of {len(docs)} docs declare `describes:`; the others are not checked for staleness."
         )
         return 0
 
     if args.write_index:
-        results = [write_index() if decision_files() else "", write_catalogue()]
+        results = [checked(write_index, None) if decision_files() else "", checked(write_catalogue, None)]
         written = [what for what in results if what]
         if written:
             print(f"Wrote {' and '.join(written)}")
         elif not any(result is None for result in results):
             print("Nothing to write: no decision files and no catalogue markers")
-        return 0
+        report_bad_encodings(file=sys.stderr)
+        return 1 if BAD_ENCODINGS else 0
 
     # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
     # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
-    files = staged_markdown_files() if args.staged else None
+    files = checked(staged_markdown_files, None) if args.staged else None
     if args.staged and not files:
+        report_bad_encodings()
         return 1 if files is None else 0
     if not args.staged:
         print(f"Project: {ROOT}")
-    decisions, problems = load_decisions()
-    problems += check_index()
-    problems += check_worklogs()
-    problems += check_catalogue()
+    decisions, problems = checked(load_decisions, (None, []))
+    problems += checked(check_index, [])
+    problems += checked(check_worklogs, [])
+    problems += checked(check_catalogue, [])
     if not args.staged:
-        files = markdown_files()
-    language = project_language()
+        files = checked(lambda: list(markdown_files()), [])
+    language = checked(project_language, "")
     for path in files:
-        problems += check_file(path, decisions)
-        if language and is_record(path) and reads_english(read_text(path).splitlines()):
+        problems += checked(lambda: check_file(path, decisions), [])
+        if language and is_record(path) and checked(lambda: reads_english(read_text(path).splitlines()), False):
             print(
                 f"Info: {rel(path)}: reads as English, but AGENTS.md sets Language: {language}\n"
                 f"    → write the prose in the project language; keys such as Next: stay English (not a failure)"
@@ -1108,12 +1155,14 @@ def main():
 
     for problem in problems:
         print(problem)
-    bad_files = len({p.split(":")[0] for p in problems})
-    if problems:
-        print(f"\n{plural(len(problems), 'problem')} in {plural(bad_files, 'file')}")
+    report_bad_encodings()
+    count = len(problems) + len(BAD_ENCODINGS)
+    bad_files = len({p.split(":")[0] for p in problems} | {rel(path) for path in BAD_ENCODINGS})
+    if count:
+        print(f"\n{plural(count, 'problem')} in {plural(bad_files, 'file')}")
     elif not args.staged:
         print("No problems found")
-    return 1 if problems else 0
+    return 1 if count else 0
 
 
 if __name__ == "__main__":

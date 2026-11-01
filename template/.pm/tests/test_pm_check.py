@@ -1339,29 +1339,140 @@ class WriteIndexMessageTest(RepoTestCase):
 
 
 class WindowsEncodingTest(RepoTestCase):
-    """A doc a Windows editor saved in its own code page is read, never a UnicodeDecodeError traceback."""
+    """A document that cannot be decoded is reported instead of being checked with replacement characters."""
 
-    def test_a_cp1254_doc_does_not_stop_the_check(self):
-        self.write_bytes("docs/turkce.md", "# Başlık\n\nŞifre ığüşç öğren.\n".encode("cp1254"))
+    MESSAGE = "docs/turkce.md is not saved as UTF-8; open it and save it as UTF-8, then run this again."
+
+    def test_a_cp1254_doc_is_one_problem_not_a_false_link_error(self):
+        self.write("docs/şema.md", "# Şema\n")
+        self.write_bytes("docs/turkce.md", "# Başlık\n\n[şema](şema.md)\n".encode("cp1254"))
 
         result = self.run_check()
 
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertIn("1 problem in 1 file", result.stdout)
+        self.assertNotIn("does not exist", result.stdout)
         self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_utf8_non_ascii_link_target_is_found(self):
+        self.write("docs/şema.md", "# Şema\n")
+        self.write("docs/turkce.md", "# Başlık\n\n[şema](şema.md)\n")
+
+        result = self.run_check()
+
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("No problems found", result.stdout)
 
-    def test_a_cp1254_doc_is_still_checked(self):
-        self.write_bytes("docs/turkce.md", "# Başlık\n\n[eksik](yok.md)\n".encode("cp1254"))
+    def test_other_docs_are_still_checked_and_bad_files_count_once(self):
+        self.write_bytes("docs/turkce.md", "Şifre\n".encode("cp1254"))
+        self.write_bytes("docs/other.md", "Başlık\n".encode("cp1254"))
+        self.write("docs/bad.md", "[missing](nope.md)\n")
 
         result = self.run_check()
 
-        self.assertNotIn("Traceback", result.stderr + result.stdout)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn("link to yok.md does not exist", result.stdout)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertEqual(result.stdout.count("docs/other.md is not saved as UTF-8"), 1, result.stdout)
+        self.assertIn("docs/bad.md:1: link to nope.md does not exist", result.stdout)
+        self.assertIn("3 problems in 3 files", result.stdout)
+
+    def test_a_bad_decision_log_does_not_make_valid_decisions_look_missing(self):
+        self.write_bytes(".pm/decisions.md", "# Kararlar\nŞifre\n".encode("cp1254"))
+        self.write("docs/guide.md", "---\ndepends_on: [D-01]\n---\n\n[missing](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(".pm/decisions.md is not saved as UTF-8", result.stdout)
+        self.assertIn("link to nope.md does not exist", result.stdout)
+        self.assertNotIn("depends on D-01, which does not exist", result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_multiple_bad_decision_files_are_each_reported(self):
+        self.write(".pm/decisions.md", "# Decisions\n")
+        self.write_bytes(".pm/decisions/D-01.md", "Şifre\n".encode("cp1254"))
+        self.write_bytes(".pm/decisions/D-02.md", "Başlık\n".encode("cp1254"))
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(".pm/decisions/D-01.md is not saved as UTF-8"), 1)
+        self.assertEqual(result.stdout.count(".pm/decisions/D-02.md is not saved as UTF-8"), 1)
+        self.assertIn("2 problems in 2 files", result.stdout)
+
+    def test_a_staged_cp1254_doc_blocks_the_commit(self):
+        self.git_init()
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+        self.git("add", "docs/turkce.md")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_stale_is_advisory_when_a_doc_cannot_be_decoded(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+
+        result = self.run_check("--stale")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((result.stdout + result.stderr).count(self.MESSAGE), 1)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_catalogue_is_not_rewritten_from_an_undecodable_record(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+        page = self.write(
+            "docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n"
+        )
+        before = page.read_bytes()
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual((result.stdout + result.stderr).count(self.MESSAGE), 1)
+        self.assertEqual(page.read_bytes(), before)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
 
 
 class ByteOrderMarkTest(RepoTestCase):
     """PowerShell 5.1 writes a byte-order mark; the frontmatter behind it still counts."""
+
+    def test_utf16_bom_in_either_byte_order_preserves_living_doc_checks(self):
+        body = "---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n\n`docs/gone.md`\n"
+        for bom, encoding in ((b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be")):
+            with self.subTest(encoding=encoding):
+                self.write_bytes("docs/guide.md", bom + body.encode(encoding))
+
+                result = self.run_check()
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("docs/gone.md does not exist", result.stdout)
+                self.assertNotIn("not saved as UTF-8", result.stdout)
+
+    def test_utf16_with_bom_works_in_generated_catalogues(self):
+        self.git_init()
+        body = "---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n"
+        self.write_bytes("docs/guide.md", body.encode("utf-16"))
+        page = self.write(
+            "docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n"
+        )
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("| [`guide.md`](guide.md) | Guide |", page.read_text(encoding="utf-8"))
+        self.assertEqual(self.run_check().returncode, 0)
+
+    def test_a_truncated_utf16_doc_is_reported_not_replaced(self):
+        self.write_bytes("docs/guide.md", b"\xff\xfe-\x00-\x00-\x00\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/guide.md is not saved as UTF-8", result.stdout)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
 
     def test_a_bom_doc_with_frontmatter_is_checked_as_a_living_doc(self):
         self.write(
