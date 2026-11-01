@@ -15,10 +15,12 @@ The package is the .pm/ folder this script lives in, so any installed project ca
 - Seed files and root files are written only when they are missing. So are .claude/settings.json (the hooks that
   run pm_board --resume when a session starts and after a compaction) and .mcp.json (Context7; LikeC4 with --map).
   A user's own copy is never edited: what it lacks goes to the "Merge by hand" list.
-- The plan is printed before anything is written. A first install into a project that already has its own
-  AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and writes nothing; --keep-existing installs
-  and keeps those files as they are. --check prints the plan and the conflicts only. The project's own git hooks
-  are never bypassed, on any run: core.hooksPath is set only when it is unset and there are none.
+- A real install prints a few lines when it is done (what it added or changed, what it kept of the user's, what to
+  merge by hand) and then what to do next; --check prints the whole plan and the conflicts instead. A first install
+  into a project that already has its own AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and
+  writes nothing, after showing that plan; --keep-existing installs and keeps those files as they are. The
+  project's own git hooks are never bypassed, on any run: core.hooksPath is set only when it is unset and there are
+  none.
 - --lang <code> sets the project language: one 'Language: <code>' line under a '## Language' heading in AGENTS.md
   (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
   the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
@@ -122,7 +124,19 @@ That file is the only copy of the instructions; this one only points Claude Code
 """
 
 
+QUIET = False  # a real install prints a few lines at the end; --check and --dry-run print every change
+
+
+def quiet(on=True):
+    """Keep the per-file lines to ourselves; a failure or a note still shows."""
+    global QUIET
+    QUIET = on
+
+
 def say(action, path, note=""):
+    """One line per change, unless the run is quiet and ends with a summary instead."""
+    if QUIET and action not in ("failed", "note"):
+        return
     print(f"  {action + ' ':<8}{path}{'  (' + note + ')' if note else ''}")  # a long label keeps one space
 
 
@@ -245,11 +259,16 @@ def copy_dir(src, dst, upgrade, backup, manifest, part):
     say("upgrade" if upgrade else "copy", dst)
 
 
-def write_pointer(skill, target, upgrade):
-    """Write the Claude Code pointer for one skill: its frontmatter, then where the instructions are."""
+def pointer_text(skill):
+    """The Claude Code pointer for one skill: its frontmatter, then where the instructions are."""
     lines = (skill / "SKILL.md").read_text(encoding="utf-8").splitlines()
     front = "\n".join(lines[1 : lines.index("---", 1)])
-    text = POINTER.format(front=front, name=skill.name)
+    return POINTER.format(front=front, name=skill.name)
+
+
+def write_pointer(skill, target, upgrade):
+    """Write the pointer, or keep one that already says this: an upgrade changes nothing when nothing moved."""
+    text = pointer_text(skill)
     dst = target / ".claude" / "skills" / skill.name / "SKILL.md"
     if dst.exists() and (not upgrade or dst.read_text(encoding="utf-8") == text):
         say("keep", dst)
@@ -582,7 +601,7 @@ def plan(target, args, conflicts):
         copies += 1
     for skill in shipped_skills(target, args.map):
         pointer = target / ".claude" / "skills" / skill.name / "SKILL.md"
-        if not pointer.exists() or args.upgrade:
+        if not pointer.exists() or (args.upgrade and pointer.read_text(encoding="utf-8") != pointer_text(skill)):
             entries.append(("write", pointer, "points Claude Code to the skill"))
     if copies or not (target / ".pm" / "VERSION").exists() or not (target / ".pm" / MANIFEST).exists():
         entries.append(("write", target / ".pm" / MANIFEST, "what each package file looked like"))
@@ -618,6 +637,32 @@ def plan(target, args, conflicts):
 
 def shown(target, path):
     return path.relative_to(target).as_posix() if isinstance(path, Path) else path
+
+
+# The user's own files the installer would write if they were missing, so a run that found them names them as kept.
+YOURS = ["AGENTS.md", "CLAUDE.md", "backlog.config.yml", ".claude/settings.json", ".mcp.json"]
+
+
+def counted(count, word):
+    return f"{count} {word}{'' if count == 1 else 's'}"
+
+
+def result_lines(target, entries, conflicts, merge):
+    """The few lines a real install prints instead of the whole plan: what it added or changed, what it kept of the
+    user's, and where the rest waits. --check still prints the plan itself."""
+    added = sum(1 for action, _, _ in entries if action in {"copy", "write", "create"})
+    changed = sum(1 for action, _, _ in entries if action in {"upgrade", "append", "update", "set"})
+    lines = [f"Added {counted(added, 'file')}."] if added else []
+    if changed:
+        lines.append(f"Changed {counted(changed, 'file')}.")
+    if not lines:
+        lines.append("Nothing to change: the package and your files are as they are.")
+    kept = [name for name in dict.fromkeys([item for item, _ in conflicts] + YOURS) if (target / name).exists()]
+    if kept:
+        lines.append(f"Kept {counted(len(kept), 'file')} of yours: {', '.join(kept)}.")
+    if merge:
+        lines.append(f"Merge by hand: {counted(len(merge), 'item')}, listed in .pm/local/merge-by-hand.md.")
+    return lines
 
 
 def language_only(target, args):
@@ -677,13 +722,16 @@ def main(argv=None):
     stops = first and bool(conflicts)  # once installed, the project's own hooks are kept and listed, not a stop
     if not args.dry_run:
         entries = plan(target, args, conflicts)
-        print(f"Plan for {target} ({len(entries)} change(s)):")
-        for entry in entries:
-            say(*entry)
-        if conflicts:
-            print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
-            for item, why in conflicts:
-                say("keep", item, why)
+        # The whole plan is for a run that writes nothing: --check, or a first install that stops on the project's own
+        # files. A real install prints a few lines at the end instead, so the next step is not buried.
+        if args.check or (stops and not args.keep_existing):
+            print(f"Plan for {target} ({len(entries)} change(s)):")
+            for entry in entries:
+                say(*entry)
+            if conflicts:
+                print("\nAlready in the project, kept as it is (/pm-setup merges it with you):")
+                for item, why in conflicts:
+                    say("keep", item, why)
         if args.check:
             return EXIT_CONFLICT if stops else 0
         if stops and not args.keep_existing:
@@ -692,7 +740,6 @@ def main(argv=None):
                 " as they are, then merge them by hand."
             )
             return EXIT_CONFLICT
-        print()
     print(f"{'Upgrading' if args.upgrade else 'Installing'} the package from {PKG} into {target}")
 
     manifest = read_manifest(target)
@@ -714,7 +761,9 @@ def main(argv=None):
         )
         return 0
     merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
+    summary = result_lines(target, entries, conflicts, merge)  # the same: what the run found, not what it left
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
+    quiet(True)  # one line per file is what --check is for; the run ends with a few lines instead
     for src, dst, part in package_parts(target, args.map, args.swarm):
         copy_dir(src, dst, args.upgrade, backup, manifest, part)
     for skill in shipped_skills(target, args.map):
@@ -762,10 +811,10 @@ def main(argv=None):
         if names:
             run(["git", "add", "--chmod=+x", "--", *names], cwd=target)
 
-    if merge:
-        print("\nMerge by hand (the installer never rewrites a file of yours):")
-        for line in merge:
-            print(f"  {line}")
+    quiet(False)
+    print()
+    for line in summary:  # a few lines for the person reading the run, not the file-by-file list
+        print(line)
     if not first:
         tool_updates(target)
     print("\nNext:")

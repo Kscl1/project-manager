@@ -109,13 +109,16 @@ class PmInitTest(unittest.TestCase):
     def test_an_upgrade_with_nothing_new_keeps_everything_and_names_the_upgrade_checks(self):
         self.assertEqual(self.run_init().returncode, 0)
 
+        check = self.run_init(self.root, "--check")
         result = self.run_init(self.root, "--upgrade")
 
+        self.assertEqual(check.returncode, 0, check.stdout + check.stderr)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse((self.root / ".pm" / "local" / "backup").exists())
-        self.assertIn("Plan for", result.stdout)
-        plan = result.stdout.split("Plan for", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("Plan for", check.stdout)
+        plan = check.stdout.split("Plan for", 1)[1].split("\n\n", 1)[0]
         self.assertNotIn("upgrade", plan)
+        self.assertIn("Nothing to change", result.stdout, "a real install says so in one line, not with a plan")
         after = result.stdout.split("\nNext:", 1)[1]
         self.assertIn("python -m unittest discover -s .pm/tests", after)
         self.assertIn("python .pm/tools/pm_board.py --resume", after)
@@ -333,10 +336,12 @@ class PmInitTest(unittest.TestCase):
         edited = self.root / ".agents" / "skills" / "pm-scratch" / "SKILL.md"
         edited.write_text(edited.read_text(encoding="utf-8") + "local rule\n", encoding="utf-8")
 
+        dry = self.run_init(self.root, "--upgrade", "--dry-run")
         result = self.run_init(self.root, "--upgrade")
 
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertIn("local-edit", dry.stdout)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("local-edit", result.stdout)
         self.assertEqual(edited.read_bytes(), (SKILLS / "pm-scratch" / "SKILL.md").read_bytes())
         backups = list((self.root / ".pm/local/backup").glob("*/.agents/skills/pm-scratch/SKILL.md"))
         self.assertEqual(len(backups), 1)
@@ -384,6 +389,31 @@ class PmInitTest(unittest.TestCase):
 
         servers = json.loads((self.root / ".mcp.json").read_text(encoding="utf-8"))["mcpServers"]
         self.assertEqual(set(servers), {"context7", "likec4"})
+
+    def test_a_real_install_prints_a_short_result_and_the_next_steps(self):
+        planned = self.run_init(self.root, "--check")
+        self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)
+        actions = [line.split()[0] for line in planned.stdout.splitlines() if line.startswith("  ")]
+        added = sum(1 for action in actions if action in ("copy", "write", "create"))
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Plan for", result.stdout, "the whole plan is what --check is for")
+        self.assertIn(f"Added {added} files.", result.stdout)
+        self.assertIn("\nNext:", result.stdout)
+        self.assertIn("run /pm-setup", result.stdout)
+        self.assertIn("backlog browser", result.stdout)
+
+    def test_a_rerun_says_what_it_kept_of_the_users(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Nothing to change: the package and your files are as they are.", result.stdout)
+        self.assertIn("Kept 5 files of yours:", result.stdout)
+        self.assertNotIn("Merge by hand:", result.stdout)
 
     def test_map_skill_comes_with_map_and_then_stays(self):
         skill = self.root / ".agents" / "skills" / "pm-likec4-dsl"
@@ -489,9 +519,10 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.root / ".claude" / "settings.json").read_text(encoding="utf-8"), own_settings)
         self.assertEqual((self.root / ".mcp.json").read_text(encoding="utf-8"), own_mcp)
-        merge = result.stdout.split("Merge by hand", 1)[1]
-        self.assertIn(".claude/settings.json", merge)
-        self.assertIn("context7", merge)
+        self.assertIn("Kept 2 files of yours: .claude/settings.json, .mcp.json.", result.stdout)
+        merge = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
+        self.assertIn("- .claude/settings.json", merge)
+        self.assertIn("- .mcp.json: add the context7 server", merge)
 
     def test_own_agents_file_stops_a_first_install(self):
         (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
@@ -513,11 +544,10 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
         self.assertEqual((self.root / "CLAUDE.md").read_text(encoding="utf-8"), "Use tabs.\n")
         self.assertTrue((self.root / ".pm" / "tools" / "pm_check.py").is_file())
-        merge = result.stdout.split("Merge by hand", 1)[1]
-        self.assertIn("AGENTS.md", merge)
-        self.assertIn("@AGENTS.md", merge)
         kept = (self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8")
         self.assertIn("- AGENTS.md:", kept)
+        self.assertIn("@AGENTS.md", kept)
+        self.assertIn("Kept 2 files of yours: AGENTS.md, CLAUDE.md.", result.stdout)
         self.assertEqual(self.run_init().returncode, 0)
         self.assertEqual((self.root / ".pm" / "local" / "merge-by-hand.md").read_text(encoding="utf-8"), kept)
 
@@ -685,7 +715,9 @@ class PmInitTest(unittest.TestCase):
         text = self.agents_text()
         self.assertTrue(text.startswith(own), "the user's lines and fenced examples stay as they were")
         self.assertIn("## Language\n\nLanguage: tr\n", text)
-        self.assertEqual(self.run_init(self.root, "--lang", "tr").stdout.count("  set "), 0, "a rerun finds the line")
+        self.assertEqual(
+            self.run_init(self.root, "--lang", "tr", "--check").stdout.count("  set "), 0, "a rerun finds the line"
+        )
 
     def test_upgrade_lists_the_programs_that_differ_from_the_release(self):
         first = self.run_init(self.root)
