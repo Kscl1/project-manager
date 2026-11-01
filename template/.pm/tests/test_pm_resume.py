@@ -273,6 +273,27 @@ class ResumeSummaryTest(unittest.TestCase):
         self.commit_with("chore: settle the idea", "Refs: DRAFT-2\nAssisted-by: M (high)", "2025-06-03")
         self.assertIn("4 commit", self.warnings_section(self.run_resume().stdout))
 
+    def test_a_pm_only_commit_is_the_record_itself(self):
+        run_git(self.root, "add", "-A")
+        run_git(self.root, "commit", "-m", "fixture")
+        worklog = self.root / ".pm" / "worklog" / "2025-06-02-0900-new.md"
+        worklog.parent.mkdir(parents=True)
+        worklog.write_text("# new\n", encoding="utf-8")
+        run_git(self.root, "add", ".pm/worklog")
+        run_git(self.root, "commit", "-m", "worklog")
+        self.assertNotIn("are in no record", self.warnings_section(self.run_resume().stdout))
+
+        # A commit that only writes task or worklog files records the work itself; it is not loose work.
+        task_file = ".pm/backlog/tasks/task-1 - open.md"
+        (self.root / task_file).parent.mkdir(parents=True)
+        (self.root / task_file).write_text("x\n", encoding="utf-8")
+        run_git(self.root, "add", task_file)
+        run_git(self.root, "commit", "-m", "docs: record the close")
+        self.assertNotIn("are in no record", self.warnings_section(self.run_resume().stdout))
+
+        self.commit_files("feat: real work", "src/app.py")
+        self.assertIn("1 commit(s) after the newest worklog", self.warnings_section(self.run_resume().stdout))
+
     def test_names_finished_tasks_in_the_newest_worklogs_next(self):
         worklog_dir = self.root / ".pm" / "worklog"
         worklog_dir.mkdir(parents=True)

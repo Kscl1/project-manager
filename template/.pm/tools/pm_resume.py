@@ -371,6 +371,13 @@ def weekly_audit_warning(today):
     return f"- ⚠️ Weekly doc audit due ({since}): .pm/templates/doc-audit.md, kind weekly"
 
 
+def record_only(sha):
+    """A commit that touches only files under .pm/ is the record itself: a worklog, a task or a draft file."""
+    listing = git_stdout(["show", "--name-only", "--format=", "-z", sha], None)  # -z: a Turkish name stays raw
+    paths = [path for path in (listing or "").split("\0") if path]
+    return bool(paths) and all(path.startswith(".pm/") for path in paths)
+
+
 def worklog_gap_warning():
     """Warn about commits after the newest worklog that no task records either.
 
@@ -393,7 +400,8 @@ def worklog_gap_warning():
         for task in load_tasks() + load_closed() + load_tasks(DRAFTS_DIR) + load_tasks(ARCHIVED_DRAFTS_DIR)
         if task["status"] != "Done" or task["summary"]
     }
-    loose = [c for c in commits(f"{last}..HEAD") if not c["refs"] or not c["refs"] <= recorded]
+    loose = [c for c in commits(f"{last}..HEAD") if not record_only(c["sha"])]
+    loose = [c for c in loose if not c["refs"] or not c["refs"] <= recorded]
     if not loose:
         return None
     return (
