@@ -372,11 +372,22 @@ def weekly_audit_warning(today):
     return f"- ⚠️ Weekly doc audit due ({since}): .pm/templates/doc-audit.md, kind weekly"
 
 
+# A commit is the record itself when it writes only these: tasks and drafts, worklogs, decisions and lessons.
+# Every other path under .pm/ (tools, hooks, roles, specs, the charter) is work, like src/app.py, so a silent
+# change to one of them still shows up as unrecorded work.
+RECORD_PATHS = (".pm/backlog/", ".pm/worklog/", ".pm/decisions/")
+RECORD_FILES = (".pm/decisions.md", ".pm/lessons.md")
+
+
+def is_record_path(path):
+    return path in RECORD_FILES or any(path.startswith(record) for record in RECORD_PATHS)
+
+
 def record_only(sha):
-    """A commit that touches only files under .pm/ is the record itself: a worklog, a task or a draft file."""
+    """A commit that writes only record files is the record itself: a task, a draft, a worklog, a decision, a lesson."""
     listing = git_stdout(["show", "--name-only", "--format=", "-z", sha], None)  # -z: a Turkish name stays raw
     paths = [path for path in (listing or "").split("\0") if path]
-    return bool(paths) and all(path.startswith(".pm/") for path in paths)
+    return bool(paths) and all(is_record_path(path) for path in paths)
 
 
 def worklog_gap_warning():
