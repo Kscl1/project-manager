@@ -575,6 +575,43 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["configurations"], [{"name": "mine"}])
 
+    def test_an_upgrade_names_the_agents_sections_the_project_lacks(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        agents = self.root / "AGENTS.md"
+        ours = agents.read_text(encoding="utf-8").split("## Lead only: teaching", 1)[0]
+        agents.write_text(ours + "\nOur own rule stays.\n", encoding="utf-8")
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "Your AGENTS.md lacks these package sections: Lead only: teaching. "
+            "Ask your agent to add them from .pm/templates/root/AGENTS.md.",
+            result.stdout,
+        )
+        self.assertEqual(agents.read_text(encoding="utf-8"), ours + "\nOur own rule stays.\n")
+
+    def test_an_upgrade_names_every_package_section_an_own_agents_file_lacks(self):
+        (self.root / "AGENTS.md").write_text("# Our rules\n", encoding="utf-8")
+        self.assertEqual(self.run_init(self.root, "--keep-existing").returncode, 0)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            "Your AGENTS.md lacks these package sections: Start here, Lead only: which tool when, Lead only: teaching.",
+            result.stdout,
+        )
+        self.assertEqual((self.root / "AGENTS.md").read_text(encoding="utf-8"), "# Our rules\n")
+
+    def test_an_upgrade_says_nothing_when_the_agents_sections_are_there(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("Your AGENTS.md lacks", result.stdout)
+
     def test_a_real_install_prints_a_short_result_and_the_next_steps(self):
         planned = self.run_init(self.root, "--check")
         self.assertEqual(planned.returncode, 0, planned.stdout + planned.stderr)

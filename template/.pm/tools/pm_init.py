@@ -30,6 +30,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   (appended with a short rule, or only the value changed), in the user's own copy too, since the flag asks for it; and
   the language key in a .claude/settings.json the installer wrote, while a user's own copy gets a merge-by-hand line. Without the flag no language is written, and --upgrade never touches either file. The installed copy
   in .pm/tools may run on its own project with --lang only, so /pm-setup can set the language later.
+- --upgrade compares the '## ' sections of the package's AGENTS.md template with the project's own file and names the
+  ones it lacks in one line; it never rewrites that file, so the user's text stays as it is.
 - After an upgrade from the project-manager checkout, the programs on this machine (Backlog.md, Pi and the rest)
   are compared with the release's tested versions (tools/setup/bom.py --updates); nothing is installed.
 - A second run with the same arguments changes nothing.
@@ -462,6 +464,22 @@ MERGE_HOW = {
     ".git/hooks": HOOKS_HOW,
 }
 SETTINGS_HOW = "add the SessionStart hooks of .pm/templates/root/claude-settings.json (they run pm_board.py --resume)"
+SECTION = re.compile(r"^## (.+?)[ \t]*$", re.MULTILINE)
+
+
+def section_names(text):
+    """The '## ' section names of a document, in order and outside fenced examples."""
+    fences = [match.span() for match in FENCE.finditer(text)]
+    return [match.group(1) for match in SECTION.finditer(text) if not any(a <= match.start() < b for a, b in fences)]
+
+
+def missing_sections(target):
+    """The package AGENTS.md sections the project's own file lacks; that file is never rewritten."""
+    template, own = ROOT_TEMPLATES / "AGENTS.md", target / "AGENTS.md"
+    if not template.is_file() or not own.is_file():
+        return []
+    have = set(section_names(own.read_text(encoding="utf-8", errors="replace")))
+    return [name for name in section_names(template.read_text(encoding="utf-8")) if name not in have]
 
 
 def git_out(args, cwd):
@@ -878,6 +896,12 @@ def main(argv=None):
         return 0
     merge = merge_items(target, args, conflicts)  # before the writes below, which make some files ours
     summary = result_lines(target, entries, conflicts, merge)  # the same: what the run found, not what it left
+    lacking = missing_sections(target) if args.upgrade else []
+    if lacking:  # the file is the user's: name what it lacks, never rewrite a line of it
+        summary.append(
+            f"Your AGENTS.md lacks these package sections: {', '.join(lacking)}. "
+            "Ask your agent to add them from .pm/templates/root/AGENTS.md."
+        )
     backup = target / ".pm" / "local" / "backup" / time.strftime("%Y%m%d-%H%M%S")
     quiet(True)  # one line per file is what --check is for; the run ends with a few lines instead
     try:
