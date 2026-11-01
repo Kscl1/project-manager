@@ -69,6 +69,12 @@ class FixedTexts(unittest.TestCase):
             self.assertIn(f'"{phrase}', agents, phrase)
         self.assertIn("pm_board.py --next", agents)
 
+    def test_quick_setup_leaves_one_later_task(self):
+        skill = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("## Step 2: read the project back", skill)
+        self.assertIn('"Finish the setup: models, own tools, map"', skill)
+        self.assertIn("Review by: <today + 14 days>", skill)
+
 
 if __name__ == "__main__":
     unittest.main()
