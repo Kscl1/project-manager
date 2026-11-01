@@ -1,5 +1,6 @@
 """Pin the first-session and setup rules shipped to project leads."""
 
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -48,6 +49,45 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
         self.assertIn(
             "serve` (aliases: `start`", read(ROOT / "template/.agents/skills/pm-likec4-dsl/references/cli.md")
         )
+
+    def test_map_update_is_prepared_without_overriding_user_file_consent(self):
+        agents = read(AGENTS)
+        section = agents.split("## Lead only: which tool when", 1)[1].split("## Lead only: teaching", 1)[0]
+        self.assertLess(section.index("Every row follows the consent rule"), section.index("| Situation |"))
+        row = next(line for line in section.splitlines() if "A component, module, service or link" in line)
+        for phrase in (
+            "On your own: prepare the LikeC4 map update",
+            "show the diff and write it only after a yes when map files are outside `.pm/`",
+            "ask before a needed download",
+            "`npx likec4@1.60.0 validate`",
+        ):
+            self.assertIn(phrase, row)
+        self.assertNotIn("On your own: update the LikeC4 map", row)
+
+    def test_map_preview_checks_the_pinned_cli_before_both_routes(self):
+        spec = importlib.util.spec_from_file_location("pm_init_map_policy", ROOT / "template/.pm/tools/pm_init.py")
+        initializer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(initializer)
+        launch = initializer.wanted_launch(True)
+        map_entry = next(config for config in launch["configurations"] if config["name"] == "map")
+        self.assertEqual(map_entry["runtimeExecutable"], "npx")
+        package = map_entry["runtimeArgs"][1]
+        self.assertEqual(package, f"likec4@{initializer.LIKEC4_VERSION}")
+        self.assertEqual(map_entry["runtimeArgs"][0], "-y")  # cold cache would download without the preflight
+
+        row = next(line for line in read(AGENTS).splitlines() if line.startswith('| "show the map"'))
+        check = f"`npx --no-install {package} --version`"
+        for phrase in (
+            "before the first map preview",
+            check,
+            "if it fails, ask before downloading",
+            "only on a yes",
+            "`map` entry",
+            f"`npx {package} start`",
+        ):
+            self.assertIn(phrase, row)
+        self.assertLess(row.index(check), row.index("`map` entry"))
+        self.assertLess(row.index("ask before downloading"), row.index("`map` entry"))
 
     def test_read_back_after_choices_preserves_existing_charter(self):
         skill = read(SKILL)
