@@ -7,7 +7,13 @@ project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtları
 
 Kuruluma üç yoldan başlayabilirsin; ilki en kısa olanı: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki Çekirdek katman tablosunu izleyerek **elle**. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar. Commit, beceri (skill) ya da katman gibi kelimeler [sözlükte](glossary.md).
 
-## Başlamadan önce
+## Ajanınla kur
+
+Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler.
+
+İş bitince projeni yeni bir sohbette aç ve `/pm-setup` yaz; gerisi aşağıdakiyle aynıdır.
+
+## Kurulum ekranına ya da elle kuruluma başlamadan önce
 
 İnternet bağlantısı, **Python 3.11 veya daha yeni bir sürüm** (kurulum ekranını çalıştıran program) ve **Git** (projenin geçmişini tutan program) gerekir. Kurulum ekranı (TUI), üzerinde çalıştığı Python'u kendi başına kuramaz.
 
@@ -34,12 +40,6 @@ Git deposu, geçmişini Git'in tuttuğu bir klasördür; `git init` herhangi bir
 Eski bir Python kurucusu "Bad Image" hatasıyla durursa [Bir şey bozulursa](#bir-şey-bozulursa) bölümüne bak.
 
 **Windows, Claude Desktop:** uygulama ayrı kurulur ve Code sekmesi ücretli bir Claude planı gerektirir. Terminal ondan bağımsız çalışır.
-
-## Ajanınla kur
-
-Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler.
-
-İş bitince projeni yeni bir oturumda aç ve `/pm-setup` yaz; gerisi aşağıdakiyle aynıdır.
 
 ## Kurulum ekranını (TUI) çalıştır
 

@@ -7,7 +7,13 @@ project-manager keeps your tasks, decisions and working rules next to your code,
 
 There are three ways in, and the first is the shortest: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the Core layer table below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you. Words such as commit, skill or layer are in the [glossary](glossary.md).
 
-## Before you start
+## Let your agent do it
+
+Open your coding agent in the folder that holds your project and paste the prompt from [Install with your agent](install-with-agent.md). This is the shortest path: it needs no terminal skills and no Python of your own. The agent asks a few questions, checks your machine and says what each command does before it runs it.
+
+When it is done, open your project in a new chat and type `/pm-setup`; the rest is the same as below.
+
+## Before you start with the setup screen or by hand
 
 You need an internet connection, **Python 3.11 or newer** (the program that runs the setup screen) and **Git** (the program that keeps your project's history). The setup screen cannot install the Python it runs on.
 
@@ -34,12 +40,6 @@ A Git repository is a folder whose history Git keeps; `git init` turns any folde
 If an older Python installer stops with a "Bad Image" error, see [When something breaks](#when-something-breaks).
 
 **Windows, Claude Desktop:** the app is a separate install, and its Code tab needs a paid Claude plan. The terminal works without it.
-
-## Let your agent do it
-
-Open your coding agent in the folder that holds your project and paste the prompt from [Install with your agent](install-with-agent.md). This is the shortest path: it needs no terminal skills and no Python of your own. The agent asks a few questions, checks your machine and says what each command does before it runs it.
-
-When it is done, open your project in a new session and type `/pm-setup`; the rest is the same as below.
 
 ## Run the setup TUI
 
