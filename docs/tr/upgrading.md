@@ -3,7 +3,7 @@ title: Yükselt ve geri al
 description: Kurulu bir projeyi her seferinde tek katman ilerleyerek yükselt; görevlerini veya kararlarını kaybetmeden paket dosyalarını eski sürüme geri al.
 ---
 
-Bir proje birbirinden bağımsız birkaç katmandan oluşur. project-manager kaynak klasörünü (`checkout`) güncellemek; kurulu bir projeyi, bilgisayardaki genel (`global`) araçlarını veya kendi eklentilerini **güncellemez**. Her seferinde tek bir katmanı güncelle, önceki sürümü sakla ve bir sonrakine geçmeden önce kontrol et.
+Bir proje birbirinden bağımsız birkaç katmandan oluşur. Commit, dal ya da katman gibi kelimeler [sözlükte](glossary.md). project-manager kaynak klasörünü (`checkout`) güncellemek; kurulu bir projeyi, bilgisayardaki genel (`global`) araçlarını veya kendi eklentilerini **güncellemez**. Her seferinde tek bir katmanı güncelle, önceki sürümü sakla ve bir sonrakine geçmeden önce kontrol et.
 
 ## Hiçbir şeyi değiştirmeden önce
 

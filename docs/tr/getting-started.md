@@ -5,7 +5,7 @@ description: Çalışma sistemi paketini projene kur, ardından ajanınla birlik
 
 project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtlarını (teknik seçimlerin nedenlerini) ve çalışma kurallarını kodunun yanında tutar. Böylece kodlama ajanın (kod okuyup yazan yapay zekâ aracın) her oturumda (çalışma sohbetinde) işi aynı yöntemle planlar ve kontrol eder.
 
-Kuruluma üç yoldan başlayabilirsin: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar.
+Kuruluma üç yoldan başlayabilirsin: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar. Commit, beceri (skill) ya da katman gibi kelimeler [sözlükte](glossary.md).
 
 ## Başlamadan önce
 

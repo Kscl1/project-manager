@@ -5,7 +5,7 @@ description: Install the work-system package in your project, then fit it with y
 
 project-manager keeps your tasks, decisions and working rules next to your code, so your coding agent plans and checks work the same way every session.
 
-There are three ways in: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the layers below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you.
+There are three ways in: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the layers below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you. Words such as commit, skill or layer are in the [glossary](glossary.md).
 
 ## Before you start
 

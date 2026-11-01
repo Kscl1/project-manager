@@ -23,6 +23,8 @@ hero:
 
 project-manager; **görevleri, karar kayıtlarını ve çalışma kurallarını kodunun hemen yanında tutar**. Sen ve kodlama ajanların (seninle birlikte kod okuyup yazabilen yapay zekâ araçları) aynı dosyaları kullanırsınız. İşi bu dosyalardan planlar, kontrol eder ve bir önceki oturumun (ajanla yaptığın çalışma sohbetinin) kaldığı yerden devam edersiniz.
 
+Görev, Epic, pano ya da MCP sunucusu gibi kelimelerin her biri [sözlükte](glossary.md) tek cümleyle anlatılır.
+
 Bu paket yeni bir kodlama ajanı, internette çalışan bir proje takip servisi ya da uygulaman için bir yazılım çatısı (framework) değildir. Var olan açık araçları Markdown kayıt dosyaları ve Python kontrolleriyle bir araya getirir. Kayıtları istediğin editörde okuyabilir, değişiklikleri Git'te inceleyebilir ve başka bir ajana geçtiğinde olduğu gibi yanında götürebilirsin.
 
 ## Kimler için?

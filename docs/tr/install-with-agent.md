@@ -9,7 +9,7 @@ project-manager'ı elle kurman gerekmez. Kodlama ajanını (Claude Code, Codex, 
 project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku (web aracın yalnız özet veriyorsa curl ile indir), adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
 ```
 
-Ajan birkaç soru sorar, makineni kontrol eder, projende yeni bir dalda kurar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uydurur. Demo proje kurmaz, koduna dokunmaz. Terminalde adım adım ilerleyen bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan.
+Ajan birkaç soru sorar, makineni kontrol eder, projende yeni bir dalda kurar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uydurur. Demo proje kurmaz, koduna dokunmaz. Terminalde adım adım ilerleyen bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu gibi kelimeler [sözlükte](glossary.md).
 
 ## Ajan için
 

@@ -3,7 +3,7 @@ title: İsteğe bağlı katmanlar
 description: Her katmanın neyi eklediği, neye ihtiyaç duyduğu ve ne zaman eklendiği.
 ---
 
-Çekirdek katman bir görevi planlamaya, yapmaya ve kontrol etmeye yeter. Bu üç katman daha fazlasını ekler. Hepsi isteğe bağlıdır; birini sonradan, geri kalanı yeniden kurmadan ekleyebilirsin.
+Çekirdek katman bir görevi planlamaya, yapmaya ve kontrol etmeye yeter. Bu üç katman daha fazlasını ekler. Hepsi isteğe bağlıdır; birini sonradan, geri kalanı yeniden kurmadan ekleyebilirsin. Yeni kelimeler [sözlükte](glossary.md).
 
 | Katman | Neyi ekler? | Neye ihtiyaç duyar? |
 |---|---|---|

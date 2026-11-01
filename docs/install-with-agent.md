@@ -9,7 +9,7 @@ You do not have to install project-manager by hand. Open your coding agent (Clau
 Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md (download it with curl if your web tool only gives a summary), follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
-The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead.
+The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
 
 ## For the agent
 

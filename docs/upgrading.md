@@ -3,7 +3,7 @@ title: Upgrade and roll back
 description: Upgrade an installed project one layer at a time, and roll back package files without losing tasks or decisions.
 ---
 
-A project has several independent layers. Updating the project-manager checkout does **not** update an installed project, your global tools or your own plugins. Update one layer at a time, keep the previous version, then check it before moving on.
+A project has several independent layers. Words such as commit, branch or layer are in the [glossary](glossary.md). Updating the project-manager checkout does **not** update an installed project, your global tools or your own plugins. Update one layer at a time, keep the previous version, then check it before moving on.
 
 ## Before changing anything
 

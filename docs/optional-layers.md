@@ -3,7 +3,7 @@ title: Optional layers
 description: What each layer adds, what it needs and when to add it.
 ---
 
-The core layer is enough to plan a task, do it and check it. These three layers add more. Each one is optional, and you can add one later without reinstalling the rest.
+The core layer is enough to plan a task, do it and check it. These three layers add more. Each one is optional, and you can add one later without reinstalling the rest. New words are in the [glossary](glossary.md).
 
 | Layer | What it adds | What it needs |
 |---|---|---|
