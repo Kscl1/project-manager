@@ -11,6 +11,8 @@ Install project-manager into my project. Read all of https://raw.githubuserconte
 
 The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
 
+**You can stop reading here:** the rest of this page is written for your agent, not for you.
+
 ## For the agent
 
 You install project-manager into the user's project. Follow these steps in order.
@@ -114,11 +116,23 @@ Fill each section from your list; write `none` where there is nothing. Add every
 Tell the user in a few lines what is installed and what is open. Then give them the next step, ready to follow:
 
 > Open your project folder itself in a new session, not this one: the agent reads a project's settings, hooks and skills only from the folder it starts in.
+>
 > - Claude Code in a terminal: `cd "<project>"`, then `claude`. Claude Desktop: Code, then choose the folder.
 > - Pi: `cd "<project>"`, then `pi`.
 >
-> Claude Code first asks whether you trust the folder: it is your project, so choose "Yes, I trust this folder". It may also ask whether to turn on the project's servers for current documentation and diagrams (Context7, LikeC4): allow them. Their reading tools are allowed in the project's settings; anything that writes still asks. Context7 sends its queries to its own server, so they never hold secrets.
+> Then type the setup command for your agent:
 >
-> Then type `/pm-setup` (in Pi `/skill:pm-setup`, in Codex `$pm-setup`).
+> | Agent | Type this |
+> | --- | --- |
+> | Claude Code | `/pm-setup` |
+> | Pi | `/skill:pm-setup` |
+> | Codex | `$pm-setup` |
+>
+> **What you will see:**
+>
+> - First, a question about trusting the folder. It is your project: choose "Yes, I trust this folder".
+> - Then one question per project server (Context7, LikeC4). Allow them: they only read current docs and diagrams, anything that writes still asks, and saying no only means fewer answers. Context7 sends its queries to its own server, so they never hold secrets.
+> - Then three short questions about how much it should explain, a setup Epic on the board, and one small real task.
+> - Anywhere in between, a message about a tag that "is not a commit". It is normal during the install, and the install is fine.
 
 Stop here. Do not continue the setup in this chat.

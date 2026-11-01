@@ -11,6 +11,8 @@ project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-
 
 Ajan birkaç soru sorar, makineni kontrol eder, projende yeni bir dalda kurar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uydurur. Demo proje kurmaz, koduna dokunmaz. Terminalde adım adım ilerleyen bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu gibi kelimeler [sözlükte](glossary.md).
 
+**Buradan sonrasını okumayabilirsin:** sayfanın geri kalanı ajanın için yazıldı.
+
 ## Ajan için
 
 project-manager'ı kullanıcının projesine kuruyorsun. Adımları sırayla izle.
@@ -114,11 +116,23 @@ Her bölümü listenden doldur; boş olana `none` yaz. Her açık sorunu sırada
 Kullanıcıya birkaç satırla neyin kurulduğunu ve neyin açık kaldığını söyle. Sonra sıradaki adımı, izlenmeye hazır biçimde ver:
 
 > Proje klasörünün kendisini bu oturumda değil, yeni bir oturumda aç: ajan bir projenin ayarlarını, hook'larını ve skill'lerini yalnız başladığı klasörden okur.
+>
 > - Terminalde Claude Code: `cd "<project>"`, sonra `claude`. Claude Desktop: Code, sonra klasörü seç.
 > - Pi: `cd "<project>"`, sonra `pi`.
 >
-> Claude Code önce klasöre güvenip güvenmediğini sorar: bu senin projen, "Yes, I trust this folder" seç. Projenin güncel belge ve şema sunucularını (Context7, LikeC4) açmak için de sorabilir: izin ver. Okuyan araçlarına projenin ayarlarında izin verilmiştir; yazan her şey yine sorar. Context7 sorgularını kendi sunucusuna gönderir, bu yüzden sorgulara gizli bilgi yazılmaz.
+> Sonra ajanına göre kurulum komutunu yaz:
 >
-> Sonra `/pm-setup` yaz (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
+> | Ajan | Yazılacak komut |
+> | --- | --- |
+> | Claude Code | `/pm-setup` |
+> | Pi | `/skill:pm-setup` |
+> | Codex | `$pm-setup` |
+>
+> **Ne göreceksin:**
+>
+> - Önce klasöre güvenip güvenmediğin sorulur. Bu senin projen: "Yes, I trust this folder" seç.
+> - Sonra her proje sunucusu için bir soru gelir (Context7, LikeC4). İzin ver: bunlar yalnızca güncel belge ve şemaları okur, yazan her şey yine sorar; hayır demek sadece daha az yanıt almak demektir. Context7 sorgularını kendi sunucusuna gönderir, bu yüzden sorgulara gizli bilgi yazılmaz.
+> - Ardından ne kadar açıklama istediğinle ilgili üç kısa soru, panoda bir kurulum Epic'i ve küçük ama gerçek bir görev gelir.
+> - Arada bir yerde, bir etiketin "commit olmadığı" uyarısını görebilirsin. Kurulum sırasında bu normaldir ve kurulum sağlamdır.
 
 Burada dur. Kurulumu bu sohbette sürdürme.
