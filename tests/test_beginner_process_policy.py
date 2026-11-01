@@ -1,6 +1,9 @@
 """Pin the first-session and setup rules shipped to project leads."""
 
 import importlib.util
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -130,6 +133,75 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
             self.assertIn(phrase, skill)
         self.assertNotIn("never mark them passed", skill)
         self.assertNotIn("commit them only on a yes", skill)
+
+    def test_owner_asks_cover_board_choices_and_approve_plan_with_first_diff(self):
+        agents, skill = read(AGENTS), read(SKILL)
+        ask = agents.split("- **Decide or ask.**", 1)[1].split("\n\n", 1)[0]
+        for phrase in (
+            "the order of steps",
+            "the order of the user's goals (priority)",
+            "creating a milestone",
+            "approving the plan for multi-step or code-changing work",
+            "show the plan with the first diff for the user to approve",
+        ):
+            self.assertIn(phrase, ask)
+        board = read(ROOT / "template/.pm/board.md")
+        self.assertIn("set only by the owner", board)
+        self.assertIn("the owner's yes opens it", board)
+        self.assertIn("`Implementation Plan`, for multi-step or code-changing work", board)
+        self.assertIn("ask only what that section lists", read(ROOT / "template/.pm/roles/lead.md"))
+        self.assertIn("ask only as the root `AGENTS.md` lists", skill)
+        self.assertNotIn("ask only at the safety boundaries", skill)
+
+    def test_next_picker_can_choose_postponed_setup_despite_other_project_work(self):
+        board = ROOT / "template/.pm/tools/pm_board.py"
+        with tempfile.TemporaryDirectory() as folder:
+            tasks = Path(folder)
+            (tasks / "task-1.md").write_text(
+                "---\nid: TASK-1\ntitle: Finish the setup: models, own tools, map\n"
+                "status: Ready\npriority: high\nordinal: 1\n---\n"
+                "## Implementation Notes\nReview by: 2026-01-01 · owner · when asked or on that date\n",
+                encoding="utf-8",
+            )
+            project = tasks / "task-2.md"
+            project.write_text(
+                "---\nid: TASK-2\ntitle: Fix the project\nstatus: Ready\npriority: medium\nordinal: 2\n---\n",
+                encoding="utf-8",
+            )
+
+            def run():
+                return subprocess.run(
+                    [sys.executable, str(board), "--tasks", str(tasks), "--next"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    check=True,
+                ).stdout
+
+            with_project = run()
+            self.assertIn("Start: Finish the setup", with_project)
+            project.write_text(
+                project.read_text(encoding="utf-8").replace("status: Ready", "status: Done"), encoding="utf-8"
+            )
+            setup_only = run()
+            self.assertIn("Start: Finish the setup", setup_only)
+
+        row = next(line for line in read(AGENTS).splitlines() if line.startswith('| "what next?"'))
+        for phrase in (
+            "`python .pm/tools/pm_board.py --next`",
+            "if it names the later setup task",
+            "waits for the user's request",
+            "next eligible project task",
+            "if none is available",
+            "say the last project task is done",
+            "Never start setup on `what next?` or `continue`",
+        ):
+            self.assertIn(phrase, row)
+        skill = read(SKILL)
+        self.assertIn("`--next` names the later setup task", skill)
+        self.assertIn("waits for the user's request", skill)
+        self.assertIn("next eligible project task", skill)
+        self.assertIn("never starts setup on `what next?` or `continue`", skill)
 
     def test_later_task_has_an_explicit_reminder_and_does_not_autostart(self):
         skill, agents = read(SKILL), read(AGENTS)
