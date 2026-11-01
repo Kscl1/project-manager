@@ -229,7 +229,17 @@ def main(argv=None):
         return send(root, Path(args.send), args.yes, args.repo)
     if not args.command or not args.error_file:
         parser.error("give --command and --error-file, or --send REPORT")
-    error = sys.stdin.read() if args.error_file == "-" else Path(args.error_file).read_text(encoding="utf-8")
+    if args.error_file == "-":
+        error = sys.stdin.read()
+    else:
+        source = Path(args.error_file)
+        try:
+            # errors=replace: an error log in another code page must not crash the tool
+            error = source.read_text(encoding="utf-8", errors="replace")
+        except OSError as failure:
+            print(f"Could not read {source.as_posix()}: {failure.strerror or failure}.")
+            print("The report is written without it. Check the path, or use --error-file - to pipe the error in.")
+            error = "(no error text: the error file could not be read)"
     report = build(root, args.command, error, args.harness, args.title)
     out = root / ".pm" / "local" / "feedback" / f"{time.strftime('%Y-%m-%d-%H%M%S')}-feedback.md"
     out.parent.mkdir(parents=True, exist_ok=True)

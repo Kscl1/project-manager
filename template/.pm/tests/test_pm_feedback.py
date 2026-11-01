@@ -190,6 +190,24 @@ class FeedbackTest(unittest.TestCase):
         with mock.patch.object(pm_feedback.subprocess, "run", run):
             self.assertEqual(pm_feedback.tool_version("backlog"), "backlog 2.1 \u2192 ready")
 
+    def test_error_file_in_another_code_page_is_read_without_a_crash(self):
+        self.error_file.write_bytes(b"pm_check: caf\xe9 \x81 odd bytes\nKeyError: 'status'\n")
+        code, out = self.run_tool("--command", "pm_check", "--error-file", str(self.error_file))
+        self.assertEqual(code, 0)
+        self.assertNotIn("Traceback", out)
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("KeyError: 'status'", report.read_text(encoding="utf-8"))
+
+    def test_unreadable_error_file_becomes_one_plain_line(self):
+        missing = self.root / "no-such-error.txt"
+        code, out = self.run_tool("--command", "pm_check", "--error-file", str(missing))
+        self.assertEqual(code, 0)
+        self.assertIn(f"Could not read {missing.as_posix()}:", out)
+        self.assertIn("The report is written without it", out)
+        self.assertNotIn("Traceback", out)
+        (report,) = (self.root / ".pm" / "local" / "feedback").glob("*.md")
+        self.assertIn("the error file could not be read", report.read_text(encoding="utf-8"))
+
     def test_error_excerpt_is_short(self):
         self.error_file.write_text("\n".join(f"line {n}" for n in range(100)), encoding="utf-8")
         report, _ = self.write_report()
