@@ -11,7 +11,7 @@ project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-
 
 Ajan birkaç soru sorar, makineni kontrol eder, projende yeni bir dalda kurar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uydurur. Demo proje kurmaz, koduna dokunmaz. Terminalde adım adım ilerleyen bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu gibi kelimeler [sözlükte](glossary.md).
 
-**Buradan sonrasını okumayabilirsin:** sayfanın geri kalanı ajanın için yazıldı.
+**Okumayı burada bırakabilirsin:** sayfanın geri kalanı ajanın için yazıldı.
 
 ## Ajan için
 

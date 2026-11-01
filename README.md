@@ -10,14 +10,14 @@ You do not learn a new tool: it uses files and programs you already have. Your a
 - **A project folder:** the folder that holds your code. It should be a Git repository; if it is not, run `git init` once inside it.
 - **About 15 minutes.** The agent path below needs no terminal skills; the other two ways ask you to type commands.
 
-You need five programs. The installer checks them and names what is missing; the badges show the minimum version, and the installer pins a tested one and tells you when yours differs.
+You need five programs. The installer checks them and names what is missing. The badges show each program's minimum version; the installer itself pins a tested version, a little newer, and tells you when yours differs.
 
 [![Status: alpha](https://img.shields.io/badge/status-alpha-orange)](#status)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![Git 2.54.0+](https://img.shields.io/badge/Git-2.54.0%2B-F05032?logo=git&logoColor=white)
 ![Node.js 24.14.0+](https://img.shields.io/badge/Node.js-24.14.0%2B-5FA04E?logo=nodedotjs&logoColor=white)
-[![Backlog.md 1.55.3+](https://img.shields.io/badge/Backlog.md-1.55.3%2B-000000?logo=markdown&logoColor=white)](https://github.com/MrLesk/Backlog.md)
+[![Backlog.md 1.52.0+](https://img.shields.io/badge/Backlog.md-1.52.0%2B-000000?logo=markdown&logoColor=white)](https://github.com/MrLesk/Backlog.md)
 [![Claude Code 2.1.296+](https://img.shields.io/badge/Claude_Code-2.1.296%2B-D97757?logo=claude&logoColor=white)](https://code.claude.com)
 
 [Getting started](docs/getting-started.md) · [Package guide](template/.pm/README.md) · [Principles](template/.pm/principles.md)
@@ -43,7 +43,7 @@ Once `/pm-setup` has made your first real task, you do not need commands to run 
 - `show the board`: the task board opens.
 - `explain <word>`: a plain explanation, and nothing changes.
 
-The words in these sentences (task, Epic, commit, MCP server and others) are in the [glossary](docs/glossary.md).
+Words such as task, Epic, commit or MCP server are in the [glossary](docs/glossary.md).
 
 ## Other ways
 
@@ -97,9 +97,9 @@ Only the Core layer is needed to start. The other three are optional and can be 
 | Layer           | Default              | Contents                                                                                                            |
 | --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
-| **Map**   | On (`--map`)       | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
-| **Swarm** | Opt-in (`--swarm`) | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
-| **EVREN** | Opt-in, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi. EVREN is a model service some people already pay for ([details](docs/optional-layers.md#evren-layer-optional)). |
+| **Map**   | On by default      | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
+| **Swarm** | Off by default     | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
+| **EVREN** | Off by default, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi. EVREN is a model service some people already pay for ([details](docs/optional-layers.md#evren-layer-optional)). |
 
 ## Status
 

@@ -29,7 +29,7 @@ Bu paket yeni bir kodlama ajanı, internette çalışan bir proje takip servisi 
 
 ## Kimler için?
 
-Kodlama ajanlarıyla yazılım geliştiren ama her oturumda projeyi sıfırdan anlatmak istemeyenler için. Tek bir proje, tek bir ajan ve çekirdek katmanla (temel paketle) başla. Mimari şemalar ve çalışırken izleyebildiğin işçi ajanlar (`worker`, tek bir alt işi yapan yardımcı ajan) isteğe bağlıdır; bir görevi yönetmek için ajan sürüsü (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) kurman gerekmez. İsteğe bağlı katmanları iş ihtiyaç duyduğunda [bu sayfada](optional-layers.md) bulursun.
+Kodlama ajanlarıyla yazılım geliştiren ama her oturumda projeyi sıfırdan anlatmak istemeyenler için. Tek bir proje, tek bir ajan ve çekirdek katmanla (temel paketle) başla. Mimari şemalar ve çalışırken izleyebildiğin işçi ajanlar (`worker`, tek bir alt işi yapan yardımcı ajan) isteğe bağlıdır; bir görevi yönetmek için ajan sürüsü (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) kurman gerekmez. İsteğe bağlı katmanları iş ihtiyaç duyduğunda [isteğe bağlı katmanlar](optional-layers.md) sayfasında bulursun.
 
 Ajanla kurulum yolu terminal bilgisi istemez: tek bir prompt yapıştırır, birkaç soruyu cevaplarsın. Kurulum ekranı ve elle kurulum yolu ise terminal açmaya ve bir Git deposunda çalışmaya alışkın olmanı bekler. Ürün hâlâ alfa aşamasındadır (erken deneme sürümüdür); her şeyi kendi başına yürüten tam otomatik bir proje yöneticisi değildir.
 
