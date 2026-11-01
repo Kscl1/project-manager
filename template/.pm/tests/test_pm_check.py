@@ -1400,7 +1400,7 @@ class RootFallbackTest(RepoTestCase):
         (self.root / "backlog.config.yml").unlink()
         self.write("docs/bad.md", "[gone](nope.md)\n")
 
-        result = self.run_check()
+        result = self.run_check(env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         lines = result.stderr.strip().splitlines()
@@ -1412,7 +1412,7 @@ class RootFallbackTest(RepoTestCase):
         (self.root / "backlog.config.yml").unlink()
         self.write(".pm/notes.md", "[gone](nope.md)\n")
 
-        result = self.run_check()
+        result = self.run_check(env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
 
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("link to nope.md does not exist", result.stdout)
@@ -1426,14 +1426,49 @@ class NoGitTest(RepoTestCase):
         self.addCleanup(shutil.rmtree, empty, True)
         return {"PATH": str(empty)}
 
-    def test_staged_without_git_says_git_is_not_available(self):
+    def test_staged_without_git_blocks_with_one_plain_line(self):
         self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
 
         result = self.run_check("--staged", env=self.no_git_env())
 
-        self.assertNotIn("Traceback", result.stderr + result.stdout)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stderr.count("git is not available here:"), 1, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_staged_with_git_error_blocks_with_one_plain_line(self):
+        self.git_init()
+        index = self.write_bytes("bad-index", b"not a git index")
+
+        result = self.run_check("--staged", env={"GIT_INDEX_FILE": str(index)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertIn("index", result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_staged_outside_a_repository_blocks_with_one_plain_line(self):
+        result = self.run_check("--staged", env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertIn("no git repository", result.stderr.lower())
+
+    def test_staged_without_any_root_marker_blocks_with_one_plain_line(self):
+        (self.root / "backlog.config.yml").unlink()
+
+        result = self.run_check("--staged", env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files: no git repository", result.stderr)
+        self.assertIn("git init", result.stderr)
 
     def test_stale_without_git_says_it_once_and_does_not_crash(self):
         self.write("docs/guide.md", "---\ndescribes: [src/app.py]\nreviewed: 2020-01-03\n---\n\nbody\n")
@@ -1465,6 +1500,15 @@ class ProjectLineTest(RepoTestCase):
         self.assertEqual(result.returncode, 1)
         self.assertTrue(result.stdout.startswith("Project: "), result.stdout)
         self.assertIn("1 problem in 1 file", result.stdout)
+
+    def test_staged_with_an_empty_diff_is_quiet_even_if_unstaged_docs_are_bad(self):
+        self.git_init()
+        self.write(".pm/decisions.md", "- **D-01** first\n- **D-01** duplicate\n")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout + result.stderr, "")
 
     def test_staged_with_nothing_to_report_prints_nothing(self):
         self.git_init()

@@ -38,11 +38,6 @@ def find_root(start):
             return folder, True
     root = start.parent
     # .pm/*.md alone would report "No problems found" for a project that never ran git init: say what is checked.
-    print(
-        f"No git repository or backlog.config.yml above {root.parent}; checking .pm/ only. "
-        "Run git init in your project folder.",
-        file=sys.stderr,
-    )
     return root, False
 
 
@@ -121,7 +116,7 @@ def read_text(path):
     return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
-def git(*args, quiet=False):
+def git(*args, quiet=False, failure=None):
     """Run git in the project root. None, and one plain line on stderr, when git cannot run here at all: not
     installed, not on PATH, or this folder is no git repository. A caller that reports the failure itself is quiet."""
     try:
@@ -129,7 +124,9 @@ def git(*args, quiet=False):
             ["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace", check=True
         )
     except (OSError, subprocess.CalledProcessError) as error:
-        if not quiet:
+        if failure is not None:
+            failure.append(error)
+        elif not quiet:
             print(f"git is not available here: {git_reason(error)}", file=sys.stderr)
         return None
     return result.stdout
@@ -941,7 +938,7 @@ def stale_flags(path):
 @functools.cache
 def git_visible():
     """Files git tracks or would add (not ignored), or None outside a git repo."""
-    # A fallback root has already said there is no repository here; repeating it for every git call is noise.
+    # The fallback notice says there is no repository here; repeating it for every git call is noise.
     listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard", quiet=not FOUND_ROOT)
     return None if listed is None else {ROOT / name for name in listed.split("\0") if name}
 
@@ -965,14 +962,32 @@ def markdown_files():
 
 
 def staged_markdown_files():
-    """Docs in the commit. A changed decision log pulls in every doc, since any of them may depend on it."""
-    listed = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", quiet=not FOUND_ROOT)
+    """Docs in the commit, or None if git could not list them. Decision changes pull in every doc."""
+    failure = []
+    if not FOUND_ROOT:
+        print(
+            "Commit check could not list the staged files: no git repository. Run git init in your project folder.",
+            file=sys.stderr,
+        )
+        return None
+    if git("rev-parse", "--git-dir", failure=failure) is None:
+        reason = git_reason(failure[0])
+        if "not a git repository" in reason.lower():
+            reason = "no git repository; run git init in your project folder"
+        print(f"Commit check could not list the staged files: {reason}", file=sys.stderr)
+        return None
+    listed = git("diff", "--cached", "--name-only", "--diff-filter=ACMR", failure=failure)
     if listed is None:
-        return []  # git cannot run here: nothing is staged, and the reason is on stderr
+        print(f"Commit check could not list the staged files: {git_reason(failure[0])}", file=sys.stderr)
+        return None
     staged = {ROOT / name for name in listed.splitlines() if name.endswith(".md")}
+    if not staged:
+        return []
     if DECISIONS in staged or (DECISION_DIR and any(DECISION_DIR in path.parents for path in staged)):
-        return list(markdown_files())
-    return [path for path in markdown_files() if path in staged]
+        files = list(markdown_files())
+    else:
+        files = [path for path in markdown_files() if path in staged]
+    return files
 
 
 # The project language line pm_init writes in AGENTS.md, right under its "## Language" heading.
@@ -1040,6 +1055,13 @@ def main():
     )
     args = parser.parse_args()
 
+    if not FOUND_ROOT and (not args.staged or args.stale or args.write_index):
+        print(
+            f"No git repository or backlog.config.yml above {ROOT.parent}; checking .pm/ only. "
+            "Run git init in your project folder.",
+            file=sys.stderr,
+        )
+
     if args.stale:
         docs = list(markdown_files())
         print(f"Project: {ROOT}")
@@ -1064,13 +1086,17 @@ def main():
 
     # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
     # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
+    files = staged_markdown_files() if args.staged else None
+    if args.staged and not files:
+        return 1 if files is None else 0
     if not args.staged:
         print(f"Project: {ROOT}")
     decisions, problems = load_decisions()
     problems += check_index()
     problems += check_worklogs()
     problems += check_catalogue()
-    files = staged_markdown_files() if args.staged else markdown_files()
+    if not args.staged:
+        files = markdown_files()
     language = project_language()
     for path in files:
         problems += check_file(path, decisions)
