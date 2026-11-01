@@ -11,7 +11,7 @@ A project is a folder on your computer, for example `C:\projects\my-site`. Every
 
 ## The assistant
 
-The assistant is an AI program that can also use the folder: Claude Code from Anthropic, Codex from OpenAI, Pi or another. You type ordinary words, as on your phone; it edits files and runs checks when allowed. You open it in a terminal, the text window where you type commands, or in Claude Desktop's **Code** tab, which needs a paid Claude plan. It runs on your computer, not on a website, and the service may charge for what you use.
+The assistant is an AI program that can also use the folder: Claude Code from Anthropic, Codex from OpenAI, Pi or another. You type ordinary words, as on your phone; it edits files and runs checks when allowed. You open it in a terminal, the text window where you type commands, or in Claude Desktop's **Code** tab, which needs a paid Claude plan. The program runs on your computer; its answers come from the company's AI service, which may charge for what you use.
 
 ## Permission
 

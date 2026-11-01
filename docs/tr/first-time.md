@@ -7,15 +7,15 @@ ChatGPT ya da Gemini'yi telefonda kullandın mı? Ne istediğini kendi sözlerin
 
 ## Klasör
 
-Bir proje, bilgisayarındaki bir klasördür; örneğin `C:\projects\sitem`. Aşağıdaki her şey o klasörün içinde olur: kodun ve project-manager'ın eklediği notlar. Yardımcıyı o klasörde açarsın, oradan başlar. Git, bir klasördeki her değişikliği kaydeden programdır; klasöründe henüz Git geçmişi yoksa kurulum bir tane başlatmayı önerir.
+Bir proje, bilgisayarındaki bir klasördür; örneğin `C:\projects\sitem`. Aşağıdaki her şey o klasörün içinde olur: kodun ve project-manager'ın eklediği notlar. Yardımcıyı o klasörde açarsın, oradan başlar. Git, bir klasördeki her değişikliği kaydeden programdır; klasöründe Git geçmişi yoksa kurulum sırasında bir tane başlatmayı önerir.
 
 ## Yardımcı
 
-Yardımcı, klasörü de kullanabilen bir yapay zekâ programıdır: Anthropic'in Claude Code'u, OpenAI'nin Codex'i, Pi ya da başka biri. Telefonda olduğu gibi günlük dille yazarsın; izin verildiğinde dosyaları düzenler ve kontrolleri çalıştırır. Onu bir terminalde, yani komut yazdığın metin penceresinde, ya da Claude Desktop'ta **Code** sekmesinde açarsın; Code sekmesi ücretli bir Claude planı ister. Tarayıcıda açtığın bir site değildir, bilgisayarında çalışır ve arkasındaki hizmet kullanım miktarına göre ücret alabilir.
+Yardımcı, klasörü de kullanabilen bir yapay zekâ programıdır: Anthropic'in Claude Code'u, OpenAI'nin Codex'i, Pi ya da başka biri. Telefonda olduğu gibi günlük dille yazarsın; izin verildiğinde dosyaları düzenler ve kontrolleri çalıştırır. Onu bir terminalde, yani komut yazdığın metin penceresinde, ya da Claude Desktop'ta **Code** sekmesinde açarsın; Code sekmesi ücretli bir Claude planı ister. Program bilgisayarında çalışır; cevapları şirketin yapay zekâ hizmetinden gelir ve bu hizmet kullanım miktarına göre ücret alabilir.
 
 ## İzin
 
-Yardımcı dosyalarını değiştirebildiği için sana sormalıdır. "Evet" demeden önce planını oku; "hayır" da bir karardır. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
+Yardımcı dosyalarını değiştirebildiği için önce sana sormalı. "Evet" demeden önce planını oku; "hayır" da bir karardır. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
 
 ## Saklanan notlar
 

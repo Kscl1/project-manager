@@ -4,7 +4,7 @@ Used ChatGPT or Gemini on your phone? You already know how to ask for help in pl
 
 You do not have to learn a new tool: it uses files and programs you already have. It is not another AI model or a website you visit. Your application keeps its own folders, and every record is a file you can open in an editor or review in Git.
 
-**Only used AI on your phone?** [Start here](docs/first-time.md) · [Türkçe](docs/tr/index.md)
+**Only used AI on your phone?** [Start here](docs/first-time.md) · [Türkçe](docs/tr/first-time.md)
 
 ![Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.](public/next-chat.svg)
 
