@@ -26,7 +26,7 @@ note = "Preinstalled on Omarchy."
 - **project-file**: lives in the user's project at `path` (the `.pm` package, the hooks, `.mcp.json`, the `pm-` skills, with the upstream `ref` for copied skills). Checked only when setup is started with the project folder (`app.py <folder>`, `bom.py --project <folder>`); without one it is "not checked". `has` is text the file must hold: the hooks file must run `pm_board.py --resume`, `.mcp.json` must name the server.
 - **manual**: nothing on the machine to check (LikeC4 runs through `npx` with a pinned version).
 
-Unknown versions are left out, never written as "not set". Until an older version has been tried, `min` equals `tested`. `note` is text shown to the user: under its step on Install and in the plain To do list, or as the note when there is no command for this OS. `install.*` and `upgrade.*` are shown too, and run through the platform shell only after the user presses Enter on that step (see Running a step). `load()` stops with a plain message on a duplicate id, an unknown kind, a malformed version or `min` above `tested`.
+Unknown versions are left out, never written as "not set". Until an older version has been tried, `min` equals `tested`. `note` is text shown to the user: under its step on Install and in the plain To do list, or as the note when there is no command for this OS. `install.*` and `upgrade.*` are shown too, and run through the platform shell only after the user presses Enter on that step (see Running a step). `load()` stops with a plain message on a duplicate id, an unknown kind, a malformed version, `min` above `tested`, or a `bom.toml` that cannot be read.
 
 `similar` lists names of skills, MCP servers or plugins that do the same job as the item (see Similar items).
 
@@ -77,7 +77,7 @@ lists every file. `y` runs the step only once that plan has arrived; without one
 
 ### Running a step
 
-The command text is shown exactly as it will run, and runs only after the user presses `y` on it. Before that the app checks that the step's program is there (`npm` is missing until the Node.js step has run); if not, it says which step to finish first and runs nothing. The command runs through the platform shell, because the official installers are shell lines (`irm … | iex`, `curl … | bash`): `powershell -NoProfile -Command <text>` on Windows, `bash -c <text>` on Linux, as one argument list with no second shell around it. An earlier design never handed the text to a shell; the text is still never built from user input or tool output; it comes only from `bom.toml`, which is reviewed like code.
+The command text is shown exactly as it will run, and runs only after the user presses `y` on it. Before that the app checks that the step's program is there (`npm` is missing until the Node.js step has run); if not, it says which step to finish first and runs nothing. The command runs through the platform shell, because the official installers are shell lines (`irm … | iex`, `curl … | bash`): `powershell -NoProfile -Command <text>` on Windows, `bash -c <text>` on Linux and macOS (`sh -c <text>` where bash is not installed, as on Alpine), as one argument list with no second shell around it. An earlier design never handed the text to a shell; the text is still never built from user input or tool output; it comes only from `bom.toml`, which is reviewed like code.
 
 While the step runs the app steps aside (Textual's `App.suspend`, supported on Windows and Unix), so the real terminal shows the installer's output and takes a `sudo` password; for a `sudo` line it first says that nothing appears while the password is typed. `Ctrl+C` stops the installer and comes back to the app as a failure (exit code 130). After the command ends the terminal says whether it finished and waits for `Enter`, so the user can read the output before the app comes back. Then the app re-checks that one item and stores the new row for Choose and Check. An exit code of 0 alone proves nothing; only the re-check does:
 
@@ -119,7 +119,7 @@ tools/setup/.venv/Scripts/python -m pip install -r tools/setup/requirements.txt 
 tools/setup/.venv/Scripts/python tools/setup/app.py <your project folder>
 ```
 
-The TUI has its own virtual environment (ignored by git), so the user's Python stays untouched. This also avoids PEP 668: a distribution that marks its Python as externally managed (Arch does) refuses system-wide `pip install`; whether it does depends on that marker file, not on Linux as such. Tests: `python -m unittest discover -s tests`; the app tests skip where Textual is missing.
+The TUI has its own virtual environment (ignored by git), so the user's Python stays untouched. This also avoids PEP 668: a distribution that marks its Python as externally managed (Arch does) refuses system-wide `pip install`; whether it does depends on that marker file, not on Linux as such. Started with any other Python, `app.py` names the package that is missing, prints these three commands and stops with exit code 1, instead of a Python traceback. Tests: `python -m unittest discover -s tests`; the app tests skip where Textual is missing.
 
 ## Layers that are not chosen
 

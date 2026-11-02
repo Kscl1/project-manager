@@ -86,8 +86,11 @@ RECORD = Path(".pm") / "local" / "setup.json"  # in the project: what setup did 
 
 def load(path=BOM):
     """The [[item]] tables of bom.toml, in file order. Raises ValueError with a plain message on a bad entry."""
-    with open(path, "rb") as f:
-        items = tomllib.load(f).get("item", [])
+    try:
+        with open(path, "rb") as f:
+            items = tomllib.load(f).get("item", [])
+    except OSError as error:  # missing or unreadable: the TUI and the plain output say so instead of a traceback
+        raise ValueError(f"bom.toml could not be read: {error}") from error
     seen = set()
     for item in items:
         where = f"bom.toml item {item.get('id') or item.get('name') or '?'}"
@@ -531,10 +534,14 @@ def needs(command, system=None):
 
 
 def shell_args(command, system=None):
-    """The argument list that runs one bom.toml command line through the platform shell (DESIGN.md)."""
+    """The argument list that runs one bom.toml command line through the platform shell (DESIGN.md).
+
+    bash where it is installed, otherwise sh: Alpine and some NixOS setups have no bash, and an install line
+    that runs in neither says only "sh: not found".
+    """
     if (system or this_os()) == "windows":
         return ["powershell", "-NoProfile", "-Command", command]
-    return ["bash", "-c", command]
+    return ["bash" if shutil.which("bash") else "sh", "-c", command]
 
 
 def refresh_path():
