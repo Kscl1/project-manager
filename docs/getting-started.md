@@ -9,7 +9,7 @@ There are three ways in, and the first is the shortest: let your **coding agent*
 
 ## Let your agent do it
 
-Open your coding agent in the folder that holds your project and paste the prompt from [Install with your agent](install-with-agent.md). This is the shortest path: it needs no terminal skills and no Python of your own. The agent asks a few questions, checks your machine and says what each command does before it runs it.
+Open your coding agent in the folder that holds your project and paste the prompt from [Install with your agent](install-with-agent.md). This is the shortest path: it needs no Python of your own, and no terminal if you open the agent in Claude Desktop's Code tab (a paid Claude plan). The agent asks a few questions, checks your machine and says what each command does before it runs it.
 
 When it is done, open your project in a new chat and type `/pm-setup`; the rest is the same as below.
 

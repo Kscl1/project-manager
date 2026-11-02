@@ -96,7 +96,7 @@ After the checklist, or earlier if the user wants to start work and the rest can
 - Do it in try-together mode unless the user chose off, whatever mode they picked; `teaching.md` keeps their choice.
 - In try-together mode, show the task moment from `texts.md` before creating the task: the user gives one sentence, it becomes the task's acceptance criterion, and the user never types a command. Then add `task` to `known` and say the one line from `texts.md`.
 - Give the board hint when the user's second own task exists or they ask what is left.
-- Do the work with the usual approvals, and close the task only when its criterion holds, with evidence.
+- Do the work with the usual approvals, and close the task only when its criterion holds, with evidence. Then show the "After the first task" text from `texts.md`, as written.
 
 ## Finish
 

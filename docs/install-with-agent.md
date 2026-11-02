@@ -21,6 +21,7 @@ You install project-manager into the user's project. Follow these steps in order
 
 - If you received only a summary of this page instead of its full text, fetch it in full before step 1 (for example with `curl`) and read all of it.
 - Talk to the user in their language, plainly; assume they know their project, not AI or project-management words. Ask one question at a time.
+- Name files and folders by what they hold, not by their path or file name: "your project folder", "the project-manager copy next to it", "a short record of your choices" (not `.pm/local/setup.json`), "git settings for line endings" (not `.gitattributes`), "the note for the next chat" (not `handover.md`). Show a path or file name only when the user must type, open or check it. When you say what was installed or changed, say it in one plain sentence ("the package's files, a folder of notes and two git settings"), not file by file; read-only checks you run yourself need not be shown unless the user asks, but a command that changes something is still shown before it runs (next rule).
 - Before each command that changes something (an install, a git command that writes, the installer), say in one sentence what it does, show it, and run it only after a clear yes. Read-only checks need no yes. Never add `sudo` to npm.
 - Do not edit the project's code and do not create example files. Do not run `/pm-setup` here.
 - Keep a list as you go: what you installed, what the user skipped, and every error with its command. It goes into the hand-over file in step 6.

@@ -34,3 +34,5 @@ Install project-manager into my project. Read all of https://raw.githubuserconte
 ```
 
 The assistant follows [Install with your agent](install-with-agent.md). When it is done, open the project in a new chat and type `/pm-setup` there (Pi: `/skill:pm-setup`, Codex: `$pm-setup`).
+
+Words you do not know are in the [glossary](glossary.md).

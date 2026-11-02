@@ -1066,9 +1066,11 @@ def main(argv=None):
         tool_updates(target)
     print("\nNext:")
     if first:
-        print("  1. Open the project in your coding agent and run /pm-setup: it fills the charter and models with you.")
-        print("  2. python .pm/tools/pm_check.py    # should print: No problems found")
-        print("  3. backlog browser                 # the task screen")
+        # The install guide records, commits and hands over first; /pm-setup belongs to a new chat after that.
+        print("  1. python .pm/tools/pm_check.py    # should print: No problems found")
+        print("  2. Commit these files, then open the project in a new chat of your coding agent and type /pm-setup")
+        print("     (Pi: /skill:pm-setup, Codex: $pm-setup): it fills the charter and models with you.")
+        print("  3. backlog browser                 # the task screen, when you want to see it")
         return 0
     # Already installed (an upgrade, a rollback or a new layer): the upgrade guide's checks, run from the project.
     checks = ["python .pm/tools/pm_check.py", "python -m unittest discover -s .pm/tests"]

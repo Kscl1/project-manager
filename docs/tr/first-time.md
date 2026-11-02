@@ -34,3 +34,5 @@ project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-
 ```
 
 Yardımcı [Yardımcınla kur](install-with-agent.md) sayfasını izler. Bitince projeyi yeni bir sohbette aç ve oraya `/pm-setup` yaz (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
+
+Bilmediğin kelimeler [sözlükte](glossary.md) tek cümleyle açıklanır.
