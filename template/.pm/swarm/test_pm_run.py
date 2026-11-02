@@ -209,6 +209,25 @@ sys.exit(2)
 """
 
 
+def end_process(proc):
+    """Clean up a check process a test started; killing the shell is enough for the fake checks here."""
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait()
+
+
+def process_runs(pid):
+    """True while a process with this id runs (tasklist on Windows, where os.kill would end it)."""
+    if os.name == "nt":
+        listed = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+        return f" {pid} " in f" {listed} "
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
 def repo_for_in_process_runs(test, repo):
     """A Run made inside the test process writes its failure log under PM_RUN_REPO, never into the checkout."""
     patcher = patch.dict(os.environ, {"PM_RUN_REPO": str(repo)})
@@ -293,6 +312,18 @@ class PmRunFixture:
         while not (log.exists() and text in log.read_text(encoding="utf-8")):
             self.assertLess(time.time(), deadline, f"no {text} in pm_run.log")
             time.sleep(0.1)
+
+    def wait_for_state(self, jid, expected):
+        """Wait until the saved receipt of `jid` says `expected`: a log line is written a moment before the save."""
+        deadline = time.time() + 30
+        while True:
+            try:
+                if self.receipts().get(jid, {}).get("state") == expected:
+                    return
+            except (OSError, ValueError):
+                pass
+            self.assertLess(time.time(), deadline, f"{jid} never reached {expected}")
+            time.sleep(0.05)
 
     def receipts(self):
         return json.loads((self.run_dir / "receipts.json").read_text(encoding="utf-8"))
@@ -1079,6 +1110,389 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("check exited 4", failed.stdout)
         self.assertFalse(self.fake_state.exists(), "--check must not call Herdr")
+
+
+class CheckAndRetryTest(PmRunFixture, unittest.TestCase):
+    """A check runs in the background (state `checking`), and `--retry` starts an ended job again."""
+
+    def test_a_slow_check_does_not_hold_the_next_launch(self):
+        (self.run_dir / "caps.json").write_text('{"default": 1}', encoding="utf-8")  # one job per bucket
+        self.jobs(
+            self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(1)"'),
+            self.job("b", "ok"),
+        )
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual([state[j]["state"] for j in "ab"], ["verified", "verified"])
+        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
+        self.assertIn("CHECK a", log)
+        self.assertLess(
+            log.index("LAUNCH b"),
+            log.index("VERIFIED a"),
+            "a slow check must not hold the next job, and a checking job keeps no bucket slot",
+        )
+
+    def test_a_check_that_runs_past_the_limit_is_killed_and_fails_the_job(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(30)"')
+        attempt = {"name": "worker", "started": 1, "worked": True, "session_log": str(self.tmp / "no.jsonl")}
+        state = {"a": {"state": "started", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "status_of", return_value=None), patch.object(pm_run, "VERIFY_S", 1):
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "checking")
+            self.assertIn("a", run.checks, "a running check is kept, not waited for")
+            with patch.object(pm_run.time, "time", return_value=time.time() + 5):
+                run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "check-failed")
+        self.assertEqual(attempt["verify_rc"], -1)
+        self.assertIn("verify timed out after 1 s", attempt["why"])
+        self.assertNotIn("a", run.checks, "the killed check is forgotten")
+
+    def test_a_restart_loses_the_check_result_and_retry_checks_again(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}, "checking_since": 0, "check_pid": 4242}
+        state = {"a": {"state": "checking", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        self.assertEqual(run.checks, {}, "a fresh loop has no check process in memory")
+        no_worker = patch.object(run, "launch")  # a regression must not start a real, paid worker
+        launch = no_worker.start()
+        self.addCleanup(no_worker.stop)
+        run.tick([self.job("a", "ok")], state, {})
+        self.assertEqual(state["a"]["state"], "check-failed", "an old check is never adopted or started twice")
+        self.assertIn("result was lost", attempt["why"])
+        self.assertEqual(run.checks, {})
+        job = self.job("a", "ok", retry=1)
+        run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "checking", "--retry checks the same report again")
+        deadline = time.time() + 10
+        while state["a"]["state"] == "checking" and time.time() < deadline:
+            run.tick([job], state, {})
+            time.sleep(0.1)
+        self.assertEqual(state["a"]["state"], "verified")
+        launch.assert_not_called()
+
+    def test_a_check_that_passes_after_its_report_went_away_fails(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        job = self.job("a", "ok")
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}}
+        state = {"a": {"state": "pending", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        run.start_check(job, state["a"])
+        out.unlink()  # the report goes away while the check runs
+        deadline = time.time() + 10
+        while state["a"]["state"] == "checking" and time.time() < deadline:
+            run.tick([job], state, {})
+            time.sleep(0.1)
+        self.assertEqual(state["a"]["state"], "check-failed", "a passed check proves nothing about a missing report")
+        self.assertIn("no longer complete", attempt["why"])
+
+    def test_a_check_that_passes_after_its_report_changed_fails(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        art, _ = pm_run.check_artifact(out, 1, 0)
+        job = self.job("a", "ok")
+        attempt = {"name": "worker", "started": 1, "artifact": art}
+        state = {"a": {"state": "pending", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        run.start_check(job, state["a"])
+        out.write_text("other " * 60 + "\n<!-- done -->\n", encoding="utf-8")  # complete, but not what was checked
+        deadline = time.time() + 10
+        while state["a"]["state"] == "checking" and time.time() < deadline:
+            run.tick([job], state, {})
+            time.sleep(0.1)
+        self.assertEqual(state["a"]["state"], "check-failed", "the check result belongs to the report it read")
+        self.assertIn("changed while the check ran", attempt["why"])
+
+    def test_a_restart_during_a_retried_check_ends_check_failed_without_a_new_worker(self):
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}, "checking_since": 0, "check_retry": True}
+        state = {"a": {"state": "checking", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "launch") as launch:  # a regression must not start a real, paid worker
+            run.tick([self.job("a", "ok")], state, {})
+        launch.assert_not_called()
+        self.assertEqual(state["a"]["state"], "check-failed", "a lost result is not a failed retry: no paid attempt")
+        self.assertIn("result was lost", attempt["why"])
+
+    def test_stop_ends_a_job_whose_check_runs_and_kills_the_check(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(30)"', stop=True)
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}}
+        state = {"a": {"state": "pending", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        run.start_check(job, state["a"])
+        proc = run.checks["a"]
+        self.addCleanup(end_process, proc)
+        run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "stopped", "a stopped job must not end verified")
+        self.assertNotIn("a", run.checks)
+        self.assertIsNotNone(proc.poll(), "the check is killed, not left to finish")
+        self.assertIn("STOPPED a: on request, its check was stopped", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_timed_out_check_kills_its_whole_process_tree(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(5)"')
+        attempt = {"name": "worker", "started": 1, "worked": True, "session_log": str(self.tmp / "no.jsonl")}
+        state = {"a": {"state": "started", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "status_of", return_value=None), patch.object(pm_run, "VERIFY_S", 1), patch.object(
+            pm_run, "kill_check"
+        ) as kill:
+            run.tick([job], state, {})
+            self.assertEqual(state["a"]["state"], "checking")
+            proc = run.checks["a"]
+            self.addCleanup(end_process, proc)
+            with patch.object(pm_run.time, "time", return_value=time.time() + 5):
+                run.tick([job], state, {})
+        kill.assert_called_once_with(proc)
+        self.assertEqual(state["a"]["state"], "check-failed")
+
+    def start_shell_tree(self):
+        """A real check shape: a shell, a Python parent under it and a Python child under that; returns the shell and the child's id."""
+        pid_file = self.tmp / "child.pid"
+        child = "import time; time.sleep(60)"
+        parent = (
+            "import subprocess, sys, time; "
+            f"p = subprocess.Popen([sys.executable, '-c', '{child}']); "
+            f"open(r'{pid_file}', 'w').write(str(p.pid)); time.sleep(60)"
+        )
+        proc = subprocess.Popen(f'"{sys.executable}" -c "{parent}"', shell=True, start_new_session=os.name != "nt")
+        self.addCleanup(end_process, proc)
+        deadline = time.time() + 20
+        while not pid_file.exists() and time.time() < deadline:
+            time.sleep(0.1)
+        return proc, int(pid_file.read_text(encoding="utf-8"))
+
+    def assert_gone(self, pid, message):
+        gone_by = time.time() + 10
+        while process_runs(pid) and time.time() < gone_by:
+            time.sleep(0.2)
+        self.assertFalse(process_runs(pid), message)
+
+    def test_kill_check_ends_the_real_child_of_the_shell(self):
+        proc, child_pid = self.start_shell_tree()
+        self.assertTrue(pm_run.kill_check(proc))
+        self.assert_gone(child_pid, "the real command under the shell is killed too")
+
+    @unittest.skipUnless(os.name == "nt", "the shell is the only handle to the tree on Windows")
+    def test_after_a_failed_tree_kill_the_command_to_stop_it_by_hand_still_works(self):
+        proc, child_pid = self.start_shell_tree()
+        self.addCleanup(subprocess.run, ["taskkill", "/PID", str(child_pid), "/F"], capture_output=True)
+        failed = subprocess.CompletedProcess([], 1)
+        with patch.object(pm_run.subprocess, "run", return_value=failed):
+            self.assertFalse(pm_run.kill_check(proc))
+        self.assertIsNone(proc.poll(), "the shell is left running, so the tree can still be found through it")
+        done = subprocess.run(pm_run.stop_by_hand(proc.pid), shell=True, capture_output=True)
+        self.assertEqual(done.returncode, 0, done.stdout)
+        self.assert_gone(child_pid, "the printed command stops the real command")
+
+    def test_a_check_whose_tree_cannot_be_killed_names_the_command_to_stop_it(self):
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir()
+        out.write_text("word " * 60 + "\n<!-- done -->\n", encoding="utf-8")
+        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import time; time.sleep(5)"')
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}}
+        state = {"a": {"state": "pending", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        run.start_check(job, state["a"])
+        proc = run.checks["a"]
+        self.addCleanup(end_process, proc)
+        with patch.object(pm_run, "VERIFY_S", 1), patch.object(pm_run, "kill_check", return_value=False), patch.object(
+            pm_run.time, "time", return_value=time.time() + 5
+        ):
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "check-failed")
+        self.assertTrue(attempt["check_left_running"])
+        self.assertIn(pm_run.stop_by_hand(proc.pid), attempt["why"])
+
+    def test_stop_after_a_restart_says_the_old_check_is_not_stopped_from_here(self):
+        attempt = {"name": "worker", "started": 1, "artifact": {"words": 60}, "checking_since": time.time()}
+        state = {"a": {"state": "checking", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        run.tick([self.job("a", "ok", stop=True)], state, {})
+        self.assertEqual(state["a"]["state"], "stopped")
+        self.assertIn("earlier loop", run.log_path.read_text(encoding="utf-8"))
+
+    def test_a_retried_check_failed_job_checks_the_report_again_first(self):
+        job = self.job("a", "ok")
+        job["retry"] = 1
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        out = self.tmp / "out" / "a.md"
+        out.parent.mkdir(parents=True)
+        cases = [
+            ("a deleted report", None, "pending"),
+            ("a report without the done marker", "word " * 60 + "\n", "pending"),
+            ("a fixed report", "word " * 60 + "\n<!-- done -->\n", "checking"),
+        ]
+        for case, text, expected in cases:
+            out.unlink(missing_ok=True)
+            if text is not None:
+                out.write_text(text, encoding="utf-8")
+            attempt = {
+                "name": "worker",
+                "started": 1,
+                "artifact": {"words": 3},
+                "verify_rc": 1,
+                "stopped_confirmed": True,
+            }
+            state = {"a": {"state": "check-failed", "attempts": [attempt]}}
+            run.tick([job], state, {"default": 0})
+            self.assertEqual(state["a"]["state"], expected, f"{case} must not end verified")
+            if expected == "pending":
+                self.assertNotIn("a", run.checks, f"{case}: no check runs on a report that does not pass")
+                self.assertNotIn("check_retry", attempt)
+            else:
+                run.drop_check("a")
+                self.assertTrue(attempt["check_retry"])
+                self.assertEqual(attempt["artifact"]["words"], 63, "the fresh result is stored")
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("RETRY a: check-failed cleared, back to pending for a new attempt: no output file", log)
+        self.assertIn("back to pending for a new attempt: no done marker", log)
+
+    def test_a_retry_closes_the_old_worker_before_the_reset(self):
+        job = self.job("a", "ok")
+        job["retry"] = 1
+        attempt = {"name": "worker", "started": 1, "pane": "p1", "stopped_confirmed": False}
+        state = {"a": {"state": "handed-over", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "stop", return_value=True) as stop:
+            run.tick([job], state, {"default": 0})
+        stop.assert_called_once_with(attempt)
+        self.assertEqual(state["a"]["state"], "pending")
+        self.assertTrue(attempt["stopped_confirmed"], "the closed worker is confirmed stopped")
+
+    def test_a_retry_is_refused_when_the_old_worker_cannot_be_closed(self):
+        job = self.job("a", "ok")
+        job["retry"] = 1
+        attempt = {"name": "worker", "started": 1, "pane": "p7", "stopped_confirmed": False}
+        state = {"a": {"state": "handed-over", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "stop", return_value=False):
+            run.tick([job], state, {"default": 0})
+            run.tick([job], state, {"default": 0})  # the same request, again
+        self.assertEqual(state["a"]["state"], "handed-over", "the job keeps its state")
+        self.assertEqual(len(state["a"]["attempts"]), 1, "no new attempt runs beside the old worker")
+        self.assertEqual(state["a"]["retries"], 1, "the handled request is not fired again")
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn(
+            "RETRY-REFUSED a: could not close the old worker in Herdr pane p7; close it, then --retry a again", log
+        )
+        self.assertEqual(log.count("RETRY-REFUSED"), 1)
+
+    def test_a_retry_that_arrives_while_the_job_runs_never_fires_later(self):
+        job = self.job("a", "ok")
+        job["retry"] = 1
+        attempt = {"name": "worker", "started": 1, "pane": "p1"}
+        state = {"a": {"state": "started", "attempts": [attempt]}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+        with patch.object(run, "status_of", return_value="unknown"):
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started", "a running job is not reset")
+        self.assertEqual(state["a"]["retries"], 1, "the request is recorded as handled")
+        state["a"]["state"] = "stopped"  # the job ends later, normally
+        attempt["stopped_confirmed"] = True
+        run.tick([job], state, {"default": 0})
+        self.assertEqual(state["a"]["state"], "stopped", "the old request does not fire after the job ends")
+        self.assertEqual(len(state["a"]["attempts"]), 1)
+        self.assertIn(
+            "RETRY-IGNORED a: it was started when the request arrived",
+            run.log_path.read_text(encoding="utf-8"),
+        )
+
+    def test_retry_refuses_a_verified_job_and_a_running_one(self):
+        self.jobs(self.job("a", "ok"), self.job("b", "hang"))
+        proc = self.start_pm()
+        self.wait_for_state("b", "started")
+        running = self.run_pm("--retry", "b")
+        self.assertNotEqual(running.returncode, 0)
+        self.assertIn("stop it first with --stop b, then --retry b", running.stderr)
+        self.wait_for_state("a", "verified")
+        verified = self.run_pm("--retry", "a")
+        self.assertNotEqual(verified.returncode, 0)
+        self.assertIn("already verified", verified.stderr)
+        missing = self.run_pm("--retry", "nope")
+        self.assertNotEqual(missing.returncode, 0)
+        self.assertIn("no job nope", missing.stderr)
+        jobs = json.loads((self.run_dir / "jobs.json").read_text(encoding="utf-8"))
+        self.assertNotIn("retry", jobs[0], "a refused --retry changes nothing")
+        self.run_pm("--stop", "b")
+        self.assertEqual(proc.wait(timeout=30), 0)
+        self.assertEqual(self.receipts()["b"]["state"], "stopped")
+
+    def test_retry_on_a_stopped_job_restarts_it_and_its_blocked_follower(self):
+        self.jobs(self.job("a", "hang"), self.job("b", "ok", after=["a"]))
+        proc = self.start_pm()
+        self.wait_for_state("a", "started")
+        self.run_pm("--stop", "a")
+        self.assertEqual(proc.wait(timeout=30), 0, "a stopped job and its blocked follower end the loop")
+        self.assertEqual([self.receipts()[j]["state"] for j in "ab"], ["stopped", "blocked"])
+        jobs = json.loads((self.run_dir / "jobs.json").read_text(encoding="utf-8"))
+        next(j for j in jobs if j["id"] == "a")["model"] = "ok"  # the retried attempt can finish this time
+        (self.run_dir / "jobs.json").write_text(json.dumps(jobs), encoding="utf-8")
+        result = self.run_pm("--retry", "a")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("go back to pending", result.stdout)
+        proc = self.start_pm()
+        self.assertEqual(proc.wait(timeout=60), 0)
+        state = self.receipts()
+        self.assertEqual([state[j]["state"] for j in "ab"], ["verified", "verified"])
+        self.assertEqual(len(state["a"]["attempts"]), 2, "the retry is a new attempt")
+        self.assertEqual(state["a"]["retries"], 1)
+        jobs = json.loads((self.run_dir / "jobs.json").read_text(encoding="utf-8"))
+        self.assertNotIn("stop", jobs[0], "--retry clears the stop request")
+        self.assertEqual(jobs[0]["retry"], 1)
+        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
+        self.assertIn("RETRY a: stopped cleared, back to pending", log)
+
+    def test_retry_on_a_check_failed_job_checks_again_without_a_new_worker(self):
+        flag, script = self.tmp / "pass.flag", self.tmp / "check.py"
+        script.write_text(
+            "import sys\nfrom pathlib import Path\nsys.exit(0 if Path('pass.flag').exists() else 1)\n", encoding="utf-8"
+        )
+        self.jobs(self.job("a", "ok", verify=f'"{sys.executable}" "{script}"'))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "check-failed")
+        flag.touch()
+        result = self.run_pm("--retry", "a")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("its check runs again on the existing report", result.stdout)
+        proc = self.start_pm()
+        self.assertEqual(proc.wait(timeout=60), 0)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "verified")
+        self.assertEqual(len(state["a"]["attempts"]), 1, "no new worker was paid for")
+        self.assertEqual(state["a"]["attempts"][0]["verify_rc"], 0)
+        self.assertEqual(state["a"]["retries"], 1)
+        self.assertIn(
+            "RETRY a: check again on the existing report, no new worker",
+            (self.run_dir / "pm_run.log").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(self.herdr_state()["agents"], {}, "a re-check starts no worker")
 
 
 class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
