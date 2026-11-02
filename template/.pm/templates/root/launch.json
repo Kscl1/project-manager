@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "board",
+      "runtimeExecutable": "backlog",
+      "runtimeArgs": ["browser", "--no-open", "--port", "6420"],
+      "port": 6420
+    }
+  ]
+}
