@@ -5,11 +5,17 @@ description: Install the work-system package in your project, then fit it with y
 
 project-manager keeps your tasks, decisions and working rules next to your code, so your coding agent plans and checks work the same way every session.
 
-There are three ways in: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the layers below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you.
+There are three ways in, and the first is the shortest: let your **coding agent** do it ([Install with your agent](install-with-agent.md): paste one prompt, answer its questions), the **setup TUI**, a guided screen in your terminal, or **by hand**, working down the Core layer table below. Every way ends with `/pm-setup` in your project, where your agent fits the package to the project with you. Words such as commit, skill or layer are in the [glossary](glossary.md).
 
-## Before you start
+## Let your agent do it
 
-You need an internet connection, **Python 3.11 or newer** and **Git**. The TUI cannot install the Python it runs on.
+Open your coding agent in the folder that holds your project and paste the prompt from [Install with your agent](install-with-agent.md). This is the shortest path: it needs no terminal skills and no Python of your own. The agent asks a few questions, checks your machine and says what each command does before it runs it.
+
+When it is done, open your project in a new chat and type `/pm-setup`; the rest is the same as below.
+
+## Before you start with the setup screen or by hand
+
+You need an internet connection, **Python 3.11 or newer** (the program that runs the setup screen) and **Git** (the program that keeps your project's history). The setup screen cannot install the Python it runs on.
 
 **Windows 11:** in PowerShell, install the [Python Install Manager](https://docs.python.org/3/using/windows.html) and [Git for Windows](https://git-scm.com/install/windows) with [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/), then open a new terminal and install Python itself with `py`:
 
@@ -19,7 +25,9 @@ winget install --id Git.Git --exact --source winget
 py install 3.13
 ```
 
-The older installers (`Python.Python.3.11` and so on) can be stopped by Smart App Control with a "Bad Image" error (`0xc0e90002`); the Install Manager is not.
+**Windows 10:** install Python from [python.org](https://www.python.org/downloads/) and Git from [git-scm.com](https://git-scm.com/install/windows), then continue below.
+
+**macOS:** install both with [Homebrew](https://brew.sh): `brew install python git`.
 
 **Omarchy and other Arch-based systems:** both are usually there already; check with `python --version` and `git --version`. If not, use [pacman](https://man.archlinux.org/man/pacman.8.en):
 
@@ -27,7 +35,11 @@ The older installers (`Python.Python.3.11` and so on) can be stopped by Smart Ap
 sudo pacman -S --needed python git
 ```
 
-Your project must be a Git repository. For a new project, create its folder and run `git init` in it. Commit or back up your work before setup.
+A Git repository is a folder whose history Git keeps; `git init` turns any folder into one. Your project must be one. For a new project, create its folder and run `git init` in it. Commit or back up your work before setup.
+
+If an older Python installer stops with a "Bad Image" error, see [When something breaks](#when-something-breaks).
+
+**Windows, Claude Desktop:** the app is a separate install, and its Code tab needs a paid Claude plan. The terminal works without it.
 
 ## Run the setup TUI
 
@@ -78,47 +90,29 @@ What every project needs. By hand, work down the table.
 |---|---|
 | [Node.js](https://nodejs.org/en/download) | Runs the JavaScript tools below. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
 | [Backlog.md](https://github.com/MrLesk/Backlog.md) | Your tasks, as Markdown files in the project. `npm i -g backlog.md@1.55.3`. If npm says `EACCES`, follow [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally); do not add `sudo`. |
-| [Claude Code](https://code.claude.com/docs/en/setup) | Your coding agent. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. Both put `claude` in `.local\bin` (`~/.local/bin`) in your home folder; on Windows that folder is not added to PATH, so the TUI's step adds it to your user PATH for you (by hand: add `%USERPROFILE%\.local\bin`, then open a new terminal). Sign in when you first run `claude`. |
+| [Claude Code](https://code.claude.com/docs/en/setup) | Your coding agent. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. Both put `claude` in `.local\bin` (`~/.local/bin`) in your home folder; on Windows that folder is not added to PATH (the list of folders where the system looks for commands), so the TUI's step adds it to your user PATH for you (by hand: add `%USERPROFILE%\.local\bin`, then open a new terminal). Sign in when you first run `claude`. |
 | The `.pm` package | Rules, decisions, checks and the `pm-` skills (`pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
 | Session hooks | Show your agent where work stopped when a session starts and after its memory is compacted. |
 | [Context7](https://github.com/upstash/context7) | Gives your agent current library docs. No account needed; a free key only raises its rate limit. |
 
-The last three come from one command, run from the project-manager folder. The TUI runs it for you:
+The `.pm` package, the session hooks and Context7 come from one command, run from the project-manager folder. The TUI runs it for you:
 
 ```bash
-python template/.pm/tools/pm_init.py ../my-project --check
-python template/.pm/tools/pm_init.py ../my-project
+python template/.pm/tools/pm_init.py ../<your-project-folder> --check
+python template/.pm/tools/pm_init.py ../<your-project-folder>
 ```
+
+Replace `<your-project-folder>` with the name of your project's folder.
 
 `--check` prints everything it would write and writes nothing. If your project already has its own agent instructions, Backlog.md or git hooks, the installer stops; run it again with `--keep-existing` to install and keep yours. A second run changes nothing.
 
 **Your language.** Add `--lang tr` (or another language code) and the agent talks to you and writes tasks, decisions, worklogs and commit messages in that language. Keys such as `Next:` and status names such as `Done` stay English, because the tools read them: `Next: İlk testi çalıştır`. The flag writes one `Language: tr` line in `AGENTS.md` and Claude Code's `language` setting in the project's `.claude/settings.json`, so it holds for everyone who opens the project (a settings file of your own is listed for `/pm-setup` instead); without it, `/pm-setup` asks once. To change it later, run `python .pm/tools/pm_init.py . --lang <code>` in the project; older records are not translated. When a task or decision still reads as English, `pm_check` prints an `Info:` line about it and passes.
 
-## Map layer (optional)
+## Optional layers
 
-[LikeC4](https://likec4.dev/tooling/cli/) turns a model of your architecture into diagrams you can browse: `npx likec4@1.60.0 start` in the project. Its [MCP server](https://likec4.dev/tooling/mcp/) lets your agent read that model, and the `pm-likec4-dsl` skill (LikeC4's own `likec4-dsl` skill, copied at v1.60.0) teaches it the syntax; tick Map in the TUI, or add `--map` to the installer command. If the project already has a `.mcp.json` (for example from an earlier core-only setup), the server is listed for `/pm-setup` to add rather than written into your file.
+Map adds architecture diagrams your agent can keep current, Swarm runs helper agents in panes you can watch, and EVREN connects your own EVREN models through a local bridge. None of them is needed for a first task, and you can add one later.
 
-## Swarm layer (optional)
-
-The swarm runs helper agents as workers you can watch: each one in its own [Herdr](https://herdr.dev) pane, started and checked by `.pm/swarm/pm_run.py`. You do not need it to start. Tick Swarm in the TUI (it starts unticked), or add `--swarm` to the installer command. It needs:
-
-- [Pi](https://github.com/earendil-works/pi), with the extensions `pi-mcp-adapter` (the project's MCP servers, such as Context7, for Pi workers) and `pi-web-access` (web search and pages). Pi finds the `pm-` skills in `.agents/skills/` once you trust the project when Pi asks; call them as `/skill:pm-setup` and so on.
-  While Pi and the extensions install, npm may report "high severity vulnerabilities" and install-script warnings from their own dependencies; setup goes on.
-  `pi-mcp-adapter` replaces Pi's built-in MCP: on its first start it turns the built-in off in your Pi user settings (`pi config` turns it back on), and it reads the project's `.mcp.json`, the file Claude Code reads too.
-  The project's MCP servers start only after you allow them. The first time Pi opens the project, it asks once per server ("Allow project MCP server?"); choose Allow, because Enter means Don't allow. Pi remembers the answer for that project and its worktrees. Answer it once in `pi` in your project before the first pm_run worker, so no worker stops at the question.
-- Herdr, from its own installer, which puts the newest release on your PATH and checks its SHA-256.
-
-Two things no check can see, so the Done screen reminds you: start `herdr` once in a terminal and leave it running, and sign in to a model in Pi (`pi`, then `/login`; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT). Set `PM_RUN_HERDR` only if `herdr` is not on your PATH.
-
-On its first start Herdr shows a welcome, then an "agent integrations" screen that offers to install integrations for the agents it finds; pm_run does not need them, and `Esc` skips it. After Sign in with ChatGPT, Pi may pick a model a ChatGPT plan cannot use (`gpt-5.5`, error 400): type `/model`, choose `openai/gpt-6.1-sol` and press `Ctrl+S` to keep it for new sessions. pm_run workers are not affected, because each job names its model.
-
-A worker in Claude Code starts without Claude Code's bundled skills (such as `/code-review`, which starts its own hidden helper); your own Claude Code setup is not changed. Which commands it may run without asking follows your Claude Code settings: read-only ones such as `git status` never ask. When a worker asks, pm_run writes `WAITING` and the Herdr tab to answer in.
-
-## EVREN layer (optional)
-
-[evren-bridge](https://github.com/Kscl1/evren-bridge) is a local bridge to the models of [EVREN](https://evren.ssyz.org.tr), for agents that speak OpenAI Chat Completions, such as Pi; it is not an official EVREN project. Tick EVREN in the TUI (it starts unticked) only if you have your own EVREN account. Setup follows the bridge's own README: it clones the repo to `~/evren-bridge` and installs its one dependency, `rich` (on Omarchy from pacman, because Arch's Python refuses `pip install`); start the bridge with the same `python`. The check reads the release tag of that clone, and an older clone is updated with `git pull`.
-
-Setup never asks for your EVREN API key, and never reads it. Put it in place yourself as the Quick start of the [evren-bridge README](https://github.com/Kscl1/evren-bridge#quick-start) says (get one from [EVREN API keys](https://evren.ssyz.org.tr/api-keys)), run `python evren_bridge.py` in `~/evren-bridge` and leave it running, then add an OpenAI-compatible provider with base URL `http://127.0.0.1:8787/v1` in your agent; the bridge's README shows Pi's `models.json`. Nothing else depends on it: without the EVREN layer the other screens and the installer work the same, and deleting `~/evren-bridge` only makes its row missing while EVREN is ticked.
+[Map, Swarm and EVREN](optional-layers.md): what each one adds, what it needs and how to add it.
 
 ## After setup: /pm-setup
 
@@ -127,7 +121,7 @@ Open your project, not the project-manager folder, in Claude Code:
 - **Windows:** press `o` on the Done screen, or open [Claude Desktop](https://code.claude.com/docs/en/desktop-quickstart), choose Code and select the project folder. Desktop is a separate install and its Code tab needs a paid Claude plan; the terminal works too. If Desktop asks you to sign in first, it forgets the project: sign in, then press `o` again.
 - **Linux:** `cd ~/projects/my-project`, then `claude`.
 
-Type `/pm-setup` and press Enter. If an install chat left a hand-over note (`.pm/local/handover.md`), your agent reads it first. It opens with three sentences on what `.pm` is and asks how you want the project-management side explained (below). Then it opens a setup Epic in Backlog (a parent task with its steps as children) and goes through what it finds, one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes. It ends with one small real task from your project and a prompt for your next session.
+Type `/pm-setup` and press Enter. If an install chat left a hand-over note (`.pm/local/handover.md`), your agent reads it first. It opens with three sentences on what `.pm` is and asks how you want the project-management side explained (below). Then it opens a setup Epic (a parent task that holds its steps) in Backlog and goes through what it finds, one thing at a time: your existing agent rules, git hooks, CI, tests, task lists, anything setup left for you to merge, the project's purpose (its charter) and the models you have. Nothing changes without your yes. It ends with one small real task from your project and a prompt for your next session.
 
 Already have MCP servers, plugins, skills or apps? See [Make your own tools useful](own-tools.md). `/pm-setup` checks one at a time, keeps your existing setup and, with approval, adds a short “which tool when” rule plus a real smoke check.
 
@@ -141,4 +135,4 @@ See [Upgrade and roll back](upgrading.md) for release-tag upgrades, separate too
 
 For a problem with the `.pm` package itself, run `/pm-feedback` in your project. It writes a diagnosis-only report and shows it to you; it opens an issue only on your yes, which needs GitHub's `gh` CLI signed in. If setup fails before the skills are installed, use the TUI's `a` key instead.
 
-**Windows, Smart App Control.** Seen so far only in Windows Sandbox, not yet on a real PC: with Smart App Control on, `git` fails with a "Bad Image" error (`0xc0e90002`), because it blocks Git for Windows' unsigned DLLs. The Git installer still reports success but leaves Git without a credential helper, so `git clone` asks for a GitHub user name in the terminal instead of opening the sign-in window. Check with `git config --system credential.helper` (it should print `manager`). If it prints nothing, reinstall Git once, but only after `git --version` works again (that is, when Smart App Control no longer blocks Git): `winget install --id Git.Git --exact --source winget --force`. Smart App Control is a Windows security setting (Windows Security, App & browser control); decide yourself whether to turn it off.
+**Windows, Smart App Control.** Seen so far only in Windows Sandbox, not yet on a real PC: with Smart App Control on, `git` fails with a "Bad Image" error (`0xc0e90002`), because it blocks Git for Windows' unsigned DLLs. The Git installer still reports success but leaves Git without a credential helper, so `git clone` asks for a GitHub user name in the terminal instead of opening the sign-in window. Check with `git config --system credential.helper` (it should print `manager`). If it prints nothing, reinstall Git once, but only after `git --version` works again (that is, when Smart App Control no longer blocks Git): `winget install --id Git.Git --exact --source winget --force`. Smart App Control is a Windows security setting (Windows Security, App & browser control); ask someone you trust before changing it.

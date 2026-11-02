@@ -5,11 +5,17 @@ description: Çalışma sistemi paketini projene kur, ardından ajanınla birlik
 
 project-manager; görevlerini (yapılacak iş kayıtlarını), karar kayıtlarını (teknik seçimlerin nedenlerini) ve çalışma kurallarını kodunun yanında tutar. Böylece kodlama ajanın (kod okuyup yazan yapay zekâ aracın) her oturumda (çalışma sohbetinde) işi aynı yöntemle planlar ve kontrol eder.
 
-Kuruluma üç yoldan başlayabilirsin: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki katmanları sırayla **elle** kurarak. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar.
+Kuruluma üç yoldan başlayabilirsin; ilki en kısa olanı: kurulumu **kodlama ajanına** yaptırarak ([Ajanınla kur](install-with-agent.md): tek bir prompt yapıştırır, sorularını cevaplarsın), terminalde adım adım yol gösteren **kurulum ekranı (TUI, yani metin tabanlı arayüz)** ile ya da aşağıdaki Çekirdek katman tablosunu izleyerek **elle**. Hangi yolu seçersen seç, sonunda kendi projende `/pm-setup` komutunu çalıştırırsın ve ajanın paketi seninle birlikte projene uyarlar. Commit, beceri (skill) ya da katman gibi kelimeler [sözlükte](glossary.md).
 
-## Başlamadan önce
+## Ajanınla kur
 
-İnternet bağlantısı, **Python 3.11 veya daha yeni bir sürüm** ve **Git** gerekir. Kurulum ekranı (TUI), üzerinde çalıştığı Python'u kendi başına kuramaz.
+Kodlama ajanını projenin bulunduğu klasörde aç ve [Ajanınla kur](install-with-agent.md) sayfasındaki promptu yapıştır. En kısa yol budur: terminal bilgisi ve kendi Python kurulumun gerekmez. Ajan birkaç soru sorar, makineni kontrol eder ve her komutu çalıştırmadan önce ne yaptığını söyler. Dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
+
+İş bitince projeni yeni bir sohbette aç ve `/pm-setup` yaz; gerisi aşağıdakiyle aynıdır.
+
+## Kurulum ekranına ya da elle kuruluma başlamadan önce
+
+İnternet bağlantısı, **Python 3.11 veya daha yeni bir sürüm** (kurulum ekranını çalıştıran program) ve **Git** (projenin geçmişini tutan program) gerekir. Kurulum ekranı (TUI), üzerinde çalıştığı Python'u kendi başına kuramaz.
 
 **Windows 11:** PowerShell'de [WinGet](https://learn.microsoft.com/en-us/windows/package-manager/winget/) kullanarak [Python Install Manager](https://docs.python.org/3/using/windows.html) ve [Git for Windows](https://git-scm.com/install/windows) araçlarını yükle. Ardından yeni bir terminal aç ve Python'un kendisini `py` komutuyla kur:
 
@@ -19,7 +25,9 @@ winget install --id Git.Git --exact --source winget
 py install 3.13
 ```
 
-Eski kurucular (`Python.Python.3.11` vb.), Windows'un Akıllı Uygulama Denetimi (Smart App Control) tarafından "Bad Image" hatasıyla (`0xc0e90002`) durdurulabilir. Install Manager bu engele takılmaz.
+**Windows 10:** Python'u [python.org](https://www.python.org/downloads/) adresinden, Git'i [git-scm.com](https://git-scm.com/install/windows) adresinden kur, sonra aşağıdan devam et.
+
+**macOS:** ikisini [Homebrew](https://brew.sh) ile kur: `brew install python git`.
 
 **Omarchy ve diğer Arch tabanlı sistemler:** İkisi de çoğunlukla kurulu gelir; `python --version` ve `git --version` ile kontrol et. Kurulu değilse [pacman](https://man.archlinux.org/man/pacman.8.en) kullan:
 
@@ -27,7 +35,11 @@ Eski kurucular (`Python.Python.3.11` vb.), Windows'un Akıllı Uygulama Denetimi
 sudo pacman -S --needed python git
 ```
 
-Projen bir Git deposu olmalıdır. Yeni bir projeyse klasörünü oluştur ve içinde `git init` çalıştır. Kurulumdan önce mevcut çalışmalarını Git'e kaydet (`commit`) veya yedekle.
+Git deposu, geçmişini Git'in tuttuğu bir klasördür; `git init` herhangi bir klasörü depoya çevirir. Projen böyle bir depo olmalıdır. Yeni bir projeyse klasörünü oluştur ve içinde `git init` çalıştır. Kurulumdan önce mevcut çalışmalarını Git'e kaydet (`commit`) veya yedekle.
+
+Eski bir Python kurucusu "Bad Image" hatasıyla durursa [Bir şey bozulursa](#bir-şey-bozulursa) bölümüne bak.
+
+**Windows, Claude Desktop:** uygulama ayrı kurulur ve Code sekmesi ücretli bir Claude planı gerektirir. Terminal ondan bağımsız çalışır.
 
 ## Kurulum ekranını (TUI) çalıştır
 
@@ -57,6 +69,8 @@ tools/setup/.venv/bin/python -m pip install -r tools/setup/requirements.txt
 tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 ```
 
+Ekranın kendi etiketleri (Check, Choose, Install, Done) ve sütun adları İngilizce kalır.
+
 | Ekran | Ne olur? | Tuşlar |
 |---|---|---|
 | Check | Her programı ve proje dosyasını gösterir: kurulu, en düşük ve test edilmiş sürüm. Burada hiçbir şey değişmez. Tekrar çalıştırdığında eksik kalmamışsa `Enter` doğrudan Done ekranına geçer. | `Enter` devam eder, `r` tekrar kontrol eder, `c` yolu kopyalar, `l` tekrar çalıştırmada katmanları değiştirir |
@@ -77,7 +91,7 @@ Her projenin ihtiyaç duyduğu temel katman. Elle kuruyorsan tabloyu yukarıdan 
 | Araç | Ne işe yarar ve nasıl kurulur? |
 |---|---|
 | [Node.js](https://nodejs.org/en/download) | Aşağıdaki JavaScript araçlarını çalıştırır. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
-| [Backlog.md](https://github.com/MrLesk/Backlog.md) | Görevlerini projede Markdown dosyaları olarak ve bir kanban panosu (işleri Yapılacak, Yapılıyor, Bitti sütunlarında izleyen pano) düzeninde tutar. `npm i -g backlog.md@1.55.3`. npm `EACCES` yetki hatası verirse [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) adımlarını izle; komutun başına `sudo` ekleme. |
+| [Backlog.md](https://github.com/MrLesk/Backlog.md) | Görevlerini projede Markdown dosyaları olarak tutar ve bir kanban panosunda (işleri durumlarına göre sütunlarda gösteren pano) düzenler. Panonun sütunları Ready (başlanabilir), Active (üzerinde çalışılıyor) ve Done (bitti); bu adlar İngilizce kalır, çünkü araçlar onları okur. `npm i -g backlog.md@1.55.3`. npm `EACCES` yetki hatası verirse [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) adımlarını izle; komutun başına `sudo` ekleme. |
 | [Claude Code](https://code.claude.com/docs/en/setup) | Kodlama ajanın. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. İkisi de `claude` komutunu kullanıcı klasöründeki `.local\bin` (`~/.local/bin`) içine koyar. Windows'ta bu klasör `PATH`'e (sistemin komut aradığı klasör listesine) otomatik eklenmez. TUI bu klasörü kullanıcı `PATH` ayarına senin için ekler (elle kuruyorsan `%USERPROFILE%\.local\bin` yolunu ekle, ardından yeni bir terminal aç). `claude` komutunu ilk çalıştırdığında hesabına giriş yap. |
 | `.pm` paketi | Kurallar, karar kayıtları, kontroller ve `pm-` becerileri (`skill`, ajana belirli bir işi nasıl yapacağını öğreten hazır komut paketleri: `pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
 | Oturum kancaları (`session hooks`) | Oturum başladığında ve ajanın sohbet belleği özetlendiğinde (`compacted`, uzun sohbet geçmişinin yer açmak için kısaltılması) işin nerede kaldığını ajana gösterir. |
@@ -86,39 +100,21 @@ Her projenin ihtiyaç duyduğu temel katman. Elle kuruyorsan tabloyu yukarıdan 
 Son üç satırdaki bileşenler, project-manager klasöründen çalıştırılan tek bir komutla kurulur. TUI bu komutu senin yerine çalıştırır:
 
 ```bash
-python template/.pm/tools/pm_init.py ../my-project --check
-python template/.pm/tools/pm_init.py ../my-project
+python template/.pm/tools/pm_init.py ../<proje-klasörün> --check
+python template/.pm/tools/pm_init.py ../<proje-klasörün>
 ```
+
+`<proje-klasörün>` yerine kendi proje klasörünün adını yaz.
 
 `--check` seçeneği yazacağı her şeyi listeler ama hiçbir dosya yazmaz. Projende zaten kendi ajan talimatların, Backlog.md veya Git kancaların varsa kurucu durur. Mevcut dosyalarını koruyarak kurmak için komutu `--keep-existing` ile tekrar çalıştır. Komutu ikinci kez çalıştırmak hiçbir şeyi değiştirmez.
 
 **Senin dilin.** Komuta `--lang tr` (ya da başka bir dil kodu) eklersen ajan seninle o dilde konuşur; görevleri, kararları, worklog'ları ve commit mesajlarını da o dilde yazar. `Next:` gibi anahtarlar ve `Done` gibi durum adları İngilizce kalır, çünkü araçlar onları okur: `Next: İlk testi çalıştır`. Bayrak `AGENTS.md`'ye tek bir `Language: tr` satırı, projenin `.claude/settings.json` dosyasına da Claude Code'un `language` ayarını yazar; böylece ayar projeyi açan herkes için geçerli olur (ayar dosyası senin kendi dosyansa yazılmaz, `/pm-setup` için listelenir). Bayrağı vermezsen `/pm-setup` bir kez sorar. Dili sonradan değiştirmek için projede `python .pm/tools/pm_init.py . --lang <kod>` çalıştır; eski kayıtlar çevrilmez. Bir görev ya da karar hâlâ İngilizce görünüyorsa `pm_check` bunun için bir `Info:` satırı basar, kontrolü düşürmez.
 
-## Harita katmanı (Map, isteğe bağlı)
+## İsteğe bağlı katmanlar
 
-[LikeC4](https://likec4.dev/tooling/cli/), yazılım mimarinin modelini tarayıcıda gezebileceğin şemalara dönüştürür: proje klasöründe `npx likec4@1.60.0 start` komutuyla açılır. [MCP server](https://likec4.dev/tooling/mcp/) (Model Context Protocol sunucusu; ajanın dış araçlardan veri okumasını sağlayan bağlantı servisi) ajanın bu modeli okumasını sağlar. `pm-likec4-dsl` becerisi ise (LikeC4'ün kendi `likec4-dsl` becerisinin v1.60.0 sürümünden kopyalanmış hâli) ajana bu şema dilinin yazım kurallarını öğretir. TUI'de Map'i işaretle ya da kurucu komutuna `--map` ekle. Projende zaten bir `.mcp.json` dosyası varsa (örneğin daha önce yalnızca çekirdek katmanı kurduysan), sunucu doğrudan dosyana yazılmaz; `/pm-setup` sırasında eklenmek üzere listelenir.
+Map mimari şemaları ekler ve ajanın bunları güncel tutar; Swarm yardımcı ajanları izleyebileceğin bölmelerde çalıştırır; EVREN ise kendi EVREN modellerini yerel bir köprü üzerinden bağlar. İlk görev için hiçbiri gerekmez, birini sonradan da ekleyebilirsin.
 
-## Sürü katmanı (Swarm, isteğe bağlı)
-
-Sürü (`swarm`), yardımcı ajanları çalışırken izleyebileceğin işçi ajanlar (`worker`) olarak çalıştırır. Her işçi kendi [Herdr](https://herdr.dev) bölmesinde (birden fazla terminali bir arada gösteren ekranda) açılır ve `.pm/swarm/pm_run.py` tarafından başlatılıp denetlenir. Başlamak için bu katmana ihtiyacın yoktur. TUI'de Swarm'ı işaretle (başlangıçta işaretsiz gelir) ya da kurucu komutuna `--swarm` ekle. Bu katman için gerekenler:
-
-- [Pi](https://github.com/earendil-works/pi) ve onun `pi-mcp-adapter` (Context7 gibi proje MCP sunucularını Pi işçilerine bağlayan eklenti) ile `pi-web-access` (web araması ve sayfa okuma eklentisi) uzantıları. Pi ilk açılışta projeye güvenip güvenmediğini sorduğunda onay verirsen `.agents/skills/` içindeki `pm-` becerilerini bulur; bunları `/skill:pm-setup` şeklinde çağırabilirsin.
-  Pi ve eklentileri kurulurken npm, bu paketlerin kendi bağımlılıklarından kaynaklanan "high severity vulnerabilities" ve kurulum betiği uyarıları gösterebilir; kurulum devam eder.
-  `pi-mcp-adapter`, Pi'nin yerleşik MCP desteğinin yerini alır. İlk çalışmada Pi kullanıcı ayarlarında yerleşik desteği kapatır (`pi config` ile geri açılır) ve Claude Code'un da okuduğu proje `.mcp.json` dosyasını okur.
-  Projenin MCP sunucuları yalnızca sen izin verdikten sonra başlar. Pi projeyi ilk açtığında her sunucu için bir kez izin sorar ("Allow project MCP server?"). Burada Allow seçeneğini seç, çünkü doğrudan Enter'a basmak Don't allow (izin verme) anlamına gelir. Pi bu yanıtı o proje ve onun çalışma ağaçları (`git worktree`, aynı deponun farklı bir iş için açılmış ayrı çalışma klasörleri) için hatırlar. İlk pm_run işçisini başlatmadan önce kendi projende `pi` komutunu bir kez açıp bu soruyu yanıtla ki hiçbir işçi ajan bu soruda takılıp beklemesin.
-- Herdr: kendi kurucusuyla kurulur; bu kurucu en yeni sürümü `PATH` içine ekler ve dosyanın bozulmadığını `SHA-256` özetiyle doğrular.
-
-Hiçbir otomatik kontrolün göremediği iki adımı Done ekranı sana hatırlatır: bir terminalde `herdr` komutunu bir kez başlatıp açık bırak ve Pi içinde bir modele giriş yap (`pi` çalıştır, ardından `/login` yaz; ChatGPT aboneliğin varsa OpenAI'ı, sonra Sign in with ChatGPT seçeneğini seç). `PM_RUN_HERDR` ortam değişkenini yalnızca `herdr` komutu `PATH` içinde değilse ayarla.
-
-Herdr ilk açılışında bir karşılama ekranı, ardından bilgisayarda bulduğu ajanlar için entegrasyon kurmayı öneren bir "agent integrations" ekranı gösterir. pm_run bunlara ihtiyaç duymaz; `Esc` ile geçebilirsin. ChatGPT ile giriş yaptıktan sonra Pi, ChatGPT planının kullanamadığı bir modeli seçebilir (`gpt-5.5`, hata 400): `/model` yaz, `openai/gpt-6.1-sol` modelini seç ve yeni oturumlarda kalıcı olması için `Ctrl+S` tuşlarına bas. pm_run işçileri bundan etkilenmez, çünkü her görev kendi kullanacağı modeli açıkça belirtir.
-
-Claude Code içinde çalışan bir işçi ajan, Claude Code'un kendi paket becerileri olmadan başlar (örneğin kendi gizli yardımcısını başlatan `/code-review`). Senin normal Claude Code kurulumun ise değişmez. İşçinin sana sormadan hangi komutları çalıştırabileceği Claude Code ayarlarına bağlıdır: `git status` gibi salt okunur komutlar hiçbir zaman izin istemez. Bir işçi ajan onay istediğinde pm_run durum olarak `WAITING` yazar ve yanıt vereceğin Herdr sekmesini gösterir.
-
-## EVREN katmanı (isteğe bağlı)
-
-[evren-bridge](https://github.com/Kscl1/evren-bridge), Pi gibi OpenAI Chat Completions (OpenAI'ın standart sohbet API formatı) konuşan ajanların [EVREN](https://evren.ssyz.org.tr) modellerine bağlanmasını sağlayan yerel bir köprüdür; resmî bir EVREN projesi değildir. TUI'de EVREN seçeneğini (başlangıçta işaretsiz gelir) yalnızca kendi EVREN hesabın varsa işaretle. Kurulum, köprünün kendi README dosyasındaki adımları izler: depoyu `~/evren-bridge` klasörüne klonlar ve tek bağımlılığı olan `rich` paketini kurar (Omarchy'de Arch'ın Python'u doğrudan `pip install` çalıştırmayı reddettiği için pacman üzerinden yükler). Köprüyü aynı `python` ile başlat. Kontrol adımı bu klondaki sürüm etiketini okur; daha eski bir klon varsa `git pull` ile güncellenir.
-
-Kurulum senden hiçbir zaman EVREN API anahtarını (kişisel servis erişim parolanı) istemez ve okumaz. Anahtarını [evren-bridge README](https://github.com/Kscl1/evren-bridge#quick-start) dosyasının Quick start bölümünde anlatıldığı gibi kendin yerleştir (anahtarı [EVREN API keys](https://evren.ssyz.org.tr/api-keys) sayfasından alabilirsin). Ardından `~/evren-bridge` klasöründe `python evren_bridge.py` komutunu çalıştırıp açık bırak ve ajanına taban adresi (`base URL`) `http://127.0.0.1:8787/v1` olan OpenAI uyumlu bir sağlayıcı ekle; köprünün README dosyası Pi için `models.json` örneğini gösterir. Başka hiçbir parça buna bağımlı değildir. EVREN katmanı olmadan da diğer ekranlar ve kurucu aynı şekilde çalışır; `~/evren-bridge` klasörünü silmek yalnızca EVREN işaretliyken ilgili satırı eksik gösterir.
+[Map, Swarm ve EVREN](optional-layers.md): her birinin neyi eklediği, neye ihtiyaç duyduğu ve nasıl eklendiği.
 
 ## Kurulumdan sonra: /pm-setup
 
@@ -141,4 +137,4 @@ Sürüm etiketiyle yükseltme, araçların ve becerilerin ayrı güncellenmesi v
 
 `.pm` paketinin kendisiyle ilgili bir sorun yaşarsan projende `/pm-feedback` komutunu çalıştır. Bu komut yalnızca teşhis bilgisi içeren bir rapor hazırlar ve önce sana gösterir. Yalnızca sen onay verirsen GitHub üzerinde bir sorun kaydı (`issue`) açar; bunun için GitHub'ın `gh` komut satırı aracında (CLI) oturum açılmış olması gerekir. Kurulum henüz beceriler (`skill`) yüklenmeden önce hata verirse bunun yerine TUI'deki `a` tuşunu kullan.
 
-**Windows, Akıllı Uygulama Denetimi (Smart App Control).** Şimdiye kadar gerçek bir bilgisayarda değil, yalnızca Windows Sandbox içinde görüldü: Akıllı Uygulama Denetimi açıkken Git for Windows'un imzasız DLL (kütüphane) dosyalarını engellediği için `git` komutu "Bad Image" hatasıyla (`0xc0e90002`) durur. Git kurucusu yine de kurulumun başarılı olduğunu söyler ama Git'i kimlik doğrulama yardımcısı (`credential helper`, tarayıcıda giriş penceresi açıp hesabı hatırlayan bileşen) olmadan bırakır. Bu yüzden `git clone` komutu giriş penceresi açmak yerine terminalde GitHub kullanıcı adı sorar. `git config --system credential.helper` komutuyla kontrol et (ekrana `manager` yazmalıdır). Hiçbir şey yazmıyorsa Git'i bir kez yeniden kur, ama ancak `git --version` yeniden çalıştıktan sonra (yani Akıllı Uygulama Denetimi Git'i artık engellemiyorken): `winget install --id Git.Git --exact --source winget --force`. Akıllı Uygulama Denetimi bir Windows güvenlik ayarıdır (Windows Güvenliği, Uygulama ve tarayıcı denetimi); kapatıp kapatmamaya kendin karar ver.
+**Windows, Akıllı Uygulama Denetimi (Smart App Control).** Şimdiye kadar gerçek bir bilgisayarda değil, yalnızca Windows Sandbox içinde görüldü: Akıllı Uygulama Denetimi açıkken Git for Windows'un imzasız DLL (kütüphane) dosyalarını engellediği için `git` komutu "Bad Image" hatasıyla (`0xc0e90002`) durur. Git kurucusu yine de kurulumun başarılı olduğunu söyler ama Git'i kimlik doğrulama yardımcısı (`credential helper`, tarayıcıda giriş penceresi açıp hesabı hatırlayan bileşen) olmadan bırakır. Bu yüzden `git clone` komutu giriş penceresi açmak yerine terminalde GitHub kullanıcı adı sorar. `git config --system credential.helper` komutuyla kontrol et (ekrana `manager` yazmalıdır). Hiçbir şey yazmıyorsa Git'i bir kez yeniden kur, ama ancak `git --version` yeniden çalıştıktan sonra (yani Akıllı Uygulama Denetimi Git'i artık engellemiyorken): `winget install --id Git.Git --exact --source winget --force`. Akıllı Uygulama Denetimi bir Windows güvenlik ayarıdır (Windows Güvenliği, Uygulama ve tarayıcı denetimi); değiştirmeden önce güvendiğin birine sor.
