@@ -128,7 +128,7 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
             "merging into the user's main branch does",
             "Show every change to a user file outside `.pm/` as a diff",
             "Mark a gate passed only when what it names was really done",
-            "Review: lead self-check",
+            "needs an independent review",
         ):
             self.assertIn(phrase, skill)
         self.assertNotIn("never mark them passed", skill)

@@ -45,15 +45,20 @@ class BeginnerDocsTest(unittest.TestCase):
         self.assertNotIn("Nothing changes without your yes", read("docs/getting-started.md"))
         self.assertNotIn("Sen onay vermeden hiçbir şey değiştirilmez", read("docs/tr/getting-started.md"))
 
-    def test_both_workflow_guides_distinguish_risk_and_consent(self):
+    def test_both_workflow_guides_name_the_independent_review_and_consent(self):
         for path, phrases in (
             (
                 "docs/how-it-works.md",
-                ("main branch", "security, data, money, permissions or a public release", "lead self-check", "consent"),
+                (
+                    "main branch",
+                    "Every change gets an independent review",
+                    "different model family",
+                    "consent",
+                ),
             ),
             (
                 "docs/tr/how-it-works.md",
-                ("Ana dal", "güvenlik, veri, para, izinler veya herkese açık yayın", "lead self-check", "onay"),
+                ("Ana dal", "Her değişiklik bağımsız bir incelemeden geçer", "farklı bir model ailesi", "onay"),
             ),
         ):
             with self.subTest(path=path):
