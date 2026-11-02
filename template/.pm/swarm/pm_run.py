@@ -6,8 +6,18 @@ has settled. This tool only decides whether a job is done. A job is **verified**
   2. it ends with the done marker and has at least `min_words` words,
   3. Herdr shows the worker's turn settled and the tool closed its pane and confirmed the agent is gone,
   4. the job's `verify` command exits 0. A job without `verify` ends as **artifact-present**, never verified.
+A check runs in the background (state **checking**): the tick starts it and polls it, so the other jobs keep starting
+meanwhile. A stop request is read before the poll, so --stop ends a running check too. A check that runs past
+PM_RUN_VERIFY_S is killed with its whole process tree and fails the job (when the tree cannot be killed, the log
+gives the command to stop it by hand). A check passes only if the report is still complete when it ends. A loop that
+restarts while a check runs has lost its result: the job ends check-failed and --retry checks it again; the old
+check's processes are never adopted or killed by the new loop.
 A finished artifact whose `verify` fails ends as **check-failed**: the report stays and the job is never relaunched,
-because a rerun costs a whole job and the fault is often the check itself; fix the check or the report, then --check.
+because a rerun costs a whole job and the fault is often the check itself; fix the check or the report, then --retry,
+whose re-check needs no new worker. That re-check repeats the artifact check first, so a deleted or shortened report
+goes back to pending for a new attempt instead of verified. A retry closes a worker that is still open first, and is
+refused (and logged) when that pane cannot be closed. A retry that arrives while the job is neither ended nor verified
+is recorded as handled and ignored, so it never fires after the job ends again.
 Herdr's own `done` badge proves nothing on its own: an aborted turn also ends as `done`.
 Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json, at most 60 s between tries), and
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
@@ -60,9 +70,13 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
-                                                            jobs.json: its worker would run on unwatched); a stopped
-                                                            job stays ended in this run dir: to run it again, put it
-                                                            in a new run dir
+                                                            jobs.json: its worker would run on unwatched)
+       python .pm/swarm/pm_run.py <run-dir> --retry <job>   run an ended job again: a stopped, failed, handed-over or
+                                                            check-failed job and every job blocked behind it go back
+                                                            to pending, after closing a worker that is still open; a
+                                                            check-failed job is checked again first, on its existing
+                                                            report and without a new worker (a report that no longer
+                                                            passes starts a new attempt instead)
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
@@ -72,7 +86,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
                        "helpers": ["model", ...],  (lets the worker start helpers as its own pm_run jobs, in a run
                                                     dir inside `writes`, on these models only; default: none)
-                       "stop": true}]          (set by --stop; the job then stays ended here)
+                       "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
+                       "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
+                                                again)
                        (harness "claude" starts Claude Code with --model and args, without its bundled skills
                         (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
@@ -108,6 +124,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -143,7 +160,7 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
-FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED"}
+FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED"}
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -346,6 +363,47 @@ def check_artifact(path, started, min_words):
         "words": len(text.split()),
         "mtime": path.stat().st_mtime,
     }, ""
+
+
+def kill_check(proc):
+    """Kill a background check and the whole tree under it; False when the tree may still run.
+
+    A check runs through the system shell, so killing only the shell leaves the real command running (a timed-out
+    check kept its Python child alive on Windows). Windows kills the tree with taskkill; elsewhere the check started
+    in its own session, so its process group can be killed. Never raises and never waits for ever.
+    """
+    if os.name == "nt":
+        try:
+            done = subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            gone = done.returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            gone = False
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+            gone = True
+        except ProcessLookupError:
+            gone = True  # already gone
+        except OSError:
+            gone = False
+    if not gone and os.name == "nt":
+        return False  # leave the shell running: the by-hand taskkill /T finds the tree only through it
+    try:  # reap the shell; never wait for ever on it
+        proc.kill()
+        proc.wait(timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return gone
+
+
+def stop_by_hand(pid):
+    """The command a person runs to stop a check's processes that pm_run could not stop."""
+    return f"taskkill /PID {pid} /T /F" if os.name == "nt" else f"kill -9 -{pid}"
 
 
 def run_verify(job, repo):
@@ -665,6 +723,7 @@ class Run:
         self.log_path = self.root / "pm_run.log"
         self.bad = {}  # file name -> the parse error last logged for it
         self.failures_warned = False  # the shared failure log could not be written; said once
+        self.checks = {}  # job id -> the Popen of its background check (state "checking")
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -968,8 +1027,13 @@ class Run:
         self.forget_removed(jobs, state)
         for job in jobs:
             s = state.setdefault(job["id"], {"state": "pending", "attempts": []})
+            if self.retry_requested(job, s, jobs, state):
+                continue
             if job.get("stop") and s["state"] not in ENDED:
-                self.stop_on_request(job, s)
+                self.stop_on_request(job, s)  # before the poll: a stop must end a running check too
+                continue
+            if s["state"] == "checking":
+                self.poll_check(job, s)  # its worker is gone, so it holds no bucket slot
                 continue
             if s["state"] != "started":
                 continue
@@ -1037,20 +1101,12 @@ class Run:
                         self.fail_or_retry(job, s, "artifact present but the worker could not be confirmed stopped")
                         continue
                     self.count_usage(job, a)
-                    rc, verify_why = run_verify(job, self.repo)
-                    a["verify_rc"] = rc
-                    if rc is None:
+                    if not job.get("verify"):
                         s["state"] = "artifact-present"
                         self.log(f"ARTIFACT {job['id']} ({art['words']} words): no check, so not verified")
-                    elif rc == 0:
-                        s["state"] = "verified"
-                        self.log(f"VERIFIED {job['id']} ({art['words']} words, check ok)")
-                    else:
-                        s["state"], a["why"] = "check-failed", f"artifact present but {verify_why}"
-                        self.log(
-                            f"CHECK-FAILED {job['id']} ({art['words']} words): {verify_why}; report kept at "
-                            f"{job['out']}, no relaunch; fix the check or the report, then --check {job['id']}"
-                        )
+                        continue
+                    self.start_check(job, s)
+                    self.log(f"CHECK {job['id']}: the check runs in the background, so the loop goes on")
                     continue
                 a["turn_end"] = turn_end(job, a, self.repo)
                 why = f"{why}; {a['turn_end']}"
@@ -1191,6 +1247,8 @@ class Run:
             a.update(stopped_confirmed=self.stop(a), ended=time.time(), why="stopped on request")
             self.count_usage(job, a)
             how = f"Herdr pane {a.get('pane')} closed" if a["stopped_confirmed"] else "its pane could not be closed"
+        elif s["state"] == "checking":
+            how = self.drop_check(job["id"])
         elif s.get("trust_wait"):
             a = s.pop("trust_wait")
             a["stopped_confirmed"] = self.stop(a)
@@ -1199,11 +1257,165 @@ class Run:
         s["state"] = "stopped"
         self.log(f"STOPPED {job['id']}: on request, {how}; its successors are blocked")
 
+    # ---- checks: started in the background, polled once per tick -----------------------------------
+    def start_check(self, job, s):
+        """Start the job's check without waiting for it: the tick goes on launching other jobs meanwhile."""
+        s["state"] = "checking"
+        a = s["attempts"][-1]
+        a["checking_since"] = time.time()
+        # No pipes: a shell child inheriting them can otherwise delay timeout cleanup on Windows. Its own session
+        # (elsewhere) is what lets kill_check kill the whole tree, not just the shell.
+        proc = subprocess.Popen(
+            job["verify"],
+            shell=True,
+            cwd=self.repo,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=os.name != "nt",
+        )
+        a["check_pid"] = proc.pid  # named in the log when its processes cannot be stopped
+        self.checks[job["id"]] = proc
+
+    def drop_check(self, jid):
+        """Stop a background check whose result nobody will read any more (a deleted job, or --stop).
+
+        Returns how it went, for the log line: stopped, could not be stopped (with the command to do it by hand), or
+        started by an earlier loop, which this one never kills because it cannot be sure the process is still that check.
+        """
+        proc = self.checks.pop(jid, None)
+        if proc is None:
+            return "its check was started by an earlier loop and is not stopped from here"
+        if kill_check(proc):
+            return "its check was stopped"
+        return f"its check could not be stopped; stop it by hand: {stop_by_hand(proc.pid)}"
+
+    def poll_check(self, job, s):
+        """Judge a job whose check runs in the background: wait, end it at the limit, or take its result."""
+        a = s["attempts"][-1]
+        proc = self.checks.get(job["id"])
+        if proc is None:
+            # This loop restarted, so the check's result is lost. Its process may still run, and this loop cannot be
+            # sure a process id is still that check, so it neither waits for it, kills it nor starts a second one.
+            # A lost result is not a failed check, so even a retried check ends here and waits for --retry.
+            a.pop("check_retry", None)
+            lost = "the loop restarted while the check ran, so its result was lost (that check may still be running)"
+            self.end_check(job, s, -1, lost)
+            return
+        rc = proc.poll()
+        if rc is None:
+            if time.time() - a["checking_since"] <= VERIFY_S:
+                return
+            rc, why = -1, f"verify timed out after {VERIFY_S:g} s"
+            if not kill_check(proc):
+                a["check_left_running"] = True
+                why += f", and its processes could not be stopped; stop them by hand: {stop_by_hand(proc.pid)}"
+        else:
+            why = f"check exited {rc}" if rc else ""
+        self.checks.pop(job["id"], None)
+        self.end_check(job, s, rc, why)
+
+    def end_check(self, job, s, rc, why):
+        """End the job with its check result; a check asked for by --retry that fails again starts a new attempt."""
+        a, words = s["attempts"][-1], s["attempts"][-1]["artifact"]["words"]
+        a["verify_rc"], again = rc, a.pop("check_retry", False)
+        if rc == 0:  # the check read the report as it was then: it must still be the same, complete report now
+            before = a["artifact"].get("sha256")
+            art, art_why = check_artifact(self.repo / job["out"], a["started"], job.get("min_words", 0))
+            if not art:
+                rc, why = -1, f"the check passed but the report is no longer complete ({art_why})"
+            elif before and art["sha256"] != before:
+                rc, why = -1, "the report changed while the check ran"
+            else:
+                a["artifact"], words = art, art["words"]
+            a["verify_rc"] = rc
+        if rc == 0:
+            s["state"] = "verified"
+            self.log(f"VERIFIED {job['id']} ({words} words, check ok)")
+        elif again:  # the retried check did not pass: pay for one more attempt instead of ending the job here
+            s["state"] = "pending"
+            self.log(f"RETRY {job['id']}: the check failed again ({why}); a new attempt follows")
+        else:
+            s["state"], a["why"] = "check-failed", f"artifact present but {why}"
+            self.log(
+                f"CHECK-FAILED {job['id']} ({words} words): {why}; report kept at "
+                f"{job['out']}, no relaunch; fix the check or the report, then --retry {job['id']}"
+            )
+
+    # ---- retry: a job ended for good until --retry raises its counter ---------------------------------
+    def reset_job(self, s):
+        """Back to pending, without the reason the cleared end left behind."""
+        s["state"] = "pending"
+        s.pop("why", None)
+        if s["attempts"]:
+            s["attempts"][-1].pop("why", None)
+
+    def unblock_followers(self, jobs, state, cleared):
+        """Every job blocked behind a retried job goes back to pending, directly or through other blocked jobs.
+
+        Their `after` check then waits for the retried job again, instead of the pass that ran before it.
+        """
+        changed = True
+        while changed:
+            changed = False
+            for job in jobs:
+                s = state.get(job["id"], {})
+                if job["id"] in cleared or s.get("state") != "blocked":
+                    continue
+                if any(dep in cleared for dep in job.get("after", [])):
+                    self.reset_job(s)
+                    cleared.add(job["id"])
+                    changed = True
+
+    def retry_requested(self, job, s, jobs, state):
+        """`--retry <job>` raised the job's counter: clear the end it was stuck in. True when the job was reset."""
+        if job.get("retry", 0) <= s.get("retries", 0):
+            return False
+        if s["state"] not in ENDED or s["state"] == "verified":
+            # Taken as handled while the job runs (or is already verified), so it never fires after the job ends again.
+            s["retries"] = job["retry"]
+            self.log(f"RETRY-IGNORED {job['id']}: it was {s['state']} when the request arrived")
+            return False
+        ended = s["state"]
+        a = s["attempts"][-1] if s["attempts"] else {}
+        if a.get("pane") and not a.get("stopped_confirmed"):
+            # A handed-over job leaves its session open on purpose; a retry must not start a second worker beside it.
+            if not self.stop(a):
+                s["retries"] = job["retry"]  # handled, so the same request does not fire again and again
+                self.log(
+                    f"RETRY-REFUSED {job['id']}: could not close the old worker in Herdr pane {a['pane']}; "
+                    f"close it, then --retry {job['id']} again"
+                )
+                return True
+            a["stopped_confirmed"] = True
+        s["retries"] = job["retry"]
+        self.reset_job(s)
+        self.unblock_followers(jobs, state, {job["id"]})
+        if ended == "check-failed" and job.get("verify"):
+            a = s["attempts"][-1]
+            art, why = check_artifact(self.repo / job["out"], a["started"], job.get("min_words", 0))
+            if not art:  # a report that no longer passes must not end verified: pay for a new attempt instead
+                self.log(f"RETRY {job['id']}: {ended} cleared, back to pending for a new attempt: {why}")
+                return True
+            a.update(artifact=art, check_retry=True)  # the fresh result, never the one the failed check saw
+            self.log(f"RETRY {job['id']}: check again on the existing report, no new worker")
+            self.start_check(job, s)
+        else:
+            self.log(f"RETRY {job['id']}: {ended} cleared, back to pending for a new attempt")
+        return True
+
     def forget_removed(self, jobs, state):
-        """A started job deleted from jobs.json is no longer watched: say so once, and leave its pane alone."""
+        """A started job deleted from jobs.json is no longer watched: say so once, and leave its pane alone (a check
+        that lost its job is stopped, since no one will read its result)."""
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
-            if jid.startswith("_") or jid in ids or not (s.get("state") == "started" or s.get("trust_wait")):
+            if jid.startswith("_") or jid in ids:
+                continue
+            if s.get("state") == "checking":  # no worker is left to watch, and no one will read the check
+                how = self.drop_check(jid)
+                s["state"] = "removed"
+                self.log(f"REMOVED {jid}: deleted from jobs.json while its check ran; {how}")
+                continue
+            if not (s.get("state") == "started" or s.get("trust_wait")):
                 continue
             s["state"] = "removed"
             pane = s["trust_wait"]["pane"] if s.get("trust_wait") else s["attempts"][-1].get("pane")
@@ -1321,6 +1533,8 @@ class Run:
                 detail += (", " if detail else "") + f"waiting for an answer in pane {a.get('pane')}"
             if a.get("wait_until", 0) > time.time():  # a running quota wait, as a clock time
                 detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
+            if s["state"] == "checking" and a.get("checking_since"):
+                detail += (", " if detail else "") + f"check running {time.time() - a['checking_since']:.0f} s"
             print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
@@ -1390,6 +1604,39 @@ class Run:
                 f"{job_id}: marked stop in jobs.json; if it is still running, the loop closes its pane within one tick"
             )
 
+    def request_retry(self, jobs, state, job_id):
+        """Raise a job's retry counter in jobs.json; the loop starts the job again on its next tick."""
+        job = next((j for j in jobs if j["id"] == job_id), None)
+        if not job:
+            sys.exit(f"no job {job_id}")
+        s, ended = state.get(job_id, {}), state.get(job_id, {}).get("state", "pending")
+        if ended == "verified":
+            sys.exit(f"{job_id}: already verified, so there is nothing to retry")
+        if ended not in ENDED:
+            sys.exit(
+                f"{job_id}: has not ended yet ({ended}); stop it first with --stop {job_id}, then --retry {job_id}"
+            )
+        job.pop("stop", None)  # a stopped job is only stopped until someone retries it
+        job["retry"] = max(job.get("retry", 0), s.get("retries", 0)) + 1
+        tmp = self.root / "jobs.json.tmp"
+        try:
+            held(lambda: tmp.write_text(json.dumps(jobs, indent=1) + "\n", encoding="utf-8"))
+            held(lambda: os.replace(tmp, self.root / "jobs.json"))
+        except PermissionError as exc:
+            sys.exit(
+                f"pm_run: could not mark {job_id} for a retry, a file is held by another process: {exc}; try again"
+            )
+        then = (
+            "its check runs again on the existing report, with no new worker"
+            if ended == "check-failed" and job.get("verify")
+            else "it starts a new attempt"
+        )
+        print(
+            f"{job_id}: marked retry {job['retry']} in jobs.json; it and every job blocked behind it go back to "
+            f"pending, then {then}; a running loop acts on its next tick, otherwise start one: "
+            f"python .pm/swarm/pm_run.py {self.root}"
+        )
+
     def check(self, jobs, state, job_id):
         """Evidence 1, 2 and 4 for one job, without Herdr; a person or the lead uses it by hand."""
         job = next((j for j in jobs if j["id"] == job_id), None)
@@ -1423,6 +1670,9 @@ def main():
         sys.exit(0 if run.check(jobs, state, sys.argv[sys.argv.index("--check") + 1]) else 1)
     if "--stop" in sys.argv:
         run.request_stop(jobs, state, sys.argv[sys.argv.index("--stop") + 1])
+        return
+    if "--retry" in sys.argv:
+        run.request_retry(jobs, state, sys.argv[sys.argv.index("--retry") + 1])
         return
     caps = run.load("caps.json", {})
     run.take_lease()
