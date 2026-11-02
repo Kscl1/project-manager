@@ -3,18 +3,23 @@ title: Install with your agent
 description: The steps a coding agent follows to install project-manager into your project, asking you before every change.
 ---
 
-You do not have to install project-manager by hand. Open your coding agent (Claude Code, Codex, Pi or another) in the folder that holds your project, and paste this:
+You do not have to install project-manager by hand. Open your coding agent (Claude Code, Codex, Pi or another) in the folder that holds your project: in Claude Desktop, click **Code** and choose the folder; in a terminal, run `cd "<your project folder>"`, then `claude`. The only command you type yourself is `/pm-setup`, in that agent's chat box after the install (Pi: `/skill:pm-setup`, Codex: `$pm-setup`).
+
+Paste this into the chat box:
 
 ```text
-Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md (download it with curl if your web tool only gives a summary), follow it step by step, ask me before every change, and stop where it says to stop.
+Install project-manager into my project. Read all of https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/install-with-agent.md, follow it step by step, ask me before every change, and stop where it says to stop.
 ```
 
-The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead.
+The agent asks a few questions, checks your machine, installs on a new branch of your project and leaves a hand-over note. Then you open your project in a new session and type `/pm-setup`, where the agent fits the package to your project with you. It does not build a demo project and does not touch your code. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did. If you prefer a guided screen in your terminal, use the [setup TUI](getting-started.md) instead. Words such as branch, commit or MCP server are in the [glossary](glossary.md).
+
+**You can stop reading here:** the rest of this page is written for your agent, not for you.
 
 ## For the agent
 
 You install project-manager into the user's project. Follow these steps in order.
 
+- If you received only a summary of this page instead of its full text, fetch it in full before step 1 (for example with `curl`) and read all of it.
 - Talk to the user in their language, plainly; assume they know their project, not AI or project-management words. Ask one question at a time.
 - Before each command that changes something (an install, a git command that writes, the installer), say in one sentence what it does, show it, and run it only after a clear yes. Read-only checks need no yes. Never add `sudo` to npm.
 - Do not edit the project's code and do not create example files. Do not run `/pm-setup` here.
@@ -28,14 +33,14 @@ Ask these, one at a time, with one sentence on each choice:
 
 1. **The project folder**, as a full path. If the user is not sure, list the folders where you are and ask.
 2. **The language** for talking and for the project's records, as a code such as `tr` or `en`. Field names and status names stay English, because the tools read them.
-3. **Map** (default yes): diagrams of the project's architecture that the agent can read and keep current. It needs Node.js.
+3. **Map** (default yes): a picture of how the project's parts connect, which the agent can read and keep current. It needs Node.js. Tell the user it can be skipped now and added later.
 4. **Swarm** (default no): helper agents that run in terminal panes the user can watch. It needs Pi and Herdr; say it can be added later.
 
-The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren` only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
+The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren` (a model service some people already pay for) only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
 
 ### 2. Check Python and Git, and get project-manager
 
-It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found. Go on only when both work.
+It needs Python 3.11 or newer and Git. If `python --version` or `git --version` fails, give the user the commands under "Before you start with the setup screen or by hand" in [Getting started](getting-started.md), run them on a yes, and ask them to open a new terminal if the program is still not found. Go on only when both work.
 
 Clone project-manager **next to** the project, in the folder that holds it, never inside it:
 
@@ -114,11 +119,23 @@ Fill each section from your list; write `none` where there is nothing. Add every
 Tell the user in a few lines what is installed and what is open. Then give them the next step, ready to follow:
 
 > Open your project folder itself in a new session, not this one: the agent reads a project's settings, hooks and skills only from the folder it starts in.
+>
 > - Claude Code in a terminal: `cd "<project>"`, then `claude`. Claude Desktop: Code, then choose the folder.
 > - Pi: `cd "<project>"`, then `pi`.
 >
-> Claude Code first asks whether you trust the folder: it is your project, so choose "Yes, I trust this folder". It may also ask whether to turn on the project's servers for current documentation and diagrams (Context7, LikeC4): allow them. Their reading tools are allowed in the project's settings; anything that writes still asks. Context7 sends its queries to its own server, so they never hold secrets.
+> Then type the setup command for your agent:
 >
-> Then type `/pm-setup` (in Pi `/skill:pm-setup`, in Codex `$pm-setup`).
+> | Agent | Type this |
+> | --- | --- |
+> | Claude Code | `/pm-setup` |
+> | Pi | `/skill:pm-setup` |
+> | Codex | `$pm-setup` |
+>
+> **What you will see:**
+>
+> - First, a question about trusting the folder. It is your project: choose "Yes, I trust this folder".
+> - Then one question per project server (Context7, LikeC4). Allow them: they only read current docs and diagrams, anything that writes still asks, and saying no only means fewer answers. Context7 sends the text of each query to an outside service: your assistant must not put secrets or private project text in a query, and you can say no.
+> - Then one question about how much it should explain, a read-back of your project with a short charter draft to confirm, a setup Epic on the board, and one small real task. Models, your own tools and the map wait in one later task, which you start when you want.
+> - Anywhere in between, a message about a tag that "is not a commit". It is normal during the install, and the install is fine.
 
 Stop here. Do not continue the setup in this chat.
