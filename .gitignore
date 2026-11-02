@@ -3,3 +3,4 @@ dist/
 .astro/
 # machine-local pm_run output (failure log) when this repo is a run's repo root
 .pm/local/
+__pycache__/

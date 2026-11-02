@@ -38,7 +38,13 @@ class RepoTestCase(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         return path
 
-    def run_check(self, *args):
+    def write_bytes(self, relpath, data):
+        path = self.root / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def run_check(self, *args, env=None):
         return subprocess.run(
             [sys.executable, str(self.root / ".pm" / "tools" / "pm_check.py"), *args],
             cwd=self.root,
@@ -46,6 +52,7 @@ class RepoTestCase(unittest.TestCase):
             text=True,
             encoding="utf-8",
             errors="replace",
+            env={**os.environ, **env} if env else None,
         )
 
     def git(self, *args, env=None):
@@ -401,7 +408,11 @@ class RecordTypeTest(RepoTestCase):
 
     def test_unknown_type_is_reported_but_backlog_tasks_are_skipped(self):
         self.write("docs/odd.md", '---\ntype: memo\ntitle: "Odd"\n---\n\n# Odd\n')
-        self.write(".pm/backlog/tasks/task-1 - X.md", "---\nid: TASK-1\ntitle: X\nstatus: Ready\ntype: epic\n---\n")
+        self.write(
+            ".pm/backlog/tasks/task-1 - X.md",
+            "---\nid: TASK-1\ntitle: X\nstatus: Ready\ntype: epic\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n",
+        )
 
         out = self.run_check().stdout
 
@@ -849,6 +860,88 @@ class DoneTaskTest(RepoTestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
 
 
+class AcceptanceCriteriaTest(RepoTestCase):
+    """An open task says what will be true when it is done, before any work starts."""
+
+    def task(
+        self,
+        status="Ready",
+        body="## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 the check catches it\n<!-- AC:END -->\n",
+        ident="REQ-12",
+        kind="task",
+    ):
+        parts = [
+            "---",
+            f"id: {ident}",
+            "title: Demo",
+            f"status: {status}",
+            *([] if kind is None else [f"type: {kind}"]),
+            "---",
+            "",
+            body,
+        ]
+        return self.write(".pm/backlog/tasks/task-1 - Demo.md", "\n".join(parts))
+
+    def test_open_task_without_acceptance_criteria_reported_with_its_id(self):
+        self.task(body="## Acceptance Criteria\n<!-- AC:BEGIN -->\n<!-- AC:END -->\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria (what will be true when it is done?)", result.stdout)
+        self.assertIn('backlog task edit REQ-12 --ac "<what will be true>"', result.stdout)
+
+    def test_open_task_without_an_acceptance_criteria_section_reported(self):
+        self.task(body="## Description\n\nThe work to do.\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria", result.stdout)
+
+    def test_criteria_outside_the_markers_do_not_count(self):
+        self.task(body="## Acceptance Criteria\n- [ ] #1 above the marker\n<!-- AC:BEGIN -->\n<!-- AC:END -->\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("task has no acceptance criteria", result.stdout)
+
+    def test_open_task_with_a_checked_or_unchecked_criterion_passes(self):
+        for item in ("- [ ] #1 ready", "- [x] #1 done"):
+            with self.subTest(item=item):
+                self.task(body=f"## Acceptance Criteria\n<!-- AC:BEGIN -->\n{item}\n<!-- AC:END -->\n")
+
+                result = self.run_check()
+
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_done_task_without_acceptance_criteria_passes(self):
+        self.task("Done", body="## Description\n\nShipped.\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_open_task_type_message_uses_the_real_id(self):
+        self.task(kind=None)
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("backlog task edit REQ-12 --type <epic|package|task|bug>", result.stdout)
+
+    def test_a_task_without_an_id_keeps_the_placeholder(self):
+        path = self.task()
+        path.write_text(
+            "---\ntitle: Demo\nstatus: Ready\ntype: task\n---\n\n## Description\n\nWork.\n", encoding="utf-8"
+        )
+
+        result = self.run_check()
+
+        self.assertIn('backlog task edit <id> --ac "<what will be true>"', result.stdout)
+
+
 ENGLISH_NOTES = (
     "The worker writes the report after the check passes, and the lead reads it before the merge. "
     "When a check fails, the lead sends the evidence back to the worker with the command that failed. "
@@ -871,7 +964,8 @@ class ProjectLanguageTest(RepoTestCase):
         return self.write(
             relpath,
             "---\nid: TASK-1\ntitle: Demo\nstatus: Active\ntype: task\n---\n\n## Description\n\n"
-            f"{notes}\n\n## Definition of Done\n<!-- DOD:BEGIN -->\n{dod}\n<!-- DOD:END -->\n\n"
+            f"{notes}\n\n## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n\n"
+            f"## Definition of Done\n<!-- DOD:BEGIN -->\n{dod}\n<!-- DOD:END -->\n\n"
             "## Implementation Notes\n\nNext: Needs owner: none\n",
         )
 
@@ -922,13 +1016,17 @@ class AuditOutcomesTest(RepoTestCase):
             notes = f"Audit report: {self.REPORT}\n\nAudit outcomes:\n" + table
         return self.write(
             directory + "/audit.md",
-            f"---\nid: REQ-1\nstatus: {status}\ntype: task\n---\n\n## Implementation Notes\n\n" + notes + tail,
+            f"---\nid: REQ-1\nstatus: {status}\ntype: task\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [x] #1 the outcomes are checked\n<!-- AC:END -->\n\n"
+            "## Implementation Notes\n\n" + notes + tail,
         )
 
     def target(self, task_id="REQ-2", notes=FOLLOW_UP, directory=".pm/backlog/tasks"):
         return self.write(
             directory + "/unrelated-filename.md",
-            f"---\nid: '{task_id}'\nstatus: Ready\ntype: task\nassignee: []\n---\n\n## Implementation Notes\n{notes}",
+            f"---\nid: '{task_id}'\nstatus: Ready\ntype: task\nassignee: []\n---\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [ ] #1 done\n<!-- AC:END -->\n\n"
+            f"## Implementation Notes\n{notes}",
         )
 
     def assert_problem(self, message):
@@ -1156,6 +1254,402 @@ class AuditOutcomesTest(RepoTestCase):
             with self.subTest(reports=reports):
                 self.audit(notes=reports + "Audit outcomes:\n" + self.HEADER + "| 1 | yes | fixed | abc1234 |\n")
                 self.assert_problem("exactly one non-empty 'Audit report:' line")
+
+
+class SummaryLineTest(RepoTestCase):
+    """The closing line counts problems and files in plain words."""
+
+    def test_one_problem_in_one_file(self):
+        self.write("docs/bad.md", "[gone](missing.md)\n")
+
+        result = self.run_check()
+
+        self.assertIn("\n1 problem in 1 file", result.stdout)
+
+    def test_two_problems_in_one_file(self):
+        self.write("docs/bad.md", "[gone](missing.md)\n\n[also](gone.md)\n")
+
+        result = self.run_check()
+
+        self.assertIn("\n2 problems in 1 file", result.stdout)
+
+
+class HelpTest(RepoTestCase):
+    def test_help_names_every_mode_and_exits_zero(self):
+        result = self.run_check("--help")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        flat = " ".join(result.stdout.split())
+        self.assertIn("usage: pm_check.py", flat)
+        self.assertIn("With no option it checks every doc", flat)
+        for mode in ("--staged", "--stale", "--write-index"):
+            self.assertIn(mode, flat)
+        self.assertNotIn("No problems found", flat)
+
+    def test_short_help_flag_prints_the_same(self):
+        self.assertEqual(self.run_check("-h").stdout, self.run_check("--help").stdout)
+
+
+class WriteIndexMessageTest(RepoTestCase):
+    """--write-index says what it wrote and where, in one line."""
+
+    INDEX = "# Decisions\n\n<!-- decision-index:begin -->\n<!-- decision-index:end -->\n"
+    DECISION = "---\nid: D-01\ntitle: A choice\nstatus: accepted\ndate: 2026-10-01\n---\n"
+
+    def test_one_line_names_the_index_and_where_it_is(self):
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 1, result.stdout)
+        self.assertIn("Wrote the decision index in .pm/decisions.md (1 decision)", lines[0])
+
+    def test_the_catalogue_is_named_in_the_same_line(self):
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        self.write("docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n")
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 1, result.stdout)
+        self.assertIn(".pm/decisions.md", lines[0])
+        self.assertIn("the record catalogue in docs/README.md", lines[0])
+
+    def test_nothing_to_write_says_so(self):
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("Nothing to write", result.stdout)
+
+    def test_a_log_that_is_not_saved_as_utf8_is_left_alone(self):
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        log = self.write_bytes(".pm/decisions.md", "# Kararlar\n\nŞifre\n".encode("cp1254"))
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("is not saved as UTF-8", result.stderr)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(log.read_bytes(), "# Kararlar\n\nŞifre\n".encode("cp1254"))
+
+    def test_a_partial_write_reports_what_was_written_but_exits_one(self):
+        self.git_init()
+        self.write(".pm/decisions.md", self.INDEX)
+        self.write(".pm/decisions/D-01.md", self.DECISION)
+        page = self.write_bytes("docs/README.md", "# Belgeler\n\nŞifre\n".encode("cp1254"))
+        before = page.read_bytes()
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Wrote the decision index in .pm/decisions.md (1 decision)", result.stdout)
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("docs/README.md is not saved as UTF-8", result.stderr)
+        self.assertIn("[D-01](decisions/D-01.md)", (self.root / ".pm/decisions.md").read_text(encoding="utf-8"))
+        self.assertEqual(page.read_bytes(), before)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+
+
+class WindowsEncodingTest(RepoTestCase):
+    """A document that cannot be decoded is reported instead of being checked with replacement characters."""
+
+    MESSAGE = "docs/turkce.md is not saved as UTF-8; open it and save it as UTF-8, then run this again."
+
+    def test_a_cp1254_doc_is_one_problem_not_a_false_link_error(self):
+        self.write("docs/şema.md", "# Şema\n")
+        self.write_bytes("docs/turkce.md", "# Başlık\n\n[şema](şema.md)\n".encode("cp1254"))
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertIn("1 problem in 1 file", result.stdout)
+        self.assertNotIn("does not exist", result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_utf8_non_ascii_link_target_is_found(self):
+        self.write("docs/şema.md", "# Şema\n")
+        self.write("docs/turkce.md", "# Başlık\n\n[şema](şema.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("No problems found", result.stdout)
+
+    def test_other_docs_are_still_checked_and_bad_files_count_once(self):
+        self.write_bytes("docs/turkce.md", "Şifre\n".encode("cp1254"))
+        self.write_bytes("docs/other.md", "Başlık\n".encode("cp1254"))
+        self.write("docs/bad.md", "[missing](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertEqual(result.stdout.count("docs/other.md is not saved as UTF-8"), 1, result.stdout)
+        self.assertIn("docs/bad.md:1: link to nope.md does not exist", result.stdout)
+        self.assertIn("3 problems in 3 files", result.stdout)
+
+    def test_a_bad_decision_log_does_not_make_valid_decisions_look_missing(self):
+        self.write_bytes(".pm/decisions.md", "# Kararlar\nŞifre\n".encode("cp1254"))
+        self.write("docs/guide.md", "---\ndepends_on: [D-01]\n---\n\n[missing](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(".pm/decisions.md is not saved as UTF-8", result.stdout)
+        self.assertIn("link to nope.md does not exist", result.stdout)
+        self.assertNotIn("depends on D-01, which does not exist", result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_multiple_bad_decision_files_are_each_reported(self):
+        self.write(".pm/decisions.md", "# Decisions\n")
+        self.write_bytes(".pm/decisions/D-01.md", "Şifre\n".encode("cp1254"))
+        self.write_bytes(".pm/decisions/D-02.md", "Başlık\n".encode("cp1254"))
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(".pm/decisions/D-01.md is not saved as UTF-8"), 1)
+        self.assertEqual(result.stdout.count(".pm/decisions/D-02.md is not saved as UTF-8"), 1)
+        self.assertIn("2 problems in 2 files", result.stdout)
+
+    def test_a_staged_cp1254_doc_blocks_the_commit(self):
+        self.git_init()
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+        self.git("add", "docs/turkce.md")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count(self.MESSAGE), 1, result.stdout)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_stale_is_advisory_when_a_doc_cannot_be_decoded(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+
+        result = self.run_check("--stale")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((result.stdout + result.stderr).count(self.MESSAGE), 1)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+    def test_catalogue_is_not_rewritten_from_an_undecodable_record(self):
+        self.write_bytes("docs/turkce.md", "# Başlık\n".encode("cp1254"))
+        page = self.write(
+            "docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n"
+        )
+        before = page.read_bytes()
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual((result.stdout + result.stderr).count(self.MESSAGE), 1)
+        self.assertEqual(page.read_bytes(), before)
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+
+
+class ByteOrderMarkTest(RepoTestCase):
+    """PowerShell 5.1 writes a byte-order mark; the frontmatter behind it still counts."""
+
+    def test_utf16_bom_in_either_byte_order_preserves_living_doc_checks(self):
+        body = "---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n\n`docs/gone.md`\n"
+        for bom, encoding in ((b"\xff\xfe", "utf-16-le"), (b"\xfe\xff", "utf-16-be")):
+            with self.subTest(encoding=encoding):
+                self.write_bytes("docs/guide.md", bom + body.encode(encoding))
+
+                result = self.run_check()
+
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("docs/gone.md does not exist", result.stdout)
+                self.assertNotIn("not saved as UTF-8", result.stdout)
+
+    def test_utf16_with_bom_works_in_generated_catalogues(self):
+        self.git_init()
+        body = "---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n"
+        self.write_bytes("docs/guide.md", body.encode("utf-16"))
+        page = self.write(
+            "docs/README.md", "# Docs\n\n<!-- record-catalogue:begin -->\n<!-- record-catalogue:end -->\n"
+        )
+
+        result = self.run_check("--write-index")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("| [`guide.md`](guide.md) | Guide |", page.read_text(encoding="utf-8"))
+        self.assertEqual(self.run_check().returncode, 0)
+
+    def test_a_truncated_utf16_doc_is_reported_not_replaced(self):
+        self.write_bytes("docs/guide.md", b"\xff\xfe-\x00-\x00-\x00\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/guide.md is not saved as UTF-8", result.stdout)
+        self.assertNotIn("Traceback", result.stdout + result.stderr)
+
+    def test_a_bom_doc_with_frontmatter_is_checked_as_a_living_doc(self):
+        self.write(
+            "docs/guide.md",
+            "\ufeff---\ntype: living_doc\ntitle: Guide\n---\n\n# Guide\n\n`docs/gone.md`\n",
+        )
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("docs/gone.md does not exist", result.stdout)
+
+    def test_a_bom_does_not_hide_depends_on(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("docs/guide.md", "\ufeff---\ndepends_on: [D-99]\n---\n\nbody\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("depends on D-99, which does not exist", result.stdout)
+
+    def test_a_second_byte_order_mark_in_the_text_does_not_hide_it_either(self):
+        # A file written by one Windows tool and pasted through another can carry the mark twice.
+        self.write("docs/guide.md", "\ufeff\ufeff---\ntype: living_doc\ntitle: Guide\n---\n\n`docs/gone.md`\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("docs/gone.md does not exist", result.stdout)
+
+
+class RootFallbackTest(RepoTestCase):
+    """A project installed before git init checks .pm/ only; one line says so instead of a happy green."""
+
+    def test_no_git_and_no_backlog_config_says_what_is_checked(self):
+        (self.root / "backlog.config.yml").unlink()
+        self.write("docs/bad.md", "[gone](nope.md)\n")
+
+        result = self.run_check(env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        lines = result.stderr.strip().splitlines()
+        self.assertEqual(len(lines), 1, result.stderr)
+        self.assertIn("No git repository or backlog.config.yml above", lines[0])
+        self.assertIn("checking .pm/ only. Run git init in your project folder.", lines[0])
+
+    def test_a_problem_inside_pm_still_fails_the_check(self):
+        (self.root / "backlog.config.yml").unlink()
+        self.write(".pm/notes.md", "[gone](nope.md)\n")
+
+        result = self.run_check(env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("link to nope.md does not exist", result.stdout)
+
+
+class NoGitTest(RepoTestCase):
+    """Without git on PATH, --staged and --stale say one plain line instead of a traceback."""
+
+    def no_git_env(self):
+        empty = Path(tempfile.mkdtemp(prefix="pm_no_git_"))
+        self.addCleanup(shutil.rmtree, empty, True)
+        return {"PATH": str(empty)}
+
+    def test_staged_without_git_blocks_with_one_plain_line(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+
+        result = self.run_check("--staged", env=self.no_git_env())
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_staged_with_git_error_blocks_with_one_plain_line(self):
+        self.git_init()
+        index = self.write_bytes("bad-index", b"not a git index")
+
+        result = self.run_check("--staged", env={"GIT_INDEX_FILE": str(index)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertIn("index", result.stderr.lower())
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_staged_outside_a_repository_blocks_with_one_plain_line(self):
+        result = self.run_check("--staged", env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files:", result.stderr)
+        self.assertIn("no git repository", result.stderr.lower())
+
+    def test_staged_without_any_root_marker_blocks_with_one_plain_line(self):
+        (self.root / "backlog.config.yml").unlink()
+
+        result = self.run_check("--staged", env={"GIT_CEILING_DIRECTORIES": str(self.root.parent)})
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(len(result.stderr.splitlines()), 1, result.stderr)
+        self.assertIn("Commit check could not list the staged files: no git repository", result.stderr)
+        self.assertIn("git init", result.stderr)
+
+    def test_stale_without_git_says_it_once_and_does_not_crash(self):
+        self.write("docs/guide.md", "---\ndescribes: [src/app.py]\nreviewed: 2020-01-03\n---\n\nbody\n")
+
+        result = self.run_check("--stale", env=self.no_git_env())
+
+        self.assertNotIn("Traceback", result.stderr + result.stdout)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stderr.count("git is not available here:"), 1, result.stderr)
+        self.assertIn("No stale docs", result.stdout)
+
+
+class ProjectLineTest(RepoTestCase):
+    """The first line of a normal run names the folder checked; the commit hook stays quiet."""
+
+    def test_first_line_names_the_project_folder(self):
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(os.path.normcase(result.stdout.splitlines()[0]), os.path.normcase(f"Project: {self.root}"))
+
+    def test_the_project_line_comes_before_the_problems(self):
+        self.write("docs/bad.md", "[gone](nope.md)\n")
+
+        result = self.run_check()
+
+        self.assertEqual(result.returncode, 1)
+        self.assertTrue(result.stdout.startswith("Project: "), result.stdout)
+        self.assertIn("1 problem in 1 file", result.stdout)
+
+    def test_staged_with_an_empty_diff_is_quiet_even_if_unstaged_docs_are_bad(self):
+        self.git_init()
+        self.write(".pm/decisions.md", "- **D-01** first\n- **D-01** duplicate\n")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout + result.stderr, "")
+
+    def test_staged_with_nothing_to_report_prints_nothing(self):
+        self.git_init()
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("README.md", "# Readme\n")
+        self.git("add", "-A")
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":
