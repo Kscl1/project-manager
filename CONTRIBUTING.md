@@ -21,8 +21,8 @@ Leave out private project content: paths, names, prompts and code from your own 
   python -m pip install -r tools/dev-tools.txt
   ruff check . && ruff format --check .
   python tools/check_ids.py
-  python -m unittest discover -s template/.pm/tests
-  python -m unittest discover -s template/.pm/swarm
+  python -m pytest template/.pm/tests -n auto   # on every core; plain unittest works too, only slower
+  python -m pytest template/.pm/swarm -n auto
   python -m unittest discover -s tests
   ```
 
