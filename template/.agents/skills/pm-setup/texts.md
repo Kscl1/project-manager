@@ -66,6 +66,13 @@ At the end of `/pm-setup`, after the resume hint (or alone when the mode is off)
 - EN: From now on you can just say: "continue" (where we are, then on), "what next?" (the next job), "show the board" (the task board opens), "explain <word>" (a plain answer) or "stop teaching".
 - TR: Bundan sonra şunları demen yeter: "devam" (nerede kaldığımız, sonra devam), "sırada ne var?" (sıradaki iş), "panoyu göster" (görev panosu açılır), "<kelime> nedir?" (sade bir cevap) ya da "anlatmayı bırak".
 
+## After the first task
+
+Right after the first real task is closed and its result is reported, as written:
+
+- EN: Your first real task is done and closed, and the records hold it. From here three sentences are enough, in your own words and with no command to remember. "What is left?" gives the next job, read from the saved notes. "Why did we choose this?" gives the reason behind a decision we made and where it is written. "Explain that word without changing anything." gives a plain answer and leaves every file alone.
+- TR: İlk gerçek işin bitti ve kapandı; kayıtlar bunu tutuyor. Bundan sonrası için üç cümle yeter; kendi ağzınla söylersin, ezberleyeceğin komut yok. "Geriye ne kaldı?" kayıtlı notlara bakıp sıradaki işi söyler. "Bunu neden seçtik?" verdiğimiz bir kararın gerekçesini ve nerede yazılı olduğunu anlatır. "Hiçbir şeyi değiştirmeden şu kelimeyi açıkla." sade bir cevap verir, hiçbir dosyayı değiştirmez.
+
 ## When a step the user did becomes known
 
 - EN: You wrote the task's done-condition yourself, so I stop explaining tasks. Say "explain tasks" if you want it back.

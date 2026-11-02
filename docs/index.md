@@ -44,7 +44,7 @@ Words such as task, Epic, board or MCP server: the [glossary](glossary.md) expla
 
 For people building software with coding agents who want to stop explaining the project from scratch every session. Start with one project, one agent and the core layer; the [optional layers](optional-layers.md) wait until the work needs them.
 
-The agent path needs no terminal skills: you paste one prompt and answer a few questions. The setup screen and the by-hand path expect you to be comfortable opening a terminal and working in a Git repository. It is still an alpha, not a fully automatic project manager.
+The agent path needs no terminal if you open the agent in Claude Desktop's Code tab (a paid Claude plan): you paste one prompt and answer a few questions. The setup screen and the by-hand path expect you to be comfortable opening a terminal and working in a Git repository. It is still an alpha, not a fully automatic project manager.
 
 ## What changes in your project?
 
@@ -56,7 +56,7 @@ This setup asks before changing your files; your assistant's own permission sett
 
 ## Start small
 
-1. Paste the prompt from [install with your agent](install-with-agent.md) into your coding agent. This is the shortest path, and it needs no terminal skills.
+1. Paste the prompt from [install with your agent](install-with-agent.md) into your coding agent. This is the shortest path; in Claude Desktop's Code tab it needs no terminal.
 2. Open your project in your coding agent and type `/pm-setup` in the chat box. It fits the package to your project and ends with one small real task.
 3. When you want the whole picture, read [how it works](how-it-works.md). The setup screen and the by-hand path are in [getting started](getting-started.md).
 

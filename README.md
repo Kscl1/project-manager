@@ -16,7 +16,7 @@ You do not have to learn a new tool: it uses files and programs you already have
 
 - **A coding agent:** a chat window that can read and change your project, such as [Claude Code](https://code.claude.com). Do you not have one yet? Install it first, then come back.
 - **A project folder:** the folder that holds your code. If it is not a Git repository yet, the agent offers to turn it into one during setup (a Git repository is a folder whose history Git keeps).
-- **About 15 minutes.** The agent path below needs no terminal skills; the other two ways ask you to type commands.
+- **About 15 minutes.** The agent path below needs no terminal if you open the agent in Claude Desktop's Code tab, which needs a paid Claude plan; the other two ways ask you to type commands.
 
 You need five programs. The installer checks them and names what is missing. The badges below the install box show each program's minimum version; the installer itself pins a tested version, a little newer, and tells you when yours differs.
 

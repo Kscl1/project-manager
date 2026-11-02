@@ -696,7 +696,11 @@ class PmInitTest(unittest.TestCase):
         self.assertIn("Set 2 git settings.", result.stdout)
         self.assertNotIn("Plan for", result.stdout, "the whole plan is what --check is for")
         self.assertIn("\nNext:", result.stdout)
-        self.assertIn("run /pm-setup", result.stdout)
+        after = result.stdout.split("\nNext:", 1)[1]
+        # The install guide commits first and starts /pm-setup in a new chat, so the steps come in that order.
+        self.assertLess(after.index("pm_check.py"), after.index("Commit these files"))
+        self.assertLess(after.index("Commit these files"), after.index("in a new chat"))
+        self.assertIn("type /pm-setup", after)
         self.assertIn("backlog browser", result.stdout)
         # The number a beginner can check: the commit that follows holds exactly those files.
         subprocess.run([GIT, "add", "-A"], cwd=self.root, check=True)

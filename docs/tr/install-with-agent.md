@@ -1,26 +1,27 @@
 ---
-title: Ajanınla kur
-description: Kodlama ajanının project-manager'ı projene kurarken izlediği adımlar; her değişiklikten önce sana sorar.
+title: Yardımcınla kur
+description: Yardımcının project-manager'ı projene kurarken izlediği adımlar; her değişiklikten önce sana sorar.
 ---
 
-project-manager'ı elle kurman gerekmez. Kodlama ajanını (coding agent: Claude Code, Codex, Pi ya da bir başkası) projenin durduğu klasörde aç: Claude Desktop'ta **Code** sekmesine tıkla ve klasörü seç; terminalde `cd "<proje klasörün>"` yaz, ardından `claude` çalıştır. Kendi elinle yazacağın tek komut, kurulumdan sonra ajanın sohbet kutusuna yazacağın `/pm-setup` komutudur (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
+project-manager'ı elle kurman gerekmez. Yardımcıyı (kodlama ajanı: Claude Code, Codex, Pi ya da bir başkası) projenin durduğu klasörde aç: Claude Desktop'ta **Code** sekmesine tıkla ve klasörü seç; terminalde `cd "<proje klasörün>"` yaz, ardından `claude` çalıştır. Kendi elinle yazacağın tek komut, kurulumdan sonra yardımcının sohbet kutusuna yazacağın `/pm-setup` komutudur (Pi'de `/skill:pm-setup`, Codex'te `$pm-setup`).
 
-Şunu ajanın sohbet kutusuna yapıştır:
+Şunu yardımcının sohbet kutusuna yapıştır:
 
 ```text
 project-manager'ı projeme kur. https://raw.githubusercontent.com/Kscl1/project-manager/main/docs/tr/install-with-agent.md sayfasının tamamını oku, adım adım izle, her değişiklikten önce bana sor ve sayfanın dur dediği yerde dur.
 ```
 
-Ajan birkaç soru sorar, bilgisayarını kontrol eder, kurulumu projende yeni bir dalda (branch) yapar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda (session) açıp `/pm-setup` yazarsın; ajan paketi orada seninle birlikte projene uyarlar. Demo proje kurmaz, koduna dokunmaz. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et. Terminalde adım adım yol gösteren bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu (MCP server) gibi kelimeler [sözlükte](glossary.md) açıklanır.
+Yardımcı birkaç soru sorar, bilgisayarını kontrol eder, kurulumu projende yeni bir dalda (branch) yapar ve bir devir notu bırakır. Sonra projeni yeni bir oturumda (session) açıp `/pm-setup` yazarsın; yardımcı paketi orada seninle birlikte projene uyarlar. Demo proje kurmaz, koduna dokunmaz. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et. Terminalde adım adım yol gösteren bir ekranı tercih edersen [kurulum ekranını (TUI)](getting-started.md) kullan. Dal, commit ya da MCP sunucusu (MCP server) gibi kelimeler [sözlükte](glossary.md) açıklanır.
 
-**Okumayı burada bırakabilirsin:** sayfanın geri kalanı senin için değil, ajanın için yazıldı.
+**Okumayı burada bırakabilirsin:** sayfanın geri kalanı sana değil, yardımcıya yazıldı.
 
-## Ajan için
+## Yardımcı için
 
 project-manager'ı kullanıcının projesine kuruyorsun. Bu adımları sırayla izle.
 
 - Bu sayfanın tamamı yerine yalnızca bir özetini aldıysan 1. adımdan önce sayfayı eksiksiz indir (örneğin `curl` ile) ve tamamını oku.
 - Kullanıcıyla kendi dilinde, sade konuş; projesini bildiğini ama yapay zekâ ve proje yönetimi terimlerini bilmediğini varsay. Her seferinde tek bir soru sor.
+- Dosya ve klasörleri yoluyla ya da dosya adıyla değil, içinde ne olduğuyla an: "proje klasörün", "yanındaki project-manager kopyası", "seçimlerinin kısa kaydı" (`.pm/local/setup.json` değil), "satır sonları için git ayarları" (`.gitattributes` değil), "bir sonraki sohbet için not" (`handover.md` değil). Yolu ya da dosya adını yalnızca kullanıcı yazacaksa, açacaksa ya da kontrol edecekse göster. Neyin kurulduğunu ya da değiştiğini tek sade cümleyle söyle ("paketin dosyaları, bir not klasörü ve iki git ayarı"), dosya dosya sayma. Kendi çalıştırdığın salt okunur kontrolleri kullanıcı istemedikçe gösterme; bir şeyi değiştiren komutu ise çalıştırmadan önce yine göster (sonraki kural).
 - Bir şeyi değiştiren her komuttan önce (paket kurulumu, yazma yapan bir git komutu ya da kurucu) ne işe yaradığını tek cümleyle söyle, komutu göster ve ancak kullanıcı açıkça onayladıktan sonra çalıştır. Salt okunur kontroller için onay gerekmez. npm komutlarına asla `sudo` ekleme.
 - Projenin kodunu düzenleme ve örnek dosyalar oluşturma. Bu sohbette `/pm-setup` çalıştırma.
 - İlerlerken bir liste tut: ne kurdun, kullanıcı neyi atladı ve hangi komutta hangi hata çıktı. Bu liste 6. adımda devir dosyasına yazılır.
@@ -33,8 +34,8 @@ Bunları tek tek, her seçeneği tek cümleyle açıklayarak sor:
 
 1. **Proje klasörü**, tam dosya yoluyla. Kullanıcı emin değilse bulunduğun klasördeki alt klasörleri listeleyip sor.
 2. **Dil**: konuşma ve proje kayıtlarının dili, `tr` ya da `en` gibi bir dil kodu olarak. Alan adları ve durum adları İngilizce kalır, çünkü araçlar onları okur.
-3. **Map (harita)** (varsayılan: evet): proje parçalarının birbirine nasıl bağlandığını gösteren, ajanın okuyup güncel tutabildiği mimari şema. Node.js gerektirir. Kullanıcıya şimdi atlayıp sonradan da ekleyebileceğini söyle.
-4. **Swarm (sürü)** (varsayılan: hayır): kullanıcının izleyebildiği terminal bölmelerinde çalışan yardımcı ajanlar. Pi ve Herdr gerektirir; sonradan da eklenebileceğini söyle.
+3. **Map (harita)** (varsayılan: evet): proje parçalarının birbirine nasıl bağlandığını gösteren, senin okuyup güncel tutabildiğin mimari şema. Node.js gerektirir. Kullanıcıya şimdi atlayıp sonradan da ekleyebileceğini söyle.
+4. **Swarm (sürü)** (varsayılan: hayır): kullanıcının izleyebildiği terminal bölmelerinde çalışan işçi ajanlar. Pi ve Herdr gerektirir; sonradan da eklenebileceğini söyle.
 
 Katmanlar `core` ve seçildiyse `map`, `swarm`, `evren` olur; `evren`'i (bazı kullanıcıların zaten abonesi olduğu bir model servisi) yalnızca halihazırda EVREN hesabı olan kullanıcıya öner. Bunları aşağıda `<layers>` olarak kullan, örneğin `core,map`.
 
@@ -118,14 +119,14 @@ Her bölümü tuttuğun listeden doldur; boş kalan yerlere `none` yaz. Açık k
 
 Kullanıcıya birkaç satırla nelerin kurulduğunu ve nelerin açık kaldığını söyle. Ardından doğrudan uygulayabileceği sıradaki adımı ver:
 
-> Proje klasörünün kendisini bu oturumda değil, yeni bir oturumda aç: ajan bir projenin ayarlarını, kancalarını ve becerilerini (skills) yalnızca başlatıldığı klasörden okur.
+> Proje klasörünün kendisini bu oturumda değil, yeni bir oturumda aç: yardımcı bir projenin ayarlarını, kancalarını ve becerilerini (skills) yalnızca başlatıldığı klasörden okur.
 >
 > - Terminalde Claude Code: `cd "<project>"`, ardından `claude`. Claude Desktop: Code sekmesi, ardından klasörü seç.
 > - Pi: `cd "<project>"`, ardından `pi`.
 >
-> Sonra kullandığın ajana göre kurulum komutunu yaz:
+> Sonra kullandığın yardımcıya göre kurulum komutunu yaz:
 >
-> | Ajan | Yazılacak komut |
+> | Yardımcı | Yazılacak komut |
 > | --- | --- |
 > | Claude Code | `/pm-setup` |
 > | Pi | `/skill:pm-setup` |
@@ -134,7 +135,7 @@ Kullanıcıya birkaç satırla nelerin kurulduğunu ve nelerin açık kaldığı
 > **Karşına neler çıkacak:**
 >
 > - Önce klasöre güvenip güvenmediğin sorulur. Bu senin projen: "Yes, I trust this folder" seçeneğini seç.
-> - Sonra her proje sunucusu için bir soru gelir (Context7, LikeC4). Bunlara izin ver: yalnızca güncel belgeleri ve şemaları okurlar, dosyaya yazan her işlem yine senden onay ister; hayır demek yalnızca daha az yanıt almak demektir. Context7 her sorgunun metnini dışarıdaki bir servise gönderir: ajanın sorgulara gizli bilgi ya da projene ait özel metin koymaması gerekir, sen yine de hayır diyebilirsin.
+> - Sonra her proje sunucusu için bir soru gelir (Context7, LikeC4). Bunlara izin ver: yalnızca güncel belgeleri ve şemaları okurlar, dosyaya yazan her işlem yine senden onay ister; hayır demek yalnızca daha az yanıt almak demektir. Context7 her sorgunun metnini dışarıdaki bir servise gönderir: yardımcının sorgulara gizli bilgi ya da projene ait özel metin koymaması gerekir, sen yine de hayır diyebilirsin.
 > - Ardından ne kadar açıklama istediğinle ilgili tek bir soru, projenin okunup kısa bir proje tüzüğü (charter) taslağıyla sana onaylatılması, panoda (board) bir kurulum Epic'i ve küçük, gerçek bir görev gelir. Modeller, kendi araçların ve harita ise istediğin zaman başlatacağın tek bir sonraki göreve kalır.
 > - Bu sırada bir etiketin "commit olmadığı" ("is not a commit") uyarısını görebilirsin. Kurulum sırasında bu normaldir ve kurulum sağlamdır.
 

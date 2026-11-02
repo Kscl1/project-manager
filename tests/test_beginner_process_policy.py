@@ -30,6 +30,27 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
         self.assertIn("fixed opening is the first reply", skill)
         self.assertIn("If installation or language needs a question first", skill)
 
+    def test_first_reply_opens_from_the_saved_note_within_four_lines(self):
+        bullet = next(
+            line for line in read(AGENTS).splitlines() if line.startswith("- **Your first reply in a session:**")
+        )
+        for phrase in (
+            "at most four short lines total",
+            "The first line starts from the saved notes",
+            "From the saved note: <what was done and what is next>.",
+            "I checked the files: <one thing confirmed, or the one thing that differs>.",
+            "Next: <step>",
+            "what waits for the user and why",
+            "only if there is one",
+            "plain names",
+            "group multiple waiting items into one line",
+        ):
+            self.assertIn(phrase, bullet)
+        # The saved note comes first: the user hears what the records say before anything this session adds.
+        self.assertLess(bullet.index("From the saved note"), bullet.index("The lines after it"))
+        self.assertLess(bullet.index("Next: <step>"), bullet.index("The lines after it"))
+        self.assertNotIn("where we are (what finished and what is in progress)", bullet)
+
     def test_consent_distinguishes_public_reads_and_sending_data(self):
         agents = read(AGENTS)
         for phrase in (
