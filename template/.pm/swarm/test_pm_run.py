@@ -2780,6 +2780,26 @@ class HerdrSafetyTest(unittest.TestCase):
             with self.subTest(error=error), patch.object(pm_run.subprocess, "run", side_effect=error):
                 self.assertIn("error", pm_run.herdr("agent", "read", "worker", plain=True))
 
+    def test_help_prints_the_usage_and_touches_no_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for flag in ("--help", "-h"):
+                result = subprocess.run(
+                    [sys.executable, str(PM_RUN), flag], cwd=tmp, capture_output=True, text=True, timeout=10
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("Run worker jobs as visible Herdr agents", result.stdout)
+                self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_a_missing_run_folder_is_named_not_a_traceback(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                [sys.executable, str(PM_RUN), "no-such-run"], cwd=tmp, capture_output=True, text=True, timeout=10
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("pm_run: no run folder", result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
     def test_stall_env_overrides_default(self):
         result = subprocess.run(
             [sys.executable, "-c", "from pm_run import STALL_S; print(STALL_S)"],
