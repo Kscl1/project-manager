@@ -48,6 +48,10 @@ python .pm/tools/pm_board.py --next      # the one task to work on now
 python .pm/tools/pm_board.py --resume
 python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
+python .pm/tools/pm_open.py board       # the board in your browser, started once; 'map' opens the map
+python .pm/tools/pm_open.py list        # every project opened this way: its board and map, running or stopped
+python .pm/tools/pm_open.py stop board  # stops the board this tool started ('stop map' for the map)
+python .pm/tools/pm_open.py opening ask # ask, always or never: whether a session start offers the project window
 backlog browser
 python .pm/tools/pm_check.py --stale
 python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
@@ -55,6 +59,8 @@ python -m unittest discover -s .pm/swarm   # with --swarm: pm_run against a fake
 ```
 
 `--next`, `--tree` and `--resume` must exist in your installed package version before you rely on them. The lead edits tasks with the `backlog task` commands; anyone can look at them in Backlog's browser. Documents are plain Markdown, read in any editor.
+
+Several projects can run side by side: each keeps its board and map ports in `~/.pm/projects.json`, a port another registered project holds is skipped, and a server that answers for another folder is left alone. `--resume` ends with one line about the project window, from the `opening` setting: the session-start hook itself starts nothing.
 
 ## When the package misbehaves
 
