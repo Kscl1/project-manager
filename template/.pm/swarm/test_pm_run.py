@@ -774,6 +774,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             "PREFLIGHT a: brief not found: missing.md; fix jobs.json, then --retry a",
             (self.run_dir / "pm_run.log").read_text(encoding="utf-8"),
         )
+        failures = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8")
+        self.assertRegex(failures, r"run PREFLIGHT a: brief not found: missing.md")
         self.assertEqual(out.read_text(encoding="utf-8"), "old output")
         self.assertFalse(out.with_name("a.kept.md").exists())
         self.assertIn("brief not found: missing.md", self.run_pm("--status").stdout)
@@ -792,38 +794,10 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertNotRegex(state["why"], r"[\x00-\x1f\x7f-\x9f]")
         self.assertFalse(self.fake_state.exists())
 
-    def test_preflight_stops_a_verify_path_that_is_not_there(self):
-        # The check names a script that is gone: the worker would run, and the check would fail on a report it cannot
-        # read. Preflight catches it before a worker is paid for, and the shared failure log keeps the reason.
-        missing = self.tmp / "missing" / "check.py"
-        self.jobs(self.job("a", "ok", verify=f'"{sys.executable}" "{missing}"'), self.job("b", "ok", after=["a"]))
-        result = self.run_pm()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        state = self.receipts()
-        self.assertEqual(state["a"]["state"], "failed")
-        self.assertEqual(state["a"]["attempts"], [])
-        self.assertIn(f"verify names a path that is not there: {missing}", state["a"]["why"])
-        self.assertEqual(state["b"]["state"], "blocked")
-        self.assertFalse(self.fake_state.exists(), "no worker may start")
-        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
-        self.assertIn(f"PREFLIGHT a: verify names a path that is not there: {missing}", log)
-        self.assertIn("fix jobs.json, then --retry a", log)
-        failures = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8")
-        self.assertRegex(failures, r"run PREFLIGHT a: verify names a path")
-
-    def test_preflight_lets_verify_name_the_report_it_will_check(self):
-        # The report does not exist yet when the job starts, so naming it is not a mistake.
-        out = self.tmp / "out" / "a.md"
-        self.jobs(self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(0)" "{out}"'))
-        self.run_pm()
-        self.assertEqual(self.receipts()["a"]["state"], "verified")
-
-    def test_preflight_lets_verify_name_what_the_worker_may_write(self):
-        # A check may read a file the worker builds inside `writes`; it is not there before the worker starts.
-        built = self.tmp / "site" / "index.html"
-        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(0)" "{built}"')
-        job["writes"] = [str(self.tmp / "site")]
-        self.jobs(job)
+    def test_preflight_does_not_read_a_file_path_out_of_verify(self):
+        # Text between quotes is not reliably a file: echo prints it. The path check was dropped for this, and the
+        # glitch that started it (a Windows path in a non-raw string) is caught by the control-character check.
+        self.jobs(self.job("a", "ok", verify='echo "Z:/this-is-a-literal-not-a-file"'))
         self.run_pm()
         self.assertEqual(self.receipts()["a"]["state"], "verified")
 
@@ -872,7 +846,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertFalse(marker.exists(), "a pre-flight must never run the check itself")
 
     def test_preflight_runs_again_before_a_retry_launches_the_job(self):
-        job = self.job("a", "ok", verify=f'"{self.tmp / "missing" / "check.py"}"', retry=1)
+        job = self.job("a", "ok", verify="echo\x0b", retry=1)
         state = {"a": {"state": "failed", "attempts": [{"started": 0}], "why": "old reason"}}
         run = pm_run.Run(self.run_dir)
         run.repo = self.tmp
@@ -885,7 +859,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             run.tick([job], state, {})
             launch.assert_not_called()
             self.assertEqual(state["a"]["state"], "failed")
-            self.assertIn("verify names a path that is not there", state["a"]["why"])
+            self.assertIn("verify holds a control character", state["a"]["why"])
             job.update(retry=2, verify=f'"{sys.executable}" -c "import sys; sys.exit(0)"')
             run.tick([job], state, {})
         self.assertEqual(state["a"]["state"], "started")

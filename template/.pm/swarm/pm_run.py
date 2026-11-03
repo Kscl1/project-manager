@@ -57,9 +57,8 @@ says what that means, so a partial sum is never read as the whole.
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
-exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character, every
-quoted absolute path in `verify` is there (except the report itself), and every entry of `helpers` names a model, or
-model, harness and thinking. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting
+exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character, and
+every entry of `helpers` names a model, or model, harness and thinking. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting
 a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
@@ -590,13 +589,6 @@ def control_mark(text):
     return None
 
 
-def quoted_paths(line):
-    """The strings a shell line writes between single or double quotes, in order."""
-    if not isinstance(line, str):
-        return []
-    return [double or single for double, single in re.findall(r'"([^"]+)"|\'([^\']+)\'', line)]
-
-
 def complete_helper(helper):
     """True when a `helpers` entry is an object that names its model, harness and thinking level."""
     keys = ("model", "harness", "thinking")
@@ -607,9 +599,10 @@ def preflight(job, repo):
     """What is wrong with the job itself, in plain words, or None when it may start a worker.
 
     Checks the job before a worker is paid for: its briefs, the folder that holds its report, the text of `verify`
-    and `setup`, the paths `verify` names, and how `helpers` is written. It never runs `verify`, which may run whole
-    test suites. A quoted absolute path that is not there is almost always a Windows path whose backslashes a JSON
-    string read as escapes, so the check could not find its own script.
+    and `setup`, and how `helpers` is written. It never runs `verify`, which may run whole test suites. A control
+    character there is almost always a Windows path whose backslashes a JSON string read as escapes, so the shell
+    line could not name its own file; text in a shell line is not read as a file, because `echo "Z:/literal"` is
+    not one.
     """
     why = missing_brief(job, repo)
     if why:
@@ -621,14 +614,6 @@ def preflight(job, repo):
         mark = control_mark(job.get(key))
         if mark:
             return f"{key} holds a control character ({mark}); write \\ or / in jobs.json"
-    # The worker makes the report and what it may write, so those need not exist before it starts.
-    made = [os.path.normcase(os.path.abspath(repo / place)) for place in [job["out"], *(job.get("writes") or [])]]
-    for path in quoted_paths(job.get("verify")):
-        if not os.path.isabs(path) or Path(path).exists():
-            continue
-        full = os.path.normcase(os.path.abspath(path))
-        if not any(full == place or full.startswith(place.rstrip("/\\") + os.sep) for place in made):
-            return f"verify names a path that is not there: {path}"
     helpers = job.get("helpers")
     if helpers and not isinstance(helpers, list):
         return "helpers must be a list of model names or objects"
