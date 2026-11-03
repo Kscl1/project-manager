@@ -31,6 +31,7 @@ import ctypes
 import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -66,6 +67,12 @@ INSTALL = {
 }
 # .claude/launch.json entries may name either; the installer writes the first of each pair.
 ENTRY_NAMES = {"board": "board", "backlog-board": "board", "map": "map", "likec4": "map"}
+# The LikeC4 config files that hold JSON, in its own order; a map's `name` there is what a running map is known by.
+# The dev server lists the projects it serves at this address, a module of LikeC4's Vite plugin.
+LIKEC4_CONFIGS = (".likec4rc", ".likec4.config.json", "likec4.config.json")
+PROJECTS_PATH = "/@id/likec4:projects"
+SERVED_LIST = re.compile(r"export const projects\s*=\s*(\[.*?\]);", re.S)
+SERVED_ID = re.compile(r"""["']?\bid["']?\s*:\s*["']([^"']*)["']""")
 OPENINGS = ("ask", "always", "never")
 OPENING_MEANINGS = {
     "ask": "at session start the agent asks once whether to open the board.",
@@ -132,22 +139,34 @@ def entry(root, name):
 
 
 def answers(port):
-    """True when something answers at that port on 127.0.0.1 or ::1.
+    """True when something answers at that port on 127.0.0.1 or ::1."""
+    return any(answers_at(address, port) for address in LOOPBACKS)
+
+
+def answers_at(address, port):
+    """True when something answers at that port on that loopback address.
 
     A machine without IPv6 answers nothing there, and a socket family the system does not have is just that.
     """
     if not isinstance(port, int) or port <= 0:
         return False
-    for address in LOOPBACKS:
-        family = socket.AF_INET6 if ":" in address else socket.AF_INET
-        try:
-            with socket.socket(family) as probe:
-                probe.settimeout(0.5)
-                if probe.connect_ex((address, port)) == 0:
-                    return True
-        except OSError:
-            continue  # no IPv6 on this machine, or no right to open a socket: no answer there
-    return False
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    try:
+        with socket.socket(family) as probe:
+            probe.settimeout(0.5)
+            return probe.connect_ex((address, port)) == 0
+    except OSError:
+        return False  # no IPv6 on this machine, or no right to open a socket: no answer there
+
+
+def address_for(port):
+    """The address a browser reaches that port at: 127.0.0.1, or [::1] for a server that listens only there.
+
+    A map someone else started (the Claude preview, a terminal) may listen on ::1 alone.
+    """
+    if not answers_at("127.0.0.1", port) and answers_at("::1", port):
+        return f"http://[::1]:{port}"
+    return ADDRESS.format(port=port)
 
 
 def project_of(port):
@@ -163,6 +182,44 @@ def project_of(port):
         return None
     path = data.get("projectPath") if isinstance(data, dict) else None
     return str(path) if path else None
+
+
+def map_folder(root, command):
+    """The folder the map command serves: the path right after `start`, else the project root."""
+    if "start" in command:
+        after = command.index("start") + 1
+        if after < len(command) and not command[after].startswith("-"):
+            return Path(root) / command[after]
+    return Path(root)
+
+
+def map_name(root):
+    """This project's map name: `name` in the JSON config of the folder its map serves, else None."""
+    found = entry(Path(root), "map")
+    if found is None:
+        return None
+    folder = map_folder(root, found[0])
+    for config in LIKEC4_CONFIGS:
+        try:
+            data = json.loads((folder / config).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        name = data.get("name") if isinstance(data, dict) else None
+        return str(name) if name else None  # LikeC4 reads the first config it finds, and so does this
+    return None
+
+
+def served_maps(port):
+    """The LikeC4 project names the map at that port says it serves; empty when it names none or is not a map."""
+    for host in ("127.0.0.1", "[::1]"):
+        try:
+            with urllib.request.urlopen(f"http://{host}:{port}{PROJECTS_PATH}", timeout=STATUS_TIMEOUT) as answer:
+                text = answer.read().decode("utf-8", "replace")
+        except (OSError, ValueError, http.client.HTTPException):
+            continue  # nothing there, or not on this loopback: the other may answer
+        found = SERVED_LIST.search(text)
+        return SERVED_ID.findall(found.group(1)) if found else []
+    return []
 
 
 def folder_key(folder):
@@ -514,7 +571,13 @@ def ownership(folder, name, server, port):
         return (ANSWERS if answers(port) else STOPPED), served
     if not answers(port):
         return STOPPED, None
-    return (OURS if process_of(server) else ANSWERS), None
+    if process_of(server):
+        return OURS, None
+    # A map this tool did not start (the Claude preview, a terminal) is this project's when it serves its name.
+    name, served = map_name(folder), served_maps(port)
+    if name and name in served:
+        return OURS, None
+    return ANSWERS, (f"the LikeC4 project {', '.join(served)}" if served else None)
 
 
 def own_group(pid):
@@ -741,10 +804,10 @@ def open_server(name, download=False, root=None):
         recorded = server_of(data, root, name)
         state, served = ownership(root, name, recorded, port)
         if state == OURS:
+            address = address_for(port)
             print(f"The {name} is already running at {address}; I opened it in your browser.")
             webbrowser.open(address)
-            if name == "board":
-                keep(data, root, port)
+            keep(data, root, name, port)
             return 0
         if state == STOPPED and recorded.get("port") == port and process_of(recorded):
             # The lock is released before the wait, so a second run can arrive while ours is started but silent.
@@ -753,6 +816,11 @@ def open_server(name, download=False, root=None):
         if state == ANSWERS:
             who = f"another project ({served})" if served else "another program"
             print(f"Port {port} answers for {who}, so this project's {name} starts on a free port above.")
+            if name == "map" and not map_name(root):
+                print(
+                    "This project's map has no name in a likec4.config.json, so a map already running cannot be"
+                    " recognised as this one; upgrading the package with --map writes one."
+                )
             free = choose_port(port, other_ports(data, root))
             if not free:
                 print(f"The {PORTS_TRIED} ports from {port} up are all taken, so the {name} was not started.")
@@ -768,11 +836,12 @@ def open_server(name, download=False, root=None):
     return wait_until_open(name, process, port, root, made, log_path)  # the lock is not held while it starts
 
 
-def keep(data, root, port):
-    """Remember a board that was already running on this port: its process id only while that process is ours."""
-    server = server_of(data, root, "board")
+def keep(data, root, name, port):
+    """Remember a server that was already running on this port: its process id only while that process is ours."""
+    server = server_of(data, root, name)
     pid = process_of(server) if server.get("port") == port else None
-    if not save(data, root, "board", port, pid=pid, started=server.get("started") if pid else None):
+    started, hmr = (server.get("started"), server.get("hmr_port")) if pid else (None, None)
+    if not save(data, root, name, port, pid=pid, started=started, hmr=hmr):
         warn_store()
 
 
@@ -837,7 +906,8 @@ def server_state(folder, name, server):
     if not isinstance(port, int) or port <= 0:
         return f"{name} not started yet"
     state = ownership(folder, name, server, port)[0]
-    return f"{name} {ADDRESS.format(port=port)} {WORDS[state]}"
+    address = address_for(port) if state == OURS else ADDRESS.format(port=port)
+    return f"{name} {address} {WORDS[state]}"
 
 
 def set_opening(value):
