@@ -487,13 +487,16 @@ class PmInitTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        for name in ("pm-grilling", "pm-grill-me", "pm-scratch", "pm-extra"):
+        for name in ("pm-grilling", "pm-grill-me", "pm-scratch", "pm-statechart", "pm-extra"):
             with self.subTest(skill=name):
                 self.assertTrue((self.root / ".agents" / "skills" / name / "SKILL.md").is_file())
                 pointer = (self.root / ".claude" / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
                 self.assertTrue(pointer.startswith(f"---\nname: {name}\n"))
                 self.assertIn(f"Read `.agents/skills/{name}/SKILL.md`", pointer)
         self.assertTrue((self.root / ".agents" / "skills" / "pm-grilling" / "LICENSE").is_file())
+        statechart = self.root / ".agents" / "skills" / "pm-statechart"
+        for part in ("LICENSE", "scripts/statechart", "scripts/janitor.ts"):  # the launcher and the Windows clean-up
+            self.assertTrue((statechart / part).is_file(), part)
         scratch = (self.root / ".claude" / "skills" / "pm-scratch" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("disable-model-invocation: true", scratch)
         self.assertFalse((self.root / ".agents" / "skills" / "own-skill").exists())

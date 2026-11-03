@@ -130,6 +130,17 @@ upstream_version = "v1.3.2"
 similar = ["grill-me"]
 
 [[item]]
+id = "pm-statechart"
+name = "Skill pm-statechart"
+kind = "project-file"
+layer = "core"
+path = ".agents/skills/pm-statechart"
+ref = "cursor/plugins@519d36a (pstack 0.15.36, statechart)"
+# renovate-pstack: P-Stack publishes no releases; its plugin version moves when any of its skills changes.
+upstream_version = "0.15.36"
+similar = ["statechart"]
+
+[[item]]
 id = "pm-scratch"
 name = "Skill pm-scratch"
 kind = "project-file"

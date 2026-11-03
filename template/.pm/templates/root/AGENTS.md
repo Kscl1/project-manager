@@ -50,6 +50,7 @@ Workers: skip this section; your brief names your tools. The lead picks the tool
 | You need a library's, framework's or API's syntax, config or setup | On your own: look it up with Context7 | Current docs beat a model's memory |
 | A piece of work or a long lookup can run apart from you | On your own, within the models in `.pm/models.md`: a worker or helper in a visible pane (`.pm/roles/lead.md`) | The user sees and can stop every agent |
 | A plan or design is about to be settled with questions still open | Offer once: `/pm-grill-me` | Gaps show up before the work, not after |
+| A flow that moves between states (a sign-up, a payment, a job that starts, retries and stops) is about to be built or changed, or a bug in one is suspected | Offer once: `/pm-statechart`; its first run needs mise, from the setup's Statechart layer | Every path is checked, and a bug shows as a path before the code exists |
 | The user drops an off-topic idea mid-work | Offer once, in one line: `/pm-scratch` keeps it for later; run it only when the user calls it | Off-topic ideas wait without derailing the work |
 | A `.pm/` tool, rule, role card or template misbehaves | On your own: the feedback report above | The package is fixed at its home, not patched here |
 
