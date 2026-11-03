@@ -693,7 +693,7 @@ class LauncherTest(unittest.TestCase):
         with mock.patch.object(pm_open, "LOCK_WAIT", 0.5):
             code, out = self.run_tool("opening", "always")
         self.assertEqual(code, 0)
-        self.assertNotIn("went on without the lock", out)
+        self.assertNotIn("Another run is using the project list", out)
         self.assertFalse(self.lock.exists())
         self.assertEqual(self.read_store()["opening"], "always")
 
@@ -723,12 +723,44 @@ class LauncherTest(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(pm_open, "LOCK_WAIT", 0.2), mock.patch.object(pm_open.time, "sleep", wait):
             with mock.patch.object(pm_open.os, "open", side_effect=PermissionError(13, "busy")):
-                with redirect_stdout(out), pm_open.locked():
+                with redirect_stdout(out), pm_open.locked() as held:
+                    self.assertFalse(held, "a run without the lock says so through the yielded value")
                     self.assertFalse(self.lock.exists())
         lines = out.getvalue().splitlines()
         self.assertEqual(len(lines), 1, "one plain line says the lock was not held")
-        self.assertIn("went on without the lock", lines[0])
+        self.assertIn(f"Another run is using the project list at {self.store}", lines[0])
+        self.assertIn("nothing was changed", lines[0])
         self.assertTrue(waits, "a busy lock is waited for")
+
+    def test_a_lock_that_cannot_be_made_at_all_ends_with_one_plain_line(self):
+        out = io.StringIO()
+        # A PermissionError is the Windows busy answer and is waited for; any other failure cannot be waited away.
+        with mock.patch.object(pm_open.os, "open", side_effect=OSError(28, "no space left on that folder")):
+            with redirect_stdout(out), pm_open.locked() as held:
+                self.assertFalse(held, "no lock file means no lock")
+        lines = out.getvalue().splitlines()
+        self.assertEqual(len(lines), 1, "one plain line says the lock could not be made")
+        self.assertIn(f"could not make the lock file at {self.lock}", lines[0])
+        self.assertIn("nothing was changed", lines[0])
+
+    def test_a_run_that_cannot_take_the_lock_changes_nothing(self):
+        self.write_store({"projects": {self.key(): {"name": "shop", "board": {"port": 6420}}}})
+        self.lock.parent.mkdir(parents=True, exist_ok=True)
+        self.lock.write_text("", encoding="utf-8")  # another run holds a fresh lock: never stale
+        before = self.store.read_bytes()
+        self.answering_after_a_start(6420, 6421)
+        with mock.patch.object(pm_open, "LOCK_WAIT", 0.05):
+            codes = [
+                self.run_tool("board")[0],
+                self.run_tool("stop", "board")[0],
+                self.run_tool("opening", "always")[0],
+            ]
+            _, out = self.run_tool("board")
+        self.assertEqual(codes, [1, 1, 1], "every write waits for the lock or ends with 1")
+        self.assertEqual(self.store.read_bytes(), before, "the other run's list is not touched without the lock")
+        self.assertEqual(self.runs, [], "nothing is started without the list")
+        self.assertIn(f"Another run is using the project list at {self.store}", out)
+        self.assertTrue(self.lock.exists(), "the other run's lock is left alone")
 
     def test_the_project_list_is_written_to_a_temporary_file_and_moved(self):
         moves = []

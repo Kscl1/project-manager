@@ -12,7 +12,8 @@ the board runs `backlog browser --no-open --port 6420`, and the map has no defau
 The project list in ~/.pm/projects.json (or the folder PM_HOME names) is what lets several projects run at once. It
 holds one entry per project, keyed by its resolved folder: the port of each server, the map's HMR port, and the
 process this tool started, with its id and the time it started. A project joins it the first time this command opens
-something in it. A lock file next to the list lets one run at a time read it, choose ports and write it back.
+something in it. A lock file next to the list lets one run at a time read it, choose ports and write it back; a run
+that cannot take the lock changes nothing and says so, so two runs never write their old copy over each other.
 
 A port that answers is not proof that the server is ours, and a running process id is not proof that it is our
 process: the system hands the id out again once ours ends. The board is ours while its /api/status names this
@@ -254,12 +255,14 @@ def warn_store():
 def locked():
     """Hold the project list's lock while it is read, ports are chosen and the result is written back.
 
-    The lock is a file next to the list, made with O_EXCL. A lock file older than LOCK_STALE was left behind by a run
-    that died, so it is removed; a run that still waits after LOCK_WAIT seconds goes on and says so. Windows refuses
-    the same open with PermissionError while another run's lock file is being deleted, which is a busy lock too, so
-    that answer is waited for like a lock file that is there. Always released.
+    Yields True while the lock is held. The lock is a file next to the list, made with O_EXCL. A lock file older than
+    LOCK_STALE was left behind by a run that died, so it is removed and taken. Windows refuses the same open with
+    PermissionError while another run's lock file is being deleted, which is a busy lock too, so that answer is waited
+    for like a lock file that is there. A run that still waits after LOCK_WAIT seconds, or cannot make the lock file at
+    all, gets False and one plain line: such a run must not read, choose and write the list, or its old copy would
+    overwrite what the other run wrote. Always released.
     """
-    folder, handle = store_dir(), None
+    folder, handle, problem = store_dir(), None, ""
     lock = folder / LOCK
     deadline = time.monotonic() + LOCK_WAIT
     try:
@@ -275,16 +278,28 @@ def locked():
                 if age > LOCK_STALE:
                     lock.unlink(missing_ok=True)  # a run that died left it behind: take it now
                 elif time.monotonic() > deadline:
-                    print(f"Another run is holding the project list at {lock}, so I went on without the lock.")
+                    problem = (
+                        f"Another run is using the project list at {store_path()}; nothing was changed. "
+                        "Run this command again in a moment."
+                    )
                     break
                 else:
                     time.sleep(0.05)
             except OSError:
-                break  # no folder for a lock: the write itself says what went wrong
+                problem = (
+                    f"I could not make the lock file at {lock}; nothing was changed. "
+                    "Check that the folder can be written, then run this command again."
+                )
+                break
     except OSError:
-        pass
+        problem = (
+            f"I could not make the folder for the project list at {folder}; nothing was changed. "
+            "Check the folder, then run this command again."
+        )
     try:
-        yield
+        if problem:
+            print(problem)
+        yield handle is not None
     finally:
         if handle is not None:
             os.close(handle)
@@ -705,7 +720,9 @@ def open_server(name, download=False, root=None):
     code = npx_download_check(name, command, download)  # up to 120 seconds: never while the lock is held
     if code:
         return code
-    with locked():
+    with locked() as held:
+        if not held:
+            return 1
         data = read_store()
         port, hmr = choose_ports(data, root, name, command, wanted)
         if not port:
@@ -751,7 +768,9 @@ def keep(data, root, port):
 
 def stop_server(name):
     """Stop the server this tool started for this project, and nothing else."""
-    with locked():
+    with locked() as held:
+        if not held:
+            return 1
         data = read_store()
         server = server_of(data, ROOT, name)
         if not server:
@@ -813,7 +832,9 @@ def server_state(folder, name, server):
 
 def set_opening(value):
     """Store the opening choice in the project list and say what it means."""
-    with locked():
+    with locked() as held:
+        if not held:
+            return 1
         data = read_store()
         data["opening"] = value
         if not write_store(data):
