@@ -13,6 +13,7 @@ import io
 import json
 import os
 import signal
+import socket
 import subprocess
 import tempfile
 import threading
@@ -358,6 +359,13 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
         self.assertIn("--listen 127.0.0.1 --hmr-port 24678", out)
 
+    def test_map_command_listens_on_ipv4_whatever_the_entry_says(self):
+        for given in ("0.0.0.0", "::1", "localhost"):  # the launcher speaks IPv4 only
+            command = pm_open.map_command(["/bin/npx", "likec4", "start", "--listen", given], 24678)
+            self.assertEqual(command[command.index("--listen") + 1], "127.0.0.1")
+            self.assertNotIn(given, command)
+            self.assertEqual(command.count("--listen"), 1, "the value is replaced, not a second flag added")
+
     def test_the_map_takes_an_hmr_port_no_other_project_holds(self):
         self.write_store(
             {"projects": {self.key(self.other): {"name": "other", "map": {"port": 5174, "hmr_port": 24678, "pid": 9}}}}
@@ -369,6 +377,33 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("24679", self.runs[0][0])
         self.assertNotIn("24678", self.runs[0][0])
         self.assertEqual(self.record()["map"]["hmr_port"], 24679)
+
+    def test_an_hmr_port_the_entry_names_moves_when_another_project_holds_it(self):
+        self.write_store(
+            {"projects": {self.key(self.other): {"name": "other", "map": {"port": 5174, "hmr_port": 24678, "pid": 9}}}}
+        )
+        self.write_launch(
+            dict(MAP, runtimeArgs=["-y", "likec4@1.60.0", "start", "--port", "5173", "--hmr-port", "24678"])
+        )
+        self.answering_after_a_start(5173)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        command = self.runs[0][0]
+        self.assertEqual(command[command.index("--hmr-port") + 1], "24679", "the command runs the chosen HMR port")
+        self.assertEqual(command.count("--hmr-port"), 1)
+        self.assertIn("--hmr-port 24679", out, "the line shows exactly what runs")
+        self.assertEqual(self.record()["map"]["hmr_port"], 24679)
+
+    def test_an_hmr_port_the_entry_names_is_kept_while_it_is_free(self):
+        self.write_launch(
+            dict(MAP, runtimeArgs=["-y", "likec4@1.60.0", "start", "--port", "5173", "--hmr-port", "25000"])
+        )
+        self.answering_after_a_start(5173)
+        code, _ = self.run_tool("map")
+        self.assertEqual(code, 0)
+        command = self.runs[0][0]
+        self.assertEqual(command[command.index("--hmr-port") + 1], "25000")
+        self.assertEqual(self.record()["map"]["hmr_port"], 25000)
 
     def test_a_map_with_no_free_hmr_port_does_not_start(self):
         self.write_launch(MAP)
@@ -730,6 +765,72 @@ class LauncherTest(unittest.TestCase):
         text = out.getvalue()
         for word in ("board", "map", "--download", "stop", "list", "opening"):
             self.assertIn(word, text)
+
+
+class PortTest(unittest.TestCase):
+    """A port counts as taken when something answers on 127.0.0.1 or ::1."""
+
+    def test_a_port_that_answers_only_on_ipv6_counts_as_taken(self):
+        try:
+            server = socket.socket(socket.AF_INET6)
+            server.bind(("::1", 0))
+            server.listen(1)
+        except OSError:
+            self.skipTest("this machine has no IPv6 loopback")
+        self.addCleanup(server.close)
+        self.assertTrue(pm_open.answers(server.getsockname()[1]))
+
+    def test_a_port_nobody_holds_is_free(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        self.assertFalse(pm_open.answers(port))
+
+    def test_a_machine_without_ipv6_just_has_no_answer_there(self):
+        tried = []
+
+        class Probe:
+            def __init__(self, family):
+                if family == socket.AF_INET6:
+                    raise OSError("no IPv6 on this machine")
+                tried.append(family)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *problem):
+                return False
+
+            def settimeout(self, seconds):
+                pass
+
+            def connect_ex(self, address):
+                return 0 if address[0] == "127.0.0.1" else 111  # IPv4 answers, IPv6 could not be tried
+
+        with mock.patch.object(pm_open.socket, "socket", Probe):
+            self.assertTrue(pm_open.answers(6420))
+        self.assertEqual(tried, [socket.AF_INET])
+
+    def test_an_ipv6_answer_without_an_ipv4_one_still_counts(self):
+        class Probe:
+            def __init__(self, family):
+                self.family = family
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *problem):
+                return False
+
+            def settimeout(self, seconds):
+                pass
+
+            def connect_ex(self, address):
+                return 0 if (self.family == socket.AF_INET6 and address[0] == "::1") else 111
+
+        with mock.patch.object(pm_open.socket, "socket", Probe):
+            self.assertTrue(pm_open.answers(6420))
 
 
 class FakeKernel32:

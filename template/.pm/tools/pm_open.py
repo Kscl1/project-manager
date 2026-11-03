@@ -18,7 +18,7 @@ A port that answers is not proof that the server is ours, and a running process 
 process: the system hands the id out again once ours ends. The board is ours while its /api/status names this
 project's folder; the map is ours while its port answers and the recorded process still started when it was recorded.
 Anything else is foreign: this project's own server then starts on the first free port above. A port counts as taken
-when something answers on 127.0.0.1.
+when something answers on 127.0.0.1 or ::1.
 
 The servers outlive this command: no console window on Windows, their own session elsewhere, with their output in
 .pm/local/open-<name>.log. `stop` ends the one this tool started, with the processes it started.
@@ -44,7 +44,7 @@ WAIT_SECONDS = 30  # how long a server may take to answer on its port
 POLL_SECONDS = 0.5
 STATUS_TIMEOUT = 2  # a board answers /api/status at once; a slower answer is not the board we can trust
 ADDRESS = "http://127.0.0.1:{port}"
-LOOPBACKS = ("127.0.0.1",)  # the launcher speaks IPv4 only
+LOOPBACKS = ("127.0.0.1", "::1")  # a port is taken when either answers there; the launcher itself runs on IPv4
 LOG = "open-{name}.log"  # under .pm/local/; holds the server's own output
 PORTS_TRIED = 50  # how many ports a taken first choice may push us up
 HMR_FIRST = 24678  # the map's HMR port counts up from here; two maps may not share one
@@ -127,7 +127,10 @@ def entry(root, name):
 
 
 def answers(port):
-    """True when something answers at that port on 127.0.0.1."""
+    """True when something answers at that port on 127.0.0.1 or ::1.
+
+    A machine without IPv6 answers nothing there, and a socket family the system does not have is just that.
+    """
     if not isinstance(port, int) or port <= 0:
         return False
     for address in LOOPBACKS:
@@ -138,7 +141,7 @@ def answers(port):
                 if probe.connect_ex((address, port)) == 0:
                     return True
         except OSError:
-            continue  # no right to open a socket there: no answer
+            continue  # no IPv6 on this machine, or no right to open a socket: no answer there
     return False
 
 
@@ -303,13 +306,13 @@ def port_for(data, folder, name, wanted):
     return choose_port(wanted, used)
 
 
-def hmr_for(data, folder):
-    """The map's HMR port: the recorded one while it is still free, else the first free one from 24678 up."""
+def hmr_for(data, folder, wanted):
+    """The map's HMR port: the one the entry or the record names while it is free, else the first free one above."""
     used = other_ports(data, folder)
-    recorded = server_of(data, folder, "map").get("hmr_port")
-    if isinstance(recorded, int) and recorded > 0 and recorded not in used and not answers(recorded):
-        return recorded
-    return choose_port(HMR_FIRST, used)
+    for port in (wanted, server_of(data, folder, "map").get("hmr_port")):
+        if isinstance(port, int) and port > 0 and port not in used and not answers(port):
+            return port
+    return choose_port(wanted if isinstance(wanted, int) and wanted > 0 else HMR_FIRST, used)
 
 
 def alive(pid):
@@ -456,11 +459,15 @@ def board_command(command):
 
 
 def map_command(command, hmr):
-    """The map command on this machine only, with its own HMR port so two maps never collide."""
+    """The map command on this machine only, with the HMR port that was chosen for it."""
     arguments = list(command)
-    if "--listen" not in arguments:
+    if "--listen" in arguments[:-1]:
+        arguments[arguments.index("--listen") + 1] = "127.0.0.1"
+    else:
         arguments += ["--listen", "127.0.0.1"]
-    if "--hmr-port" not in arguments:
+    if "--hmr-port" in arguments[:-1]:
+        arguments[arguments.index("--hmr-port") + 1] = str(hmr)
+    else:
         arguments += ["--hmr-port", str(hmr)]
     return arguments
 
@@ -518,9 +525,12 @@ def choose_ports(data, root, name, command, wanted):
         return 0, None
     if name != "map":
         return port, None
-    hmr = hmr_for(data, root)
+    asked = value_after(command, "--hmr-port")
+    hmr = hmr_for(data, root, asked)
     if not hmr:
-        print(f"The {PORTS_TRIED} ports from {HMR_FIRST} up are all taken, so the map's HMR port was not found.")
+        print(
+            f"The {PORTS_TRIED} ports from {asked or HMR_FIRST} up are all taken, so the map's HMR port was not found."
+        )
         return 0, None
     return port, hmr
 
