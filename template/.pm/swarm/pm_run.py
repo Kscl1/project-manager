@@ -23,10 +23,10 @@ Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
 quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry. When the log is not found (another harness, a Pi
 folder moved by the setup line) the pane stands in for it: the nudge waits until the pane's content has stayed the
-same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. The HOLD line it logs meanwhile says what
-comes next and when: the brief again when no turn ran yet, otherwise a nudge in the same session. A nudge goes to
-the same session: RESUME, or the full brief again when no turn ran (no completion_seq advance and no observed
-working state).
+same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. The HOLD line it logs meanwhile states the
+condition on the source it watches (Pi's log, or the pane): the brief again once that source has stayed quiet for
+PM_RUN_QUIET_S when no turn ran yet, otherwise a nudge in the same session. A nudge goes to the same session:
+RESUME, or the full brief again when no turn ran (no completion_seq advance and no observed working state).
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
@@ -1200,14 +1200,14 @@ class Run:
                     self.fail_or_retry(job, s, f"worker is gone and {why}")
                     continue
                 size, quiet = session_log(a, now)
-                source = "Pi wrote its log"
+                source, watched = "Pi wrote its log", "Pi's log"
                 if quiet is None:
-                    quiet, source = self.pane_quiet(a, now), "its pane last changed"
+                    quiet, source, watched = self.pane_quiet(a, now), "its pane last changed", "the pane"
                 if quiet is not None and quiet < QUIET_S:
                     if not a.get("held"):
                         a["held"] = True
                         then = (
-                            f"if the pane stays the same for {round(QUIET_S - quiet)} s more, pm_run resends the brief"
+                            f"if {watched} stays quiet for {QUIET_S:g} s, pm_run resends the brief"
                             if no_turn_yet(a)
                             else "pm_run nudges it in the same session"
                         )

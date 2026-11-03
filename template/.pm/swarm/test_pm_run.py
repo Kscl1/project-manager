@@ -1818,8 +1818,19 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         )
         log = run.log_path.read_text(encoding="utf-8")
         self.assertIn("HOLD a: turn looks settled but Pi wrote its log 30 s ago; ", log)
-        self.assertIn("; if the pane stays the same for 60 s more, pm_run resends the brief", log)
+        self.assertIn("; if Pi's log stays quiet for 90 s, pm_run resends the brief", log)
         self.assertNotIn("pm_run nudges it in the same session", log)
+
+    def test_hold_line_names_the_pane_as_the_source_it_watches(self):
+        # No session log, so the pane is the clock: the condition must say so, not name Pi's log.
+        run, log, attempt, state = self.settled_worker()
+        log.unlink()
+        del attempt["session_log"]
+        attempt.update(worked=False, seq0=0, completion_seq=0)  # the worker never took the brief
+        self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=90, MAX_NUDGES=3)), 1)
+        log_text = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("its pane last changed 0 s ago", log_text)
+        self.assertIn("; if the pane stays quiet for 90 s, pm_run resends the brief", log_text)
 
     def test_no_turn_yet_needs_a_quiet_sequence_and_no_working_state(self):
         self.assertTrue(pm_run.no_turn_yet({}), "an attempt without a sequence ran no turn")
