@@ -825,6 +825,23 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("I left the list as it was", out)
         self.assertNotIn("I kept a copy", out, "the line about a kept copy waits for the copy")
 
+    def test_a_list_that_cannot_be_read_is_left_as_it_was(self):
+        # Sol, 3 Nov: a list the run may not read (a Windows ACL) was replaced without a copy.
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        self.store.write_text('{"opening": "never"}', encoding="utf-8")
+        real = Path.read_bytes
+
+        def refuse(path):
+            if path == self.store:
+                raise PermissionError(13, "Permission denied")
+            return real(path)
+
+        with mock.patch.object(pm_open.Path, "read_bytes", refuse):
+            code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 1, "a list that could not be read is never replaced")
+        self.assertEqual(self.store.read_text(encoding="utf-8"), '{"opening": "never"}')
+        self.assertIn("is there but could not be read (Permission denied); I left it as it was.", out)
+
     # -- stop and list ------------------------------------------------------------------------------------------
 
     def test_stop_with_no_record_does_nothing(self):

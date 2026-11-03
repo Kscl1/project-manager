@@ -218,8 +218,11 @@ def keep_broken(path):
     """
     try:
         original = path.read_bytes()
-    except OSError:
+    except FileNotFoundError:
         return True  # no list yet, so there is nothing to keep
+    except OSError as error:  # there, but this run may not read it: replacing it would lose what it holds
+        print(f"The project list at {path} is there but could not be read ({error.strerror}); I left it as it was.")
+        return False
     try:
         readable = isinstance(json.loads(original.decode("utf-8")), dict)
     except ValueError:  # not UTF-8, or not JSON
