@@ -984,6 +984,27 @@ class LauncherTest(unittest.TestCase):
             self.assertIn(word, text)
 
 
+class CommandTest(unittest.TestCase):
+    """The command a server runs: the flag's value replaced where it is, or the flag added once."""
+
+    def test_an_option_is_replaced_in_place_or_added_once(self):
+        self.assertEqual(
+            pm_open.with_port(["/bin/backlog", "browser", "--port", "6420"], 6421),
+            ["/bin/backlog", "browser", "--port", "6421"],
+        )
+        self.assertEqual(
+            pm_open.with_port(["/bin/backlog", "browser"], 6421), ["/bin/backlog", "browser", "--port", "6421"]
+        )
+        self.assertEqual(
+            pm_open.map_command(["/bin/npx", "likec4", "start", "--listen", "0.0.0.0"], 24679),
+            ["/bin/npx", "likec4", "start", "--listen", "127.0.0.1", "--hmr-port", "24679"],
+        )
+        self.assertEqual(
+            pm_open.map_command(["/bin/npx", "likec4", "start", "--hmr-port", "25000"], 24679),
+            ["/bin/npx", "likec4", "start", "--hmr-port", "24679", "--listen", "127.0.0.1"],
+        )
+
+
 class PortTest(unittest.TestCase):
     """A port counts as taken when something answers on 127.0.0.1 or ::1."""
 

@@ -546,14 +546,19 @@ def terminate(pid):
     return True
 
 
-def with_port(command, port):
-    """The same command with `--port <port>`: the value after it replaced, or the flag added."""
+def set_option(command, flag, value):
+    """The same command with that flag's value set: the value after the flag replaced, or the flag and value added."""
     arguments = list(command)
-    if "--port" in arguments[:-1]:
-        arguments[arguments.index("--port") + 1] = str(port)
+    if flag in arguments[:-1]:
+        arguments[arguments.index(flag) + 1] = str(value)
     else:
-        arguments += ["--port", str(port)]
+        arguments += [flag, str(value)]
     return arguments
+
+
+def with_port(command, port):
+    """The same command on the port this run chose."""
+    return set_option(command, "--port", port)
 
 
 def board_command(command):
@@ -567,16 +572,7 @@ def board_command(command):
 
 def map_command(command, hmr):
     """The map command on this machine only, with the HMR port that was chosen for it."""
-    arguments = list(command)
-    if "--listen" in arguments[:-1]:
-        arguments[arguments.index("--listen") + 1] = "127.0.0.1"
-    else:
-        arguments += ["--listen", "127.0.0.1"]
-    if "--hmr-port" in arguments[:-1]:
-        arguments[arguments.index("--hmr-port") + 1] = str(hmr)
-    else:
-        arguments += ["--hmr-port", str(hmr)]
-    return arguments
+    return set_option(set_option(command, "--listen", "127.0.0.1"), "--hmr-port", hmr)
 
 
 def start(command, root, log):
