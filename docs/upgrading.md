@@ -64,7 +64,7 @@ Use the setup TUI or its read-only inventory after switching releases:
 python tools/setup/bom.py --project ../my-project --layers core,map,swarm
 ```
 
-Add `evren` only if you use that optional layer. Exit 1 can mean remaining steps or warnings; read the table. The TUI does not force every installed tool to the new command pin: when intentionally upgrading, review and run the release's matching `install.*` / `upgrade.*` command yourself, then recheck. Install the TUI requirements into its separate virtual environment again if they changed.
+Add `evren` or `statechart` only if you use that optional layer. Exit 1 can mean remaining steps or warnings; read the table. The TUI does not force every installed tool to the new command pin: when intentionally upgrading, review and run the release's matching `install.*` / `upgrade.*` command yourself, then recheck. Install the TUI requirements into its separate virtual environment again if they changed.
 
 | Tool group | Upgrade path | Rollback preparation |
 |---|---|---|
