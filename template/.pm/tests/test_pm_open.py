@@ -2,8 +2,9 @@
 
 A throwaway project holds only a ``.pm/`` folder and, in the tests that need it, a ``.claude/launch.json``; the
 project list lives in a throwaway ``PM_HOME``. The port check, ``Popen``, ``shutil.which``, ``webbrowser.open``, the
-``npx --no-install`` check, the board's ``/api/status`` answer, the process check and the stop call are fakes, so
-nothing is started, no browser opens and no port or process is touched. Standard library only.
+``npx --no-install`` check, the board's ``/api/status`` answer, the process check, the process start time and the stop
+call are fakes, so nothing is started, no browser opens and no port or process is touched. The project list, its
+temporary files and its lock are real, in the throwaway folder. Standard library only.
 """
 
 import contextlib
@@ -14,6 +15,7 @@ import os
 import signal
 import subprocess
 import tempfile
+import threading
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -66,7 +68,8 @@ class LauncherTest(unittest.TestCase):
         self.after_start = set()  # the ports that answer once a server was started on them
         self.ports = []  # every port the check was asked about
         self.statuses = []  # every port the board status was asked about
-        self.status = {}  # port -> the folder the board there says it serves; the default is this project
+        self.status = {}  # port -> the folder the board there says it serves
+        self.owners = {}  # port -> the project root of the server that was started there
         self.runs = []  # (command, kwargs) of each start
         self.checks = []  # every npx download check
         self.opened = []  # every address handed to the browser
@@ -74,17 +77,20 @@ class LauncherTest(unittest.TestCase):
         self.check_code = 0  # the npx check's answer: 0 when the package is already downloaded
         self.exit_code = None  # the started server's exit code; None while it runs
         self.pids = []  # every process id a start handed out
+        self.starts = {}  # process id -> the start time the check reads now; the default is one per id
         self.serving = self.root  # the project the board under test belongs to
         self.live = set()  # the process ids the check calls alive
         self.ended = []  # every process id a stop asked to end
+        self.guard = threading.Lock()  # the lock test runs two of these at once
         for patch in (
             mock.patch.object(pm_open, "WAIT_SECONDS", 0.1),
             mock.patch.object(pm_open, "POLL_SECONDS", 0.01),
-            mock.patch.object(pm_open, "listening", self.listen),
+            mock.patch.object(pm_open, "answers", self.listen),
             mock.patch.object(pm_open.subprocess, "Popen", self.spawn),
             mock.patch.object(pm_open.subprocess, "run", self.check),
             mock.patch.object(pm_open, "project_of", self.project_of),
             mock.patch.object(pm_open, "alive", self.is_alive),
+            mock.patch.object(pm_open, "start_time", self.start_of),
             mock.patch.object(pm_open, "terminate", self.terminate),
             mock.patch.object(pm_open.shutil, "which", self.which),
             mock.patch.object(pm_open.webbrowser, "open", self.opened.append),
@@ -98,19 +104,24 @@ class LauncherTest(unittest.TestCase):
         (root / ".pm").mkdir(parents=True)
         return root
 
+    def opened_port(self, port):
+        """Whether something answers there now: a busy port, or one whose started server holds it."""
+        if port in self.after_start and any(str(port) in command for command, _ in list(self.runs)):
+            return True
+        said = self.answers.get(port)
+        return bool(said) and (said.pop(0) if len(said) > 1 else said[0])
+
     def listen(self, port):
         self.ports.append(port)
-        if port in self.after_start and any(str(port) in command for command, _ in self.runs):
-            return True  # the server that was started on it holds it
-        answers = self.answers.get(port)
-        if not answers:
-            return False
-        return answers.pop(0) if len(answers) > 1 else answers[0]
+        return self.opened_port(port)
 
     def spawn(self, command, **kwargs):
-        self.pids.append(4321 + len(self.runs))
-        self.runs.append((command, kwargs))
-        return FakeProcess(self.pids[-1], self.exit_code)
+        with self.guard:
+            pid = 4321 + len(self.pids)
+            self.pids.append(pid)
+            self.runs.append((command, kwargs))
+            self.owners[int(command[command.index("--port") + 1])] = kwargs["cwd"]
+        return FakeProcess(pid, self.exit_code)
 
     def check(self, command, **kwargs):
         self.checks.append(command)
@@ -118,10 +129,17 @@ class LauncherTest(unittest.TestCase):
 
     def project_of(self, port):
         self.statuses.append(port)
-        return self.status.get(port, self.serving.as_posix())
+        if port in self.status:
+            return self.status[port]  # what the test says, including None
+        if not self.opened_port(port):
+            return None  # nothing answers there, so nothing names a folder
+        return self.owners.get(port, self.serving.as_posix())
 
     def is_alive(self, pid):
         return pid in self.live
+
+    def start_of(self, pid):
+        return self.starts.get(pid, f"start-of-{pid}")
 
     def terminate(self, pid):
         self.ended.append(pid)
@@ -188,7 +206,9 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("python .pm/tools/pm_open.py stop board", out)
         self.assertNotIn("close the window", out)
         self.assertEqual(
-            self.record()["board"], {"port": 6420, "pid": 4321}, "the port and the process id are recorded"
+            self.record()["board"],
+            {"port": 6420, "pid": 4321, "started": "start-of-4321"},
+            "the port, the process id and the time it started are recorded",
         )
 
     def test_a_board_that_is_ours_already_is_opened_and_nothing_starts(self):
@@ -207,7 +227,11 @@ class LauncherTest(unittest.TestCase):
         code, _ = self.run_tool("board")
         self.assertEqual(code, 0)
         self.assertEqual(self.runs[0][0][-2], "7050", "the address of a project stays the same")
-        self.assertEqual(self.record()["board"], {"port": 7050, "pid": 4321}, "the new process id replaces the old one")
+        self.assertEqual(
+            self.record()["board"],
+            {"port": 7050, "pid": 4321, "started": "start-of-4321"},
+            "the new process id replaces the old one",
+        )
 
     def test_a_port_that_answers_for_another_folder_is_foreign_and_ours_starts_above(self):
         self.busy(6420)
@@ -220,7 +244,7 @@ class LauncherTest(unittest.TestCase):
             self.runs[0][0], ["/bin/backlog", "browser", "--no-open", "--port", "6421", "--non-interactive"]
         )
         self.assertEqual(self.opened, ["http://127.0.0.1:6421"])
-        self.assertEqual(self.record()["board"], {"port": 6421, "pid": 4321}, "ours is recorded on its own port")
+        self.assertEqual(self.record()["board"]["port"], 6421, "ours is recorded on its own port")
 
     def test_a_port_that_answers_without_a_board_status_is_foreign(self):
         self.busy(6420)
@@ -328,7 +352,9 @@ class LauncherTest(unittest.TestCase):
                 "24678",
             ],
         )
-        self.assertEqual(self.record()["map"], {"port": 5173, "hmr_port": 24678, "pid": 4321})
+        self.assertEqual(
+            self.record()["map"], {"port": 5173, "hmr_port": 24678, "pid": 4321, "started": "start-of-4321"}
+        )
         self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
         self.assertIn("--listen 127.0.0.1 --hmr-port 24678", out)
 
@@ -344,10 +370,18 @@ class LauncherTest(unittest.TestCase):
         self.assertNotIn("24678", self.runs[0][0])
         self.assertEqual(self.record()["map"]["hmr_port"], 24679)
 
+    def test_a_map_with_no_free_hmr_port_does_not_start(self):
+        self.write_launch(MAP)
+        self.busy(*range(pm_open.HMR_FIRST, pm_open.HMR_FIRST + pm_open.PORTS_TRIED))
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 1)
+        self.assertIn("HMR port was not found", out)
+        self.assertEqual(self.runs, [], "nothing starts without an HMR port of its own")
+
     def test_a_map_whose_recorded_process_still_runs_is_opened_and_nothing_starts(self):
         self.write_launch(MAP)
         self.write_store(
-            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 4321, "hmr_port": 24678}}}}
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 4321, "started": "start-of-4321"}}}}
         )
         self.live = {4321}
         self.busy(5173)
@@ -360,7 +394,7 @@ class LauncherTest(unittest.TestCase):
     def test_a_map_whose_recorded_process_is_gone_is_foreign_even_though_the_port_answers(self):
         self.write_launch(MAP)
         self.write_store(
-            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "hmr_port": 24678}}}}
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "started": "start-of-999"}}}}
         )
         self.busy(5173)
         self.answering_after_a_start(5174)
@@ -370,7 +404,46 @@ class LauncherTest(unittest.TestCase):
             "Port 5173 answers for another program", out, "a running map of ours would have a live process id"
         )
         self.assertEqual(self.runs[0][0][:6], ["/bin/npx", "--no-install", "likec4@1.60.0", "start", "--port", "5174"])
-        self.assertEqual(self.record()["map"], {"port": 5174, "hmr_port": 24678, "pid": 4321})
+        self.assertEqual(self.record()["map"]["port"], 5174)
+
+    def test_a_process_id_that_belongs_to_another_process_is_not_ours(self):
+        self.write_launch(MAP)
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "started": "then"}}}}
+        )
+        self.live = {999}
+        self.starts = {999: "now"}  # the id runs, but it is another process now
+        self.busy(5173)
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("Port 5173 answers for another program", out, "a reused process id is not our map")
+        self.assertEqual(self.runs[0][0][:6], ["/bin/npx", "--no-install", "likec4@1.60.0", "start", "--port", "5174"])
+        self.assertEqual(self.record()["map"]["started"], "start-of-4321", "the new process replaces the stale one")
+
+    def test_a_record_without_a_start_time_is_not_ours(self):
+        self.write_launch(MAP)
+        self.write_store({"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999}}}})
+        self.live = {999}
+        self.busy(5173)
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("Port 5173 answers for another program", out, "without a start time nothing proves it is ours")
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
+
+    def test_keep_does_not_carry_a_process_id_to_another_port(self):
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "board": {"pid": 4321, "started": "start-of-4321"}}}}
+        )
+        self.live = {4321}
+        self.busy(6420)
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertIn("The board is already running at http://127.0.0.1:6420", out)
+        self.assertEqual(
+            self.record()["board"], {"port": 6420}, "a board found on another port brings no process id with it"
+        )
 
     def test_map_without_the_layer_is_reported_as_not_installed(self):
         code, out = self.run_tool("map")
@@ -506,7 +579,7 @@ class LauncherTest(unittest.TestCase):
         source, target = moves[0]
         self.assertEqual(target, self.store)
         self.assertEqual(source.parent, self.store.parent, "the temporary file sits next to its final name")
-        self.assertEqual([path.name for path in self.store.parent.iterdir()], ["projects.json"])
+        self.assertEqual(sorted(path.name for path in self.store.parent.iterdir()), ["projects.json"])
 
     def test_a_broken_project_list_reads_as_empty_and_is_rewritten(self):
         self.store.parent.mkdir(parents=True, exist_ok=True)
@@ -515,9 +588,7 @@ class LauncherTest(unittest.TestCase):
         self.answering_after_a_start(6420)
         code, _ = self.run_tool("board")
         self.assertEqual(code, 0)
-        self.assertEqual(self.record()["board"], {"port": 6420, "pid": 4321})
-
-    # -- stop and list ------------------------------------------------------------------------------------------
+        self.assertEqual(self.record()["board"], {"port": 6420, "pid": 4321, "started": "start-of-4321"})
 
     def test_stop_with_no_record_does_nothing(self):
         code, out = self.run_tool("stop", "board")
@@ -546,6 +617,28 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("The board recorded for this project is not running, so I stopped nothing.", out)
         self.assertEqual(self.ended, [])
 
+    def test_stop_leaves_a_server_this_tool_did_not_start(self):
+        self.write_store({"projects": {self.key(): {"name": "shop", "board": {"port": 6420}}}})
+        self.busy(6420)  # this project's own board, started by hand
+        code, out = self.run_tool("stop", "board")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ended, [], "nothing is ended: this tool cannot tell whose process it is")
+        self.assertIn("was not started by this tool, so I left it running", out)
+        self.assertNotIn("is not running", out, "the board answers, so saying it is not running would be wrong")
+
+    def test_stop_does_not_end_a_process_that_is_not_ours(self):
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "started": "then"}}}}
+        )
+        self.live = {999}
+        self.starts = {999: "now"}  # the recorded id was handed to another process
+        self.busy(5173)
+        code, out = self.run_tool("stop", "map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ended, [], "a process id that now belongs to another process is never ended")
+        self.assertIn("was not started by this tool, so I left it running", out)
+        self.assertEqual(self.record()["map"], {"port": 5173}, "the stale process id is dropped from the list")
+
     def test_stop_needs_to_know_which_server(self):
         code, out = self.run_tool("stop")
         self.assertEqual(code, 1)
@@ -561,17 +654,41 @@ class LauncherTest(unittest.TestCase):
             }
         )
         self.live = {4321}
-        self.busy(5173)
+        self.busy(6421, 5173)
         code, out = self.run_tool("list")
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertEqual(len(lines), 2, "one line per project")
         shop = next(line for line in lines if line.startswith("shop"))
         self.assertIn("board http://127.0.0.1:6421 running", shop)
-        self.assertIn("map http://127.0.0.1:5173 running", shop)
         other = next(line for line in lines if line.startswith("other"))
         self.assertIn("board not started yet", other)
         self.assertIn("map http://127.0.0.1:5174 stopped", other, "a dead process id is not a running map")
+
+    def test_list_calls_a_server_running_only_when_it_is_this_projects_own(self):
+        self.write_store(
+            {
+                "projects": {
+                    self.key(): {
+                        "name": "shop",
+                        "board": {"port": 6421, "pid": 4321, "started": "start-of-4321"},
+                        "map": {"port": 5173, "pid": 4322, "started": "start-of-4322"},
+                    },
+                    self.key(self.other): {"name": "other", "board": {"port": 6422}, "map": {"port": 5174}},
+                }
+            }
+        )
+        self.status[6421] = self.other.as_posix()  # the board there serves another project
+        self.live = {4322}
+        self.busy(6421, 5173, 5174)
+        code, out = self.run_tool("list")
+        self.assertEqual(code, 0)
+        shop = next(line for line in out.splitlines() if line.startswith("shop"))
+        other = next(line for line in out.splitlines() if line.startswith("other"))
+        self.assertIn("board http://127.0.0.1:6421 answers for another program", shop)
+        self.assertIn("map http://127.0.0.1:5173 running", shop)
+        self.assertIn("board http://127.0.0.1:6422 stopped", other)
+        self.assertIn("map http://127.0.0.1:5174 answers for another program", other)
 
     def test_list_with_nothing_registered_says_how_to_add_a_project(self):
         code, out = self.run_tool("list")
@@ -616,16 +733,21 @@ class LauncherTest(unittest.TestCase):
 
 
 class FakeKernel32:
-    """Stands in for the Windows kernel: an OpenProcess handle and the exit code GetExitCodeProcess writes."""
+    """Stands in for the Windows kernel: an OpenProcess handle, the exit code and the creation time it writes."""
 
-    def __init__(self, code=pm_open.STILL_ACTIVE, handle=1234):
-        self.code, self.handle, self.closed = code, handle, []
+    def __init__(self, code=pm_open.STILL_ACTIVE, handle=1234, created=132000000000000000):
+        self.code, self.handle, self.created, self.closed = code, handle, created, []
         self.OpenProcess = mock.Mock(return_value=handle)
         self.GetExitCodeProcess = mock.Mock(side_effect=self.exit_code)
+        self.GetProcessTimes = mock.Mock(side_effect=self.times)
         self.CloseHandle = mock.Mock(side_effect=self.closed.append)
 
     def exit_code(self, handle, pointer):
         pointer._obj.value = self.code
+        return 1
+
+    def times(self, handle, created, exited, kernel, user):
+        created._obj.value = self.created
         return 1
 
 
@@ -661,6 +783,28 @@ class PlatformTest(unittest.TestCase):
         with self.windows(FakeKernel32(handle=0)):
             self.assertFalse(pm_open.alive(4321))
 
+    def test_the_windows_start_time_comes_from_get_process_times(self):
+        kernel = FakeKernel32(created=132000000000000001)
+        with self.windows(kernel):
+            self.assertEqual(pm_open.start_time(4321), "132000000000000001")
+        self.kill.assert_not_called()
+        self.assertEqual(kernel.OpenProcess.call_args[0], (pm_open.QUERY_LIMITED, False, 4321))
+        self.assertEqual(kernel.CloseHandle.call_count, 1, "the handle is closed again")
+
+    def test_a_windows_process_whose_times_cannot_be_read_has_no_start_time(self):
+        kernel = FakeKernel32()
+        kernel.GetProcessTimes = mock.Mock(return_value=0)
+        with self.windows(kernel):
+            self.assertIsNone(pm_open.start_time(4321), "without a start time a process is not ours")
+
+    def test_a_windows_process_that_cannot_be_opened_has_no_start_time(self):
+        with self.windows(FakeKernel32(handle=0)):
+            self.assertIsNone(pm_open.start_time(4321))
+
+    def test_a_process_id_of_zero_has_no_start_time(self):
+        self.assertIsNone(pm_open.start_time(0))
+        self.assertIsNone(pm_open.start_time(None))
+
     def test_stop_on_windows_ends_the_whole_tree(self):
         run = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
         with self.windows(FakeKernel32()), mock.patch.object(pm_open.subprocess, "run", run):
@@ -686,6 +830,69 @@ class PlatformTest(unittest.TestCase):
             self.assertFalse(pm_open.alive(0))
             self.assertFalse(pm_open.alive(None))
         self.kill.assert_not_called()
+
+
+class StartTimeTest(unittest.TestCase):
+    """The start time of a process, read the way this system offers it; no process is started or ended."""
+
+    @unittest.skipUnless(os.name == "nt", "the Windows creation time comes from GetProcessTimes")
+    def test_on_windows_the_start_time_of_this_process_can_be_read(self):
+        started = pm_open.start_time(os.getpid())
+        self.assertTrue(started and started.isdigit())
+        self.assertEqual(pm_open.start_time(os.getpid()), started, "a process keeps the time it started")
+
+    @unittest.skipUnless(os.path.isdir("/proc"), "the Linux start time is the 22nd field of /proc/<pid>/stat")
+    def test_on_linux_the_start_time_is_the_22nd_field_of_proc_stat(self):
+        started = pm_open.start_time(os.getpid())
+        self.assertTrue(started and started.isdigit())
+        self.assertEqual(pm_open.start_time(os.getpid()), started, "a process keeps the time it started")
+        self.assertIsNone(pm_open.start_time(999999999), "no such process, no start time")
+
+    def test_elsewhere_the_start_time_comes_from_ps(self):
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout="Tue Nov  4 09:00:00 2025\n"))
+        with mock.patch.object(pm_open.os, "name", "posix"):
+            if os.path.isdir("/proc"):
+                self.skipTest("this machine reads /proc instead")
+            with mock.patch.object(pm_open.subprocess, "run", run):
+                self.assertEqual(pm_open.start_time(4321), "Tue Nov  4 09:00:00 2025")
+        self.assertEqual(run.call_args[0][0], ["ps", "-o", "lstart=", "-p", "4321"])
+
+    def test_a_process_whose_ps_output_is_empty_has_no_start_time(self):
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout="  \n"))
+        with mock.patch.object(pm_open.os, "name", "posix"):
+            if os.path.isdir("/proc"):
+                self.skipTest("this machine reads /proc instead")
+            with mock.patch.object(pm_open.subprocess, "run", run):
+                self.assertIsNone(pm_open.start_time(4321))
+
+    def test_a_failing_ps_reads_as_no_start_time(self):
+        run = mock.Mock(side_effect=OSError("no ps here"))
+        with mock.patch.object(pm_open.os, "name", "posix"):
+            if os.path.isdir("/proc"):
+                self.skipTest("this machine reads /proc instead")
+            with mock.patch.object(pm_open.subprocess, "run", run):
+                self.assertIsNone(pm_open.start_time(4321))
+
+    def test_a_record_without_a_start_time_is_never_ours(self):
+        server = {"port": 5173, "pid": 4321}
+        with mock.patch.object(pm_open, "alive", lambda pid: True), mock.patch.object(
+            pm_open, "start_time", lambda pid: "start-of-4321"
+        ):
+            self.assertIsNone(pm_open.process_of(server), "a process id alone proves nothing")
+
+    def test_a_record_whose_start_time_differs_is_not_ours(self):
+        server = {"port": 5173, "pid": 4321, "started": "then"}
+        with mock.patch.object(pm_open, "alive", lambda pid: True), mock.patch.object(
+            pm_open, "start_time", lambda pid: "now"
+        ):
+            self.assertIsNone(pm_open.process_of(server), "the id was handed to another process")
+
+    def test_a_record_whose_process_still_started_then_is_ours(self):
+        server = {"port": 5173, "pid": 4321, "started": "start-of-4321"}
+        with mock.patch.object(pm_open, "alive", lambda pid: True), mock.patch.object(
+            pm_open, "start_time", lambda pid: "start-of-4321"
+        ):
+            self.assertEqual(pm_open.process_of(server), 4321)
 
 
 class StartTest(unittest.TestCase):

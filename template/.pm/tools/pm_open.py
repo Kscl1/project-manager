@@ -10,12 +10,15 @@ port come from the project's .claude/launch.json, which the installer writes; th
 the board runs `backlog browser --no-open --port 6420`, and the map has no default: it is an optional layer.
 
 The project list in ~/.pm/projects.json (or the folder PM_HOME names) is what lets several projects run at once. It
-holds one entry per project, keyed by its resolved folder: the port of each server, the process id this tool started,
-and the map's HMR port. A project joins it the first time this command opens something in it.
+holds one entry per project, keyed by its resolved folder: the port of each server, the map's HMR port, and the
+process this tool started, with its id and the time it started. A project joins it the first time this command opens
+something in it.
 
-A port that answers is not proof that the server is ours. The board is asked for its /api/status project path; the map
-is ours only while the process id recorded for that port still runs. Anything else is foreign: this project's own
-server then starts on the first free port above.
+A port that answers is not proof that the server is ours, and a running process id is not proof that it is our
+process: the system hands the id out again once ours ends. The board is ours while its /api/status names this
+project's folder; the map is ours while its port answers and the recorded process still started when it was recorded.
+Anything else is foreign: this project's own server then starts on the first free port above. A port counts as taken
+when something answers on 127.0.0.1.
 
 The servers outlive this command: no console window on Windows, their own session elsewhere, with their output in
 .pm/local/open-<name>.log. `stop` ends the one this tool started, with the processes it started.
@@ -41,12 +44,15 @@ WAIT_SECONDS = 30  # how long a server may take to answer on its port
 POLL_SECONDS = 0.5
 STATUS_TIMEOUT = 2  # a board answers /api/status at once; a slower answer is not the board we can trust
 ADDRESS = "http://127.0.0.1:{port}"
+LOOPBACKS = ("127.0.0.1",)  # the launcher speaks IPv4 only
 LOG = "open-{name}.log"  # under .pm/local/; holds the server's own output
 PORTS_TRIED = 50  # how many ports a taken first choice may push us up
 HMR_FIRST = 24678  # the map's HMR port counts up from here; two maps may not share one
 STILL_ACTIVE = 259  # GetExitCodeProcess answers this while the process runs
 QUERY_LIMITED = 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION: ask about a process without the right to end it
 TASKKILL_SECONDS = 10
+OURS, ANSWERS, STOPPED = "ours", "answers", "stopped"  # what the ownership check says about a port
+WORDS = {OURS: "running", ANSWERS: "answers for another program", STOPPED: "stopped"}  # how `list` says it
 # Without .claude/launch.json: the board's own command, and no map at all, since the map is an optional layer.
 DEFAULTS = {"board": (["backlog", "browser", "--no-open", "--port", "6420"], 6420)}
 INSTALL = {
@@ -90,14 +96,19 @@ def configurations(root):
     return [item for item in found if isinstance(item, dict)] if isinstance(found, list) else []
 
 
+def value_after(command, flag):
+    """The number after that flag in the command, else 0."""
+    if flag in command[:-1]:
+        number = command[command.index(flag) + 1]
+        return int(number) if number.isdigit() else 0
+    return 0
+
+
 def port_of(command, given):
     """The port to wait on: the entry's `port` field, else the number after --port; 0 when neither is there."""
     if isinstance(given, int) and given > 0:
         return given
-    if "--port" in command[:-1]:
-        number = command[command.index("--port") + 1]
-        return int(number) if number.isdigit() else 0
-    return 0
+    return value_after(command, "--port")
 
 
 def entry(root, name):
@@ -115,11 +126,20 @@ def entry(root, name):
     return DEFAULTS.get(name)
 
 
-def listening(port):
-    """True when something already answers on 127.0.0.1 at that port."""
-    with socket.socket() as probe:
-        probe.settimeout(0.5)
-        return probe.connect_ex(("127.0.0.1", port)) == 0
+def answers(port):
+    """True when something answers at that port on 127.0.0.1."""
+    if not isinstance(port, int) or port <= 0:
+        return False
+    for address in LOOPBACKS:
+        family = socket.AF_INET6 if ":" in address else socket.AF_INET
+        try:
+            with socket.socket(family) as probe:
+                probe.settimeout(0.5)
+                if probe.connect_ex((address, port)) == 0:
+                    return True
+        except OSError:
+            continue  # no right to open a socket there: no answer
+    return False
 
 
 def project_of(port):
@@ -206,14 +226,14 @@ def warn_store():
 def record_of(data, folder):
     """This project's entry in the project list, found the way the list is keyed; empty when it has none yet."""
     key = folder_key(folder)
-    found = [
-        record for name, record in data.get("projects", {}).items() if same_key(name, key) and isinstance(record, dict)
-    ]
-    return found[0] if found else {}
+    for name, record in data.get("projects", {}).items():
+        if same_key(name, key) and isinstance(record, dict):
+            return record
+    return {}
 
 
 def server_of(data, folder, name):
-    """The recorded board or map of this project: {"port": ..., "pid": ...}, or {} when there is none."""
+    """The recorded board or map of this project: {"port": ..., "pid": ..., "started": ...}, or {} without one."""
     server = record_of(data, folder).get(name)
     return server if isinstance(server, dict) else {}
 
@@ -230,18 +250,30 @@ def other_ports(data, folder):
     return ports
 
 
-def save(data, folder, name, port, pid=None, hmr=None):
-    """Record one server of this project and write the list: its port, the process id, the map's HMR port."""
+def save(data, folder, name, port, pid=None, started=None, hmr=None):
+    """Record one server of this project and write the list: its port, the process that runs it, the HMR port."""
     key, projects = folder_key(folder), data.setdefault("projects", {})
     record = projects.setdefault(next((item for item in projects if same_key(item, key)), key), {})
     record["name"] = Path(folder).name
     server = {"port": port}
     if pid:
         server["pid"] = pid
+    if started:
+        server["started"] = started
     if hmr:
         server["hmr_port"] = hmr
     record[name] = server
     return write_store(data)
+
+
+def forget(data, folder, name):
+    """Drop a recorded process that is not ours anymore: it ended, or its id belongs to another process now."""
+    server = server_of(data, folder, name)
+    if not server.get("pid") or process_of(server):
+        return
+    record_of(data, folder)[name] = {key: value for key, value in server.items() if key not in ("pid", "started")}
+    if not write_store(data):
+        warn_store()
 
 
 def opening(data=None):
@@ -255,7 +287,7 @@ def choose_port(wanted, used):
     if not isinstance(wanted, int) or wanted <= 0:
         return 0
     for port in range(wanted, wanted + PORTS_TRIED):
-        if port not in used and not listening(port):
+        if port not in used and not answers(port):
             return port
     return 0
 
@@ -275,7 +307,7 @@ def hmr_for(data, folder):
     """The map's HMR port: the recorded one while it is still free, else the first free one from 24678 up."""
     used = other_ports(data, folder)
     recorded = server_of(data, folder, "map").get("hmr_port")
-    if isinstance(recorded, int) and recorded not in used and not listening(recorded):
+    if isinstance(recorded, int) and recorded > 0 and recorded not in used and not answers(recorded):
         return recorded
     return choose_port(HMR_FIRST, used)
 
@@ -309,6 +341,83 @@ def alive_on_windows(pid):
         return code.value == STILL_ACTIVE
     finally:
         kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+
+def start_time(pid):
+    """When that process started, as text to keep in the list; None when that cannot be read (so it is not ours)."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if os.name == "nt":
+        return start_on_windows(pid)
+    if os.path.isdir("/proc"):
+        return start_from_proc(pid)
+    return start_from_ps(pid)
+
+
+def start_on_windows(pid):
+    """GetProcessTimes through the same query-only handle as alive_on_windows: the creation time, in filetime ticks."""
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    handle = kernel32.OpenProcess(QUERY_LIMITED, False, pid)
+    if not handle:
+        return None
+    try:
+        clock = [ctypes.c_ulonglong() for _ in range(4)]  # created, exited, kernel time, user time
+        asked = kernel32.GetProcessTimes(ctypes.c_void_p(handle), *(ctypes.byref(value) for value in clock))
+        return str(clock[0].value) if asked else None
+    finally:
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+
+def start_from_proc(pid):
+    """Linux: the 22nd field of /proc/<pid>/stat counts clock ticks since the machine started."""
+    try:
+        text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    fields = text[text.rfind(")") + 1 :].split()  # the second field may hold spaces and brackets
+    return fields[19] if len(fields) > 19 else None
+
+
+def start_from_ps(pid):
+    """Elsewhere: `ps -o lstart= -p <pid>` prints the start time of that process."""
+    command = ["ps", "-o", "lstart=", "-p", str(pid)]
+    try:
+        answer = subprocess.run(command, capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return answer.stdout.strip() or None
+
+
+def process_of(server):
+    """The process this tool started for that record, while it still runs and is still the same process: its id.
+
+    A process id alone proves nothing: the system hands the id to another program once ours ends. The recorded start
+    time is what tells the two apart, so a record without one, or an unreadable one, is not ours.
+    """
+    pid, started = server.get("pid"), server.get("started")
+    if not started or not alive(pid):
+        return None
+    return pid if start_time(pid) == str(started) else None
+
+
+def ownership(folder, name, server, port):
+    """(state, served): whether this project's server at that port is ours and running, for open, list and stop.
+
+    state is OURS, ANSWERS (the port answers, but not for this project's own server) or STOPPED (nothing answers
+    there). served is the folder a board at that port names, when it names one. The board is ours while its status
+    names this folder; the map is ours while its port answers and its recorded process is still the one we started.
+    """
+    if not isinstance(port, int) or port <= 0:
+        return STOPPED, None
+    if name == "board":
+        served = project_of(port)
+        if same_folder(served, folder):
+            return OURS, served
+        return (ANSWERS if answers(port) else STOPPED), served
+    if not answers(port):
+        return STOPPED, None
+    return (OURS if process_of(server) else ANSWERS), None
 
 
 def terminate(pid):
@@ -379,14 +488,6 @@ def downloaded(package):
         return False
 
 
-def relative_log(log):
-    """The log's path as the project sees it, so the line can be copied into a command."""
-    try:
-        return log.relative_to(ROOT).as_posix()
-    except ValueError:
-        return log.as_posix()
-
-
 def missing_entry_message(name):
     """Why the map has no command to start, in words for the person who asked for it."""
     if (ROOT / ".agents" / "skills" / "pm-likec4-dsl").is_dir():  # the map layer's skill: the layer is there
@@ -400,17 +501,6 @@ def missing_entry_message(name):
     )
 
 
-def no_port_message(what, first):
-    """One plain line when every port this project could use is taken; nothing was started."""
-    return f"The {PORTS_TRIED} ports from {first} up are all taken, so {what} was not started. Free one of them."
-
-
-def foreign_line(name, port, served):
-    """One plain line: something answers there, and it does not answer for this project."""
-    who = f"another project ({served})" if served else "another program"
-    return f"Port {port} answers for {who}, so this project's {name} starts on a free port above."
-
-
 def wait_for_board(port, folder, deadline):
     """The folder the board at that port names last: asked until it names this project's, or the time runs out."""
     served = project_of(port)
@@ -420,41 +510,23 @@ def wait_for_board(port, folder, deadline):
     return served
 
 
-def open_server(name, download=False):
-    """Open this project's board or map, starting it here when it is not this project's own server yet."""
-    data = read_store()
-    found = entry(ROOT, name)
-    if found is None:
-        print(missing_entry_message(name))
-        return 1
-    command, wanted = found
-    port = port_for(data, ROOT, name, wanted)
-    hmr = hmr_for(data, ROOT) if name == "map" else None
+def choose_ports(data, root, name, command, wanted):
+    """(port, hmr port): the ports this server can run on. (0, None), with one line, when none is free."""
+    port = port_for(data, root, name, wanted)
     if not port:
-        print(no_port_message(f"the {name}", wanted))
-        return 1
-    if name == "map" and not hmr:
-        print(no_port_message("the map's HMR port", HMR_FIRST))
-        return 1
-    address = ADDRESS.format(port=port)
-    if listening(port):
-        served = project_of(port) if name == "board" else None
-        ours = same_folder(served, ROOT) if name == "board" else map_is_ours(data, port)
-        if ours:
-            print(f"The {name} is already running at {address}; I opened it in your browser.")
-            webbrowser.open(address)
-            if name == "board":
-                keep(data, port)
-            return 0
-        # The port answers for another program or another project: ours goes above it, as a new port would.
-        print(foreign_line(name, port, served))
-        answered = port
-        port = choose_port(port, other_ports(data, ROOT))
-        if not port:
-            print(no_port_message(f"the {name}", answered))
-            return 1
-        address = ADDRESS.format(port=port)
+        print(f"The {PORTS_TRIED} ports from {wanted} up are all taken, so the {name} was not started. Free one.")
+        return 0, None
+    if name != "map":
+        return port, None
+    hmr = hmr_for(data, root)
+    if not hmr:
+        print(f"The {PORTS_TRIED} ports from {HMR_FIRST} up are all taken, so the map's HMR port was not found.")
+        return 0, None
+    return port, hmr
 
+
+def build(name, command, port, hmr, download):
+    """(command, program, 0) for the server to start; (None, None, exit code) with the reason already printed."""
     command = with_port(command, port)
     command = board_command(command) if name == "board" else map_command(command, hmr)
     program = shutil.which(command[0])
@@ -463,50 +535,53 @@ def open_server(name, download=False):
             f"The {name} needs `{command[0]}`, which this machine does not have: "
             f"{INSTALL.get(command[0], 'install it, then run this command again.')} Nothing was started."
         )
-        return 1
+        return None, None, 1
     if name == "map" and Path(command[0]).stem.casefold() == "npx" and not download:
         # Whatever the entry names (pinned or not), npx would fetch it: the first argument that is not a flag.
         package = next((argument for argument in command[1:] if not argument.startswith("-")), "likec4")
         if not downloaded(package):
             print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
             print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
-            return 2
+            return None, None, 2
         # Without a yes the start itself must not download either: npx gets --no-install instead of -y.
         command = [
             command[0],
             "--no-install",
             *(argument for argument in command[1:] if argument not in ("-y", "--yes")),
         ]
+    return command, program, 0
 
-    log = ROOT / ".pm" / "local" / LOG.format(name=name)
-    process = start([program, *command[1:]], ROOT, log)
-    if not save(data, ROOT, name, port, pid=process.pid, hmr=hmr):
-        warn_store()
-    deadline, ran = time.monotonic() + WAIT_SECONDS, " ".join(command)
-    while not listening(port):
+
+def wait_until_open(name, process, port, root, command, log_path):
+    """Wait for the server to answer, and for the board to name this project; the exit code to end with."""
+    address = ADDRESS.format(port=port)
+    ran = " ".join(command)
+    try:
+        log = log_path.relative_to(root).as_posix()  # as the project sees it, so the line can be copied
+    except ValueError:
+        log = log_path.as_posix()
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not answers(port):
         if process.poll() is not None:  # it stopped before it answered: waiting longer would not help
             print(f"The {name} stopped before it answered at {address} (exit code {process.returncode}).")
-            print(f"I ran `{ran}`; its output is in {relative_log(log)}.")
+            print(f"I ran `{ran}`; its output is in {log}.")
             print("Read that file, then run this command again.")
             return 1
         if time.monotonic() > deadline:
             print(f"The {name} did not answer at {address} within {WAIT_SECONDS:g} seconds.")
-            print(f"I ran `{ran}`; its output is in {relative_log(log)}.")
+            print(f"I ran `{ran}`; its output is in {log}.")
             print("Read that file, then run this command again.")
             return 1
         time.sleep(POLL_SECONDS)
     if process.poll() is not None:  # the port answers, but what this command started has quit: someone else answers
         print(f"Something answers at {address}, but the {name} I started stopped (exit code {process.returncode}).")
-        print(f"Another program may hold port {port}; the {name}'s output is in {relative_log(log)}.")
+        print(f"Another program may hold port {port}; the {name}'s output is in {log}.")
         return 1
-    if name == "board":
-        served = wait_for_board(port, ROOT, deadline)  # a port that answers is not proof: the board must name us
-        if not same_folder(served, ROOT):
-            print(
-                f"Something answers at {address}, but it is not this project's board; it serves {served or 'nothing'}."
-            )
-            print(f"The board I started writes to {relative_log(log)}; read that file, then run this command again.")
-            return 1
+    served = wait_for_board(port, root, deadline) if name == "board" else None  # a port that answers proves nothing
+    if name == "board" and not same_folder(served, root):
+        print(f"Something answers at {address}, but it is not this project's board; it serves {served or 'nothing'}.")
+        print(f"The board I started writes to {log}; read that file, then run this command again.")
+        return 1
     webbrowser.open(address)
     print(f"The {name} is open at {address}")
     print(f"Command: {ran}")
@@ -514,18 +589,49 @@ def open_server(name, download=False):
     return 0
 
 
-def map_is_ours(data, port):
-    """The map has no status endpoint: ours only while the process recorded for that port still runs."""
-    server = server_of(data, ROOT, "map")
-    return server.get("port") == port and alive(server.get("pid"))
+def open_server(name, download=False, root=None):
+    """Open this project's board or map, starting it here when it is not this project's own server yet."""
+    root = root or ROOT
+    found = entry(root, name)
+    if found is None:
+        print(missing_entry_message(name))
+        return 1
+    command, wanted = found
+    data = read_store()
+    port, hmr = choose_ports(data, root, name, command, wanted)
+    if not port:
+        return 1
+    address = ADDRESS.format(port=port)
+    state, served = ownership(root, name, server_of(data, root, name), port)
+    if state == OURS:
+        print(f"The {name} is already running at {address}; I opened it in your browser.")
+        webbrowser.open(address)
+        if name == "board":
+            keep(data, root, port)
+        return 0
+    if state == ANSWERS:
+        who = f"another project ({served})" if served else "another program"
+        print(f"Port {port} answers for {who}, so this project's {name} starts on a free port above.")
+        free = choose_port(port, other_ports(data, root))
+        if not free:
+            print(f"The {PORTS_TRIED} ports from {port} up are all taken, so the {name} was not started.")
+            return 1
+        port, address = free, ADDRESS.format(port=free)
+    made, program, code = build(name, command, port, hmr, download)
+    if made is None:
+        return code
+    log_path = root / ".pm" / "local" / LOG.format(name=name)
+    process = start([program, *made[1:]], root, log_path)
+    if not save(data, root, name, port, pid=process.pid, started=start_time(process.pid), hmr=hmr):
+        warn_store()
+    return wait_until_open(name, process, port, root, made, log_path)
 
 
-def keep(data, port):
-    """Remember a board that was already running: its port, and its process id while that one still runs."""
-    pid = server_of(data, ROOT, "board").get("pid")
-    if not alive(pid):
-        pid = None  # this tool did not start it, so its process id is not ours to stop later
-    if not save(data, ROOT, "board", port, pid=pid):
+def keep(data, root, port):
+    """Remember a board that was already running on this port: its process id only while that process is ours."""
+    server = server_of(data, root, "board")
+    pid = process_of(server) if server.get("port") == port else None
+    if not save(data, root, "board", port, pid=pid, started=server.get("started") if pid else None):
         warn_store()
 
 
@@ -533,18 +639,24 @@ def stop_server(name):
     """Stop the server this tool started for this project, and nothing else."""
     data = read_store()
     server = server_of(data, ROOT, name)
-    pid = server.get("pid")
     if not server:
         print(f"No {name} is recorded for this project, so I stopped nothing.")
         return 0
-    if not pid or not alive(pid):
+    address = ADDRESS.format(port=server.get("port"))
+    pid, state = process_of(server), ownership(ROOT, name, server, server.get("port"))[0]
+    if state == STOPPED:
+        forget(data, ROOT, name)
         print(f"The {name} recorded for this project is not running, so I stopped nothing.")
+        return 0
+    if not pid:
+        forget(data, ROOT, name)
+        print(f"The {name} at {address} was not started by this tool, so I left it running.")
         return 0
     if not terminate(pid):
         print(f"I could not stop the {name} (process id {pid}); it may already have stopped. Nothing else was touched.")
         return 1
     # The port stays, so this project keeps its address; only the claim to a running process goes.
-    record_of(data, ROOT)[name] = {key: value for key, value in server.items() if key != "pid"}
+    record_of(data, ROOT)[name] = {key: value for key, value in server.items() if key not in ("pid", "started")}
     if not write_store(data):
         warn_store()
     print(f"Stopped the {name} (process id {pid}).")
@@ -552,7 +664,7 @@ def stop_server(name):
 
 
 def show_list():
-    """One line per registered project: its folder, then the address of its board and map and whether each runs."""
+    """One line per registered project: its folder, then the address of its board and map and whether each is ours."""
     projects = read_store().get("projects", {})
     if not projects:
         print("No project is registered yet: `python .pm/tools/pm_open.py board` adds this one to the list.")
@@ -560,18 +672,19 @@ def show_list():
     for key in sorted(projects):
         record = projects[key]
         name = record.get("name") or Path(key).name
-        states = " · ".join(server_state(server, record.get(server)) for server in ("board", "map"))
+        states = " · ".join(server_state(key, which, record.get(which)) for which in ("board", "map"))
         print(f"{name} ({key}) · {states}")
     return 0
 
 
-def server_state(name, server):
-    """`board http://127.0.0.1:6421 running`, or `map not started yet`."""
-    port = server.get("port") if isinstance(server, dict) else None
+def server_state(folder, name, server):
+    """`board http://127.0.0.1:6421 running`, `map ... answers for another program`, or `map not started yet`."""
+    server = server if isinstance(server, dict) else {}
+    port = server.get("port")
     if not isinstance(port, int) or port <= 0:
         return f"{name} not started yet"
-    running = alive(server.get("pid")) if server.get("pid") else listening(port)
-    return f"{name} {ADDRESS.format(port=port)} {'running' if running else 'stopped'}"
+    state = ownership(folder, name, server, port)[0]
+    return f"{name} {ADDRESS.format(port=port)} {WORDS[state]}"
 
 
 def set_opening(value):
