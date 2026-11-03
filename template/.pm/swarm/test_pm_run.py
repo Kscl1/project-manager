@@ -670,12 +670,12 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         )
         self.jobs(self.job("a", "ok"))
         status = self.run_pm("--status")
-        self.assertNotIn("fixed by pm_run itself", status.stdout)
+        self.assertNotIn("tried again (pm_run on its own, or a --retry)", status.stdout)
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fixed by pm_run itself: PROMPT=2, RETRY=1", result.stdout)
+        self.assertIn("tried again (pm_run on its own, or a --retry): PROMPT=2, RETRY=1", result.stdout)
         self.assertIn("needed a person or a look: WAITING=2", result.stdout)
-        self.assertEqual(result.stdout.count("fixed by pm_run itself:"), 1)
+        self.assertEqual(result.stdout.count("tried again (pm_run on its own, or a --retry):"), 1)
         self.assertNotIn("LAUNCH=", result.stdout)
         self.assertFalse(self.fake_state.exists())
 
@@ -694,10 +694,10 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         )
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fixed by pm_run itself: RESUME=2, QUOTA-WAIT=1", result.stdout)
+        self.assertIn("tried again (pm_run on its own, or a --retry): RESUME=2, QUOTA-WAIT=1", result.stdout)
         self.assertIn("needed a person or a look: CHECK-FAILED=3, BLOCKED=1", result.stdout)
         self.assertLess(
-            result.stdout.index("fixed by pm_run itself:"),
+            result.stdout.index("tried again (pm_run on its own, or a --retry):"),
             result.stdout.index("needed a person or a look:"),
             "the line a person must read comes second",
         )
@@ -717,7 +717,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_status_tally_with_no_failure_log_says_none(self):
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("fixed by pm_run itself: none", result.stdout)
+        self.assertIn("tried again (pm_run on its own, or a --retry): none", result.stdout)
         self.assertIn("needed a person or a look: none", result.stdout)
         self.assertFalse((self.tmp / ".pm" / "local" / "failures.log").exists())
 

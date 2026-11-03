@@ -72,8 +72,8 @@ that pane; pm_run closes it and starts the job once the screen changes. A failed
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
        python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and turns, then exit
        python .pm/swarm/pm_run.py <run-dir> --status --tally  also count shared failure-log events, in two lines:
-                                                            what pm_run fixed itself, then what needed a person or
-                                                            a look, each most frequent first
+                                                            what was tried again (pm_run on its own, or a --retry),
+                                                            then what needed a person or a look, most frequent first
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
@@ -172,7 +172,8 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
 FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED", "PREFLIGHT"}
-# The events pm_run fixed on its own; the tally prints these apart from the ones that needed a person or a look.
+# The events that mark another attempt, not proof of a fix: a person's --retry logs RETRY too. The tally prints these
+# apart from the ones that needed a person or a look.
 SELF_FIXED = ("PROMPT", "RESUME", "RETRY", "QUOTA-WAIT")
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
@@ -1634,8 +1635,9 @@ class Run:
     def failure_tally(self):
         """Count shared failure-log events, not event names mentioned in a message.
 
-        Two lines, each most frequent first: what pm_run fixed on its own (PROMPT, RESUME, RETRY, QUOTA-WAIT), and
-        everything else, which needed a person or a look.
+        Two lines, each most frequent first: what was tried again (PROMPT, RESUME, RETRY, QUOTA-WAIT; a retry is an
+        attempt, not proof of a fix, and a person's --retry logs RETRY too), and everything else, which needed a person
+        or a look.
         """
         path = self.repo / ".pm" / "local" / "failures.log"
         counts = Counter()
@@ -1661,7 +1663,7 @@ class Run:
             ordered = sorted(kinds, key=lambda kind: (-counts[kind], kind))
             print(label + ": " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
 
-        print_line("fixed by pm_run itself", [kind for kind in counts if kind in SELF_FIXED])
+        print_line("tried again (pm_run on its own, or a --retry)", [kind for kind in counts if kind in SELF_FIXED])
         print_line("needed a person or a look", [kind for kind in counts if kind not in SELF_FIXED])
 
     def print_totals(self, per_model):
