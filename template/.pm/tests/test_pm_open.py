@@ -821,6 +821,21 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("was not started by this tool, so I left it running", out)
         self.assertEqual(self.record()["map"], {"port": 5173}, "the stale process id is dropped from the list")
 
+    def test_stop_reads_the_process_once_right_before_it_ends_it(self):
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "started": "then"}}}}
+        )
+        self.live = {999}
+        self.busy(5173)
+        reads = iter(["then", "now"])  # ours for the ownership check, another process by the time it is ended
+        with mock.patch.object(pm_open, "start_time", lambda pid: next(reads, "now")):
+            code, out = self.run_tool("stop", "map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ended, [], "only the process read right before the end is ended")
+        self.assertIn("was not started by this tool, so I left it running", out)
+        self.assertNotIn("Stopped the map", out)
+        self.assertEqual(self.record()["map"], {"port": 5173}, "the stale process id is dropped from the list")
+
     def test_stop_needs_to_know_which_server(self):
         code, out = self.run_tool("stop")
         self.assertEqual(code, 1)
@@ -1062,11 +1077,21 @@ class PlatformTest(unittest.TestCase):
 
     def test_stop_elsewhere_signals_the_process_group(self):
         killpg = mock.Mock()
-        group = mock.patch.object(pm_open.os, "getpgid", lambda pid: 77, create=True)
+        group = mock.patch.object(
+            pm_open.os, "getpgid", lambda pid: pid, create=True
+        )  # its own group, as start() gave it
         signal_group = mock.patch.object(pm_open.os, "killpg", killpg, create=True)
         with mock.patch.object(pm_open.os, "name", "posix"), group, signal_group:
             self.assertTrue(pm_open.terminate(4321))
-        killpg.assert_called_once_with(77, signal.SIGTERM)
+        killpg.assert_called_once_with(4321, signal.SIGTERM)
+
+    def test_stop_elsewhere_ends_nothing_when_the_group_is_another_one(self):
+        killpg = mock.Mock()
+        group = mock.patch.object(pm_open.os, "getpgid", lambda pid: 77, create=True)  # another program's group
+        signal_group = mock.patch.object(pm_open.os, "killpg", killpg, create=True)
+        with mock.patch.object(pm_open.os, "name", "posix"), group, signal_group:
+            self.assertFalse(pm_open.terminate(4321))
+        killpg.assert_not_called()  # the group holds programs this tool did not start
 
     def test_the_alive_check_elsewhere_only_asks(self):
         with mock.patch.object(pm_open.os, "name", "posix"), mock.patch.object(pm_open.os, "kill", self.kill):

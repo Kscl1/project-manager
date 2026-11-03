@@ -488,6 +488,20 @@ def ownership(folder, name, server, port):
     return (OURS if process_of(server) else ANSWERS), None
 
 
+def own_group(pid):
+    """True when that process leads the process group `start()` gave it: its own id is the group's id.
+
+    The servers start with `start_new_session=True`, so a server's group is its own. Another group id means the id now
+    belongs to a process that this tool did not start, and ending that group would end other programs.
+    """
+    if os.name == "nt":
+        return True  # no group to signal there: taskkill /T ends the tree by itself
+    try:
+        return os.getpgid(pid) == pid
+    except OSError:
+        return False
+
+
 def terminate(pid):
     """End a process this tool started together with the ones it started; True when the system did it."""
     if os.name == "nt":
@@ -497,8 +511,10 @@ def terminate(pid):
             return subprocess.run(command, capture_output=True, timeout=TASKKILL_SECONDS).returncode == 0
         except (OSError, subprocess.SubprocessError):
             return False
+    if not own_group(pid):
+        return False  # that group holds other programs now, so nothing in it is ours to end
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)  # the group the server got when it started
+        os.killpg(pid, signal.SIGTERM)  # the group the server got when it started, which is its own
     except OSError:
         return False
     return True
@@ -742,19 +758,26 @@ def stop_server(name):
             print(f"No {name} is recorded for this project, so I stopped nothing.")
             return 0
         address = ADDRESS.format(port=server.get("port"))
-        pid, state = process_of(server), ownership(ROOT, name, server, server.get("port"))[0]
+        # The ownership check comes first (for a board it is a network answer), and the process is read once more
+        # right before it is ended: an id read before that check may belong to another process by now.
+        state = ownership(ROOT, name, server, server.get("port"))[0]
         if state == STOPPED:
             forget(data, ROOT, name)
             print(f"The {name} recorded for this project is not running, so I stopped nothing.")
             return 0
+        pid = process_of(server)
         if not pid:
             forget(data, ROOT, name)
             print(f"The {name} at {address} was not started by this tool, so I left it running.")
             return 0
         if not terminate(pid):
-            print(
-                f"I could not stop the {name} (process id {pid}); it may already have stopped. Nothing else was touched."
-            )
+            if os.name != "nt" and alive(pid) and not own_group(pid):
+                print(f"The {name} (process id {pid}) is in another process group now, so I ended nothing.")
+            else:
+                print(
+                    f"I could not stop the {name} (process id {pid}); it may already have stopped. "
+                    "Nothing else was touched."
+                )
             return 1
         # The port stays, so this project keeps its address; only the claim to a running process goes.
         record_of(data, ROOT)[name] = {key: value for key, value in server.items() if key not in ("pid", "started")}
