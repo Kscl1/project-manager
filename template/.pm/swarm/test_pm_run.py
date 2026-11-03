@@ -844,6 +844,24 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertIn(f"{key} must be one command line (text)", state["a"]["why"])
                 self.assertIn(f"PREFLIGHT a: {key} must be one command line (text)", run.log_path.read_text("utf-8"))
 
+    def test_preflight_fails_a_task_field_that_is_not_a_task_id(self):
+        # The optional task field names the task a job works for; a number or a blank cannot name one.
+        for value in (12, "  "):
+            with self.subTest(task=value):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
+                run.repo = self.tmp
+                job["task"] = value
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertIn("task must be a task ID (text)", state["a"]["why"])
+
+    def test_a_job_with_a_task_field_runs_as_before(self):
+        self.jobs(self.job("a", "ok", task="REQ-12"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
     def test_preflight_requires_the_folder_that_will_hold_the_report(self):
         run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
         run.repo = self.tmp

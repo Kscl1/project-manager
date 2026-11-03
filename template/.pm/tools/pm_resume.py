@@ -484,7 +484,7 @@ def map_warning():
     return f"- ⚠️ Map may be out of date: folders added or removed since the map last changed ({last[:7]}): {shown}"
 
 
-def git_stdout(arguments, failure_warning):
+def git_stdout(arguments, failure_warning, timeout=None):
     try:
         result = subprocess.run(
             ["git", *arguments],
@@ -493,9 +493,10 @@ def git_stdout(arguments, failure_warning):
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=timeout,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return failure_warning
     if result.returncode != 0:
         return failure_warning
@@ -655,20 +656,28 @@ def local_day(stamp):
         return as_date(stamp)
 
 
-def commits(revisions="HEAD"):
-    """Commits with short hash, local author day, subject, Refs task IDs and Assisted-by models."""
-    log = git_stdout(["log", "--date=short", "--format=%h%x1f%ad%x1f%s%x1f%B%x1e", revisions], "")
+def commits(*revisions, timeout=None, failed=()):
+    """Commits with short hash, author day, commit time, subject, Refs task IDs and Assisted-by models.
+
+    `revisions` are git log arguments, HEAD by default: a range, `-5` or `--since=midnight`. The time is the committer's,
+    the one `--since` filters on, so a rebased or amended commit counts on the day it landed. When git fails or does
+    not answer in `timeout`, the result is `failed`: an empty list unless the caller must tell the two apart."""
+    log_format = "--format=%h%x1f%ad%x1f%cI%x1f%s%x1f%B%x1e"
+    log = git_stdout(["log", "--date=short", log_format, *(revisions or ["HEAD"])], None, timeout)
+    if log is None:
+        return [] if failed == () else failed
     found = []
     for record in log.split("\x1e"):
         parts = record.strip("\n").split("\x1f")
-        if len(parts) != 4:
+        if len(parts) != 5:
             continue
-        sha, day, subject, body = parts
+        sha, day, when, subject, body = parts
         refs = re.search(r"^Refs:\s*(.+)$", body, re.MULTILINE)
         found.append(
             {
                 "sha": sha,
                 "day": day,
+                "time": when,
                 "subject": subject,
                 "refs": {item.strip() for item in refs.group(1).split(",")} if refs else set(),
                 "models": re.findall(r"^Assisted-by:\s*(.+?)\s*$", body, re.MULTILINE),

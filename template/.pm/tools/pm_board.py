@@ -1,7 +1,8 @@
 """Status board in English for the Backlog.md task files. Standard library only.
 
 Usage: python .pm/tools/pm_board.py [--tasks DIR] [--today YYYY-MM-DD]
-                                      [--next | --tree | --resume [--brief] | --did [DAY] | --commits TASK]
+                                      [--next | --tree | --resume [--brief] | --did [DAY] | --commits TASK
+                                       | --state]
 """
 
 import argparse
@@ -400,7 +401,13 @@ def main():
         help="print the Did part of a multi-goal worklog for DAY, default today",
     )
     parser.add_argument("--commits", metavar="TASK", help="print one task's commits and models")
+    parser.add_argument("--state", action="store_true", help="print the project's live state as JSON")
     args = parser.parse_args()
+
+    if args.state:
+        import pm_state  # a sibling script, like pm_resume
+
+        return pm_state.main()
 
     if args.resume or args.brief or args.did or args.commits:
         import pm_resume  # a sibling script: the tools folder is on sys.path when run directly
