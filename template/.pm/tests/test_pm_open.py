@@ -565,6 +565,30 @@ class LauncherTest(unittest.TestCase):
         self.assertIn(f"The map name {copied} was made for another folder", out)
         self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"], "the other folder's map is not taken for ours")
 
+    def test_a_map_on_the_entrys_port_is_found_when_the_record_names_another(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        # `stop map` ended our map on 5174 and kept that port; the Claude preview's map still runs on 5173.
+        self.write_store({"projects": {self.key(): {"name": "shop", "map": {"port": 5174, "hmr_port": 24679}}}})
+        self.busy(5173)
+        self.maps["http://[::1]:5173"] = ["shop-map"]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs, [], "no new map on the recorded port")
+        self.assertEqual(self.opened, ["http://[::1]:5173"])
+        self.assertEqual(self.record()["map"], {"port": 5173}, "the project now points at the running map")
+
+    def test_a_foreign_map_on_the_entrys_port_leaves_the_recorded_port_in_use(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        self.write_store({"projects": {self.key(): {"name": "shop", "map": {"port": 5174, "hmr_port": 24679}}}})
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = ["other-map"]
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"], "the recorded port, as before")
+
     def test_a_made_name_is_checked_by_its_code_whatever_the_folders_are_called(self):
         for name in ("other", "project", "x"):  # a copy into shop-copy, a renamed folder, an empty slug's fallback
             with self.subTest(made_for=name):

@@ -825,9 +825,14 @@ def open_server(name, download=False, root=None):
         port, hmr = choose_ports(data, root, name, command, wanted)
         if not port:
             return 1
-        address = ADDRESS.format(port=port)
         recorded = server_of(data, root, name)
         state, served, address = ownership(root, name, recorded, port)
+        if state != OURS and name == "map" and wanted != port:
+            # The Claude preview and a terminal start the map on the entry's own port, while this project may have
+            # recorded another one: a map serving this project's name there is opened instead of a second one.
+            found = ownership(root, name, {}, wanted)
+            if found[0] == OURS:
+                port, (state, served, address) = wanted, found
         if state == OURS:
             print(f"The {name} is already running at {address}; I opened it in your browser.")
             webbrowser.open(address)
