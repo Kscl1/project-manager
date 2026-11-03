@@ -3,7 +3,7 @@ name: pm-statechart
 description: "Check a TLA+ model of a system that moves between states, such as a product flow, a protocol, or a service, and draw it as a Mermaid statechart. The report gives the shortest path to each state that breaks a rule. Use for /pm-statechart, or to show a bug as a path through states."
 disable-model-invocation: true
 ---
-<!-- Source: https://github.com/cursor/plugins/tree/519d36aa98955bf680db01bcde5fdfba686dc901/pstack/skills/statechart (P-Stack 0.15.36, skill `statechart`, MIT, see LICENSE in this folder). Changed here: the name has the pm- prefix; the command runs through `sh`; a missing mise is named; the scripts/test folder is left out; the Windows fixes of the open upstream pull request https://github.com/cursor/plugins/pull/1147 (head 002d3c4, without its test) are applied: CRLF output, taskkill and janitor.ts instead of POSIX process groups, TEMP and TMP, hidden console windows. Drop them once upstream has its own. -->
+<!-- Source: https://github.com/cursor/plugins/tree/519d36aa98955bf680db01bcde5fdfba686dc901/pstack/skills/statechart (P-Stack 0.15.36, skill `statechart`, MIT, see LICENSE in this folder). Changed here: the name has the pm- prefix; the command runs through `sh`, its path quoted; a missing mise is named; the scripts/test folder is left out; the Windows fixes of the open upstream pull request https://github.com/cursor/plugins/pull/1147 (head 002d3c4, without its test) are applied: CRLF output, taskkill and janitor.ts instead of POSIX process groups, TEMP and TMP, hidden console windows. Drop them once upstream has its own. -->
 
 # Statechart
 
@@ -14,7 +14,7 @@ The chart shows how a system moves between states, in the words of the person wh
 Work in a scratch folder outside the repo. Write a TLA+ spec and its config. Then run:
 
 ```sh
-sh <skill dir>/scripts/statechart SPEC.tla [--config FILE] [--view FILE] [--out DIR]
+sh "<skill dir>/scripts/statechart" SPEC.tla [--config FILE] [--view FILE] [--out DIR]
 ```
 
 `scripts/statechart.ts` is TypeScript, so run it with a runtime that can execute TypeScript.
