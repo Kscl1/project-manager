@@ -74,7 +74,7 @@ Ekranın kendi etiketleri (Check, Choose, Install, Done) ve sütun adları İngi
 | Ekran | Ne olur? | Tuşlar |
 |---|---|---|
 | Check | Her programı ve proje dosyasını gösterir: kurulu, en düşük ve test edilmiş sürüm. Burada hiçbir şey değişmez. Tekrar çalıştırdığında eksik kalmamışsa `Enter` doğrudan Done ekranına geçer. | `Enter` devam eder, `r` tekrar kontrol eder, `c` yolu kopyalar, `l` tekrar çalıştırmada katmanları değiştirir |
-| Choose | Core (çekirdek katman) her zaman açıktır; şemalar istiyorsan Map'i, izleyebileceğin işçi ajanlar (`worker`, tek bir alt işi yapan ajan) istiyorsan Swarm'ı, yalnızca EVREN hesabın varsa EVREN'i işaretle. Bu bilgisayarda gereken adımları listeler. | `Space` işaretler, `Enter` devam eder, `Esc` geri döner |
+| Choose | Core (çekirdek katman) her zaman açıktır; şemalar istiyorsan Map'i, izleyebileceğin işçi ajanlar (`worker`, tek bir alt işi yapan ajan) istiyorsan Swarm'ı, yalnızca EVREN hesabın varsa EVREN'i, akışların kontrol edilip çizilmesini istiyorsan Statechart'ı işaretle. Bu bilgisayarda gereken adımları listeler. | `Space` işaretler, `Enter` devam eder, `Esc` geri döner |
 | Install | Her seferinde tek bir adım ilerler. Önce çalıştıracağı komutu gösterir; proje adımında kurucunun planını da gösterir. | `y` çalıştırır, `s` atlar, `c` kopyalar, `r` tekrar kontrol eder |
 | Done | Nelerin hazır olduğunu, geriye ne kaldığını ve projeni nasıl açacağını gösterir. | `o` Claude Desktop'ı açar (Windows), `c` komutları kopyalar |
 
@@ -93,7 +93,7 @@ Her projenin ihtiyaç duyduğu temel katman. Elle kuruyorsan tabloyu yukarıdan 
 | [Node.js](https://nodejs.org/en/download) | Aşağıdaki JavaScript araçlarını çalıştırır. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
 | [Backlog.md](https://github.com/MrLesk/Backlog.md) | Görevlerini projede Markdown dosyaları olarak tutar ve bir kanban panosunda (işleri durumlarına göre sütunlarda gösteren pano) düzenler. Panonun sütunları Ready (başlanabilir), Active (üzerinde çalışılıyor) ve Done (bitti); bu adlar İngilizce kalır, çünkü araçlar onları okur. `npm i -g backlog.md@1.55.3`. npm `EACCES` yetki hatası verirse [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally) adımlarını izle; komutun başına `sudo` ekleme. |
 | [Claude Code](https://code.claude.com/docs/en/setup) | Yardımcın. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. İkisi de `claude` komutunu kullanıcı klasöründeki `.local\bin` (`~/.local/bin`) içine koyar. Windows'ta bu klasör `PATH`'e (sistemin komut aradığı klasör listesine) otomatik eklenmez. TUI bu klasörü kullanıcı `PATH` ayarına senin için ekler (elle kuruyorsan `%USERPROFILE%\.local\bin` yolunu ekle, ardından yeni bir terminal aç). `claude` komutunu ilk çalıştırdığında hesabına giriş yap. |
-| `.pm` paketi | Kurallar, karar kayıtları, kontroller ve `pm-` becerileri (`skill`, yardımcıya belirli bir işi nasıl yapacağını öğreten hazır komut paketleri: `pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
+| `.pm` paketi | Kurallar, karar kayıtları, kontroller ve `pm-` becerileri (`skill`, yardımcıya belirli bir işi nasıl yapacağını öğreten hazır komut paketleri: `pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`, `pm-statechart`). |
 | Oturum kancaları (`session hooks`) | Oturum başladığında ve yardımcının sohbet belleği özetlendiğinde (`compacted`, uzun sohbet geçmişinin yer açmak için kısaltılması) işin nerede kaldığını yardımcıya gösterir. |
 | [Context7](https://github.com/upstash/context7) | Yardımcına kütüphanelerin güncel belgelerini sağlar. Hesap açman gerekmez; ücretsiz anahtar yalnızca istek sınırını yükseltir. |
 
@@ -112,9 +112,9 @@ python template/.pm/tools/pm_init.py ../<proje-klasörün>
 
 ## İsteğe bağlı katmanlar
 
-Map mimari şemaları ekler, yardımcın da bunları güncel tutar; Swarm işçi ajanları izleyebileceğin bölmelerde çalıştırır; EVREN ise kendi EVREN modellerini yerel bir köprü üzerinden bağlar. İlk görev için hiçbiri gerekmez, birini sonradan da ekleyebilirsin.
+Map mimari şemaları ekler, yardımcın da bunları güncel tutar; Swarm işçi ajanları izleyebileceğin bölmelerde çalıştırır; EVREN kendi EVREN modellerini yerel bir köprü üzerinden bağlar; Statechart ise durumları olan bir akışı kontrol edip çizer. İlk görev için hiçbiri gerekmez, birini sonradan da ekleyebilirsin.
 
-[Map, Swarm ve EVREN](optional-layers.md): her birinin neyi eklediği, neye ihtiyaç duyduğu ve nasıl eklendiği.
+[Map, Swarm, EVREN ve Statechart](optional-layers.md): her birinin neyi eklediği, neye ihtiyaç duyduğu ve nasıl eklendiği.
 
 ## Kurulumdan sonra: /pm-setup
 

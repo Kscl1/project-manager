@@ -64,7 +64,7 @@ Sürüm değiştirdikten sonra kurulum ekranını (TUI, metin tabanlı arayüz) 
 python tools/setup/bom.py --project ../my-project --layers core,map,swarm
 ```
 
-`evren` katmanını yalnızca bu isteğe bağlı katmanı kullanıyorsan ekle. Komutun `1` çıkış koduyla bitmesi, geriye kalan adımlar veya uyarılar olduğu anlamına gelebilir; tabloyu oku. TUI, kurulu her aracı yeni sabit sürüme zorla geçirmez: bir aracı bilerek yükseltirken sürümün ilgili `install.*` / `upgrade.*` komutunu inceleyip kendin çalıştır, ardından tekrar kontrol et. TUI gereksinimleri değiştiyse bunları TUI'nin ayrı sanal ortamına (virtual environment) yeniden kur.
+`evren` ya da `statechart` katmanını yalnızca o isteğe bağlı katmanı kullanıyorsan ekle. Komutun `1` çıkış koduyla bitmesi, geriye kalan adımlar veya uyarılar olduğu anlamına gelebilir; tabloyu oku. TUI, kurulu her aracı yeni sabit sürüme zorla geçirmez: bir aracı bilerek yükseltirken sürümün ilgili `install.*` / `upgrade.*` komutunu inceleyip kendin çalıştır, ardından tekrar kontrol et. TUI gereksinimleri değiştiyse bunları TUI'nin ayrı sanal ortamına (virtual environment) yeniden kur.
 
 | Araç grubu | Yükseltme yolu | Geri alma (rollback) hazırlığı |
 |---|---|---|

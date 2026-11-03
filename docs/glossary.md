@@ -57,4 +57,4 @@ New to AI coding assistants? These are the words the other pages use, in the ord
 
 **Skill.** A saved instruction that teaches your agent one job, which you call by name, for example `/pm-setup`. project-manager ships skills whose names start with `pm-`.
 
-**Layer.** One part of the package: Core (always installed), Map (diagrams, on by default), Swarm (visible helper agents) and EVREN (your own models). You add a layer only when the work needs it.
+**Layer.** One part of the package: Core (always installed), Map (diagrams, on by default), Swarm (visible helper agents), EVREN (your own models) and Statechart (flows checked and drawn). You add a layer only when the work needs it.

@@ -57,4 +57,4 @@ Yapay zekâ destekli kodlama araçlarıyla yeni mi tanışıyorsun? Diğer sayfa
 
 **Beceri (skill).** Ajanına tek bir işi öğreten ve `/pm-setup` gibi adıyla çağırdığın hazır talimat. project-manager ile gelen becerilerin adları `pm-` ile başlar.
 
-**Katman (layer).** Paketin bir parçası: Core (her zaman kurulur), Map (şemalar, varsayılan olarak açık), Swarm (ekranda izleyebildiğin yardımcı ajanlar) ve EVREN (kendi modellerin). Bir katmanı yalnızca iş gerektirdiğinde eklersin.
+**Katman (layer).** Paketin bir parçası: Core (her zaman kurulur), Map (şemalar, varsayılan olarak açık), Swarm (ekranda izleyebildiğin yardımcı ajanlar), EVREN (kendi modellerin) ve Statechart (kontrol edilip çizilen akışlar). Bir katmanı yalnızca iş gerektirdiğinde eklersin.

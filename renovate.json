@@ -13,7 +13,7 @@
       "groupName": "tool and skill updates"
     },
     {
-      "description": "A release waits three days, so npm can no longer unpublish it and scanners have had time to check it; Herdr's manifest has no release date, so it is not held",
+      "description": "A release waits three days, so npm can no longer unpublish it and scanners have had time to check it; Herdr's and P-Stack's manifests have no release date, so they are not held",
       "matchDatasources": ["npm", "github-releases"],
       "minimumReleaseAge": "3 days"
     }
@@ -54,6 +54,17 @@
       ],
       "datasourceTemplate": "github-releases",
       "versioningTemplate": "semver-coerced"
+    },
+    {
+      "customType": "regex",
+      "description": "P-Stack plugin version, the source of the vendored pm-statechart skill; it has no releases",
+      "managerFilePatterns": ["/^tools/setup/bom\\.toml$/"],
+      "matchStrings": [
+        "# renovate-pstack:[^\\r\\n]*\\r?\\nupstream_version = \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "depNameTemplate": "pstack",
+      "datasourceTemplate": "custom.pstack",
+      "versioningTemplate": "semver"
     }
   ],
   "customDatasources": {
@@ -61,6 +72,13 @@
       "defaultRegistryUrlTemplate": "https://herdr.dev/latest.json",
       "format": "json",
       "transformTemplates": ["{\"releases\":[{\"version\": version}],\"homepage\":\"https://herdr.dev\"}"]
+    },
+    "pstack": {
+      "defaultRegistryUrlTemplate": "https://raw.githubusercontent.com/cursor/plugins/main/pstack/.cursor-plugin/plugin.json",
+      "format": "json",
+      "transformTemplates": [
+        "{\"releases\":[{\"version\": version}],\"sourceUrl\":\"https://github.com/cursor/plugins\"}"
+      ]
     }
   }
 }

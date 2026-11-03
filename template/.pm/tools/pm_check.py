@@ -117,11 +117,15 @@ class InvalidDocumentEncoding(Exception):
 
 
 BAD_ENCODINGS = set()
+# --staged: each staged doc's bytes as the commit will hold them, so an unstaged edit cannot block a commit.
+STAGED = {}
 
 
 def read_text(path):
-    """Read UTF-8 or BOM-marked UTF-16 strictly; never check text with replacement characters."""
-    data = path.read_bytes()
+    """Read UTF-8 or BOM-marked UTF-16 strictly; never check text with replacement characters.
+
+    Under --staged a doc in git's index is read as staged; a doc that is not in it is read from disk."""
+    data = STAGED[path] if path in STAGED else path.read_bytes()
     if data.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
         raise InvalidDocumentEncoding(path)
     encoding = "utf-16" if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) else "utf-8-sig"
@@ -996,6 +1000,39 @@ def markdown_files():
             yield path
 
 
+def load_staged():
+    """The staged copy of every .md file in git's index, by path: one git call lists them, one reads them all."""
+    listed = git("ls-files", "--stage", "-z", "--", "*.md", quiet=True)
+    entries = []
+    for record in (listed or "").split("\0"):
+        info, _, name = record.partition("\t")
+        fields = info.split()
+        if len(fields) == 3 and fields[0] in ("100644", "100755") and fields[2] == "0":
+            entries.append((fields[1], ROOT / name))
+    if not entries:
+        return {}
+    try:
+        out = subprocess.run(
+            ["git", "cat-file", "--batch"],
+            cwd=ROOT,
+            input="".join(f"{sha}\n" for sha, _ in entries).encode(),
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return {}  # the docs are then read from disk, as before
+    staged, at = {}, 0
+    try:
+        for _, path in entries:  # each answer: "<sha> blob <size>", a newline, the bytes, a newline
+            end = out.index(b"\n", at)
+            size = int(out[at:end].split()[2])
+            staged[path] = out[end + 1 : end + 1 + size]
+            at = end + 1 + size + 1
+    except (ValueError, IndexError):
+        return {}
+    return staged
+
+
 def staged_markdown_files():
     """Docs in the commit, or None if git could not list them. Decision changes pull in every doc."""
     failure = []
@@ -1133,6 +1170,8 @@ def main():
     # A normal run names the folder it checked: the wrong folder is the trap a beginner cannot diagnose.
     # --staged is the commit hook and stays quiet when there is nothing to report, so commits stay clean.
     files = checked(staged_markdown_files, None) if args.staged else None
+    if files:
+        STAGED.update(load_staged())
     if args.staged and not files:
         report_bad_encodings()
         return 1 if files is None else 0

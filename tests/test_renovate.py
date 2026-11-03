@@ -56,6 +56,14 @@ class RenovateTests(unittest.TestCase):
         self.assertIn('tested = "0.9.5"', self.bom)
         self.assertIn("https://herdr.dev/latest.json", str(self.config["customDatasources"]))
 
+    def test_pstack_candidate_from_its_plugin_manifest(self):
+        # P-Stack has no releases or tags; its plugin.json version is the only version it publishes.
+        matches = [match for pattern in self.patterns(3) for match in pattern.finditer(self.bom)]
+        self.assertEqual([match["currentValue"] for match in matches], ["0.15.36"])
+        self.assertEqual(self.config["customManagers"][3]["datasourceTemplate"], "custom.pstack")
+        self.assertIn("pstack/.cursor-plugin/plugin.json", str(self.config["customDatasources"]))
+        self.assertIn('ref = "cursor/plugins@519d36a (pstack 0.15.36, statechart)"', self.bom)
+
     def test_skill_candidates_keep_real_provenance(self):
         matches = [match for pattern in self.patterns(2) for match in pattern.finditer(self.bom)]
         self.assertEqual(len(matches), 2)
@@ -81,7 +89,7 @@ class RenovateTests(unittest.TestCase):
 
     def test_replacing_every_capture_cannot_change_min_tested_or_ref(self):
         changed = self.bom
-        for index in range(3):
+        for index in range(len(self.config["customManagers"])):
             for pattern in self.patterns(index):
 
                 def bump(match):

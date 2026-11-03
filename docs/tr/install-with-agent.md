@@ -37,7 +37,7 @@ Bunları tek tek, her seçeneği tek cümleyle açıklayarak sor:
 3. **Map (harita)** (varsayılan: evet): proje parçalarının birbirine nasıl bağlandığını gösteren, senin okuyup güncel tutabildiğin mimari şema. Node.js gerektirir. Kullanıcıya şimdi atlayıp sonradan da ekleyebileceğini söyle.
 4. **Swarm (sürü)** (varsayılan: hayır): kullanıcının izleyebildiği terminal bölmelerinde çalışan işçi ajanlar. Pi ve Herdr gerektirir; sonradan da eklenebileceğini söyle.
 
-Katmanlar `core` ve seçildiyse `map`, `swarm`, `evren` olur; `evren`'i (bazı kullanıcıların zaten abonesi olduğu bir model servisi) yalnızca halihazırda EVREN hesabı olan kullanıcıya öner. Bunları aşağıda `<layers>` olarak kullan, örneğin `core,map`.
+Katmanlar `core` ve seçildiyse `map`, `swarm`, `evren`, `statechart` olur; `evren`'i (bazı kullanıcıların zaten abonesi olduğu bir model servisi) yalnızca halihazırda EVREN hesabı olan kullanıcıya öner. Bunları aşağıda `<layers>` olarak kullan, örneğin `core,map`.
 
 ### 2. Python'u ve Git'i kontrol et, project-manager'ı indir
 

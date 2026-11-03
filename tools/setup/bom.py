@@ -4,7 +4,7 @@ Standard library only, so the tests and the plain-text output run without Textua
 anything: it runs each command item's version check with a timeout and works out which steps are left (plan());
 the TUI runs a step only after the user presses Enter on it.
 
-usage: python tools/setup/bom.py [--layers core,map,swarm,evren] [--project FOLDER] [--json]
+usage: python tools/setup/bom.py [--layers core,map,swarm,evren,statechart] [--project FOLDER] [--json]
        the check table and the To do list for this machine (and the project's files with --project);
        exit 0 when nothing is left, 1 when steps or notes are left; --record with --project also writes
        .pm/local/setup.json, as the TUI's Done screen does (the agent install path, docs/install-with-agent.md)
@@ -29,8 +29,9 @@ import tomllib
 
 BOM = Path(__file__).with_name("bom.toml")
 KINDS = ("command", "project-file", "manual")
-LAYERS = ("core", "map", "swarm", "evren")
-DEFAULT_LAYERS = ("core", "map")  # swarm and evren are opted into: they need accounts of the user's own
+LAYERS = ("core", "map", "swarm", "evren", "statechart")
+# swarm and evren are opted into: they need accounts of the user's own; statechart brings Java, which few need
+DEFAULT_LAYERS = ("core", "map")
 # What a layer still needs after every step is done, said on Done and in the plain output: nothing checks it.
 AFTER = {
     "evren": (
@@ -43,6 +44,10 @@ AFTER = {
         "and sign in to a model in Pi (run pi, then /login; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT). "
         "Pi may then pick a model a ChatGPT plan cannot use: type /model, choose openai/gpt-6.1-sol and press Ctrl+S "
         "to keep it for new sessions."
+    ),
+    "statechart": (
+        "Type /pm-statechart in a session when you want a flow checked and drawn. Its first run downloads Java and TLC "
+        "through mise and needs the network."
     ),
 }
 SYSTEMS = ("windows", "linux", "macos", "all")  # the keys of install.<os> and upgrade.<os>

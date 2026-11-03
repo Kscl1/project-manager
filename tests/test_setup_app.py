@@ -171,7 +171,7 @@ class SwarmLayerTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(setup.query_one(app.DataTable).row_count, 1)
             summary = str(setup.query_one("#summary").content)
             self.assertNotIn("Herdr", summary)
-            self.assertIn("Not chosen: swarm, evren. Tick one", summary)
+            self.assertIn("Not chosen: swarm, evren, statechart. Tick one", summary)
             await pilot.press("enter")
             await pilot.pause()
             setup.screen.query_one(app.SelectionList).select("swarm")

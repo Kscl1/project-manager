@@ -9,6 +9,8 @@ Two kinds, same brief:
 
 Fill `<kind>` and `<date>`, then launch a worker as in `roles/lead.md` (visible, watched) with this brief and the line "Kind: <kind>. Date: <date>. Do the task in the attached brief." Ask it to write the report in small edits.
 
+For a weekly audit, once you have verified every finding, write `.pm/local/audits/weekly-<date>/lead-verification.md` (each finding's verdict and outcome): that file, not the report, stops the resume's weekly warning.
+
 ```text
 GOAL        Find every place where a living doc says something that the repo's real state contradicts, with evidence for each.
 
