@@ -88,7 +88,7 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
-                       "task": "REQ-12",       (optional: the task this job works for; pm_state groups workers by it)
+                       "task": "REQ-1",        (optional: the task this job works for; pm_state groups workers by it)
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
