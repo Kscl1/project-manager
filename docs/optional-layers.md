@@ -3,15 +3,16 @@ title: Optional layers
 description: What each layer adds, what it needs and when to add it.
 ---
 
-The core layer is enough to plan a task, do it and check it. These three layers add more. Each one is optional, and you can add one later without reinstalling the rest. New words are in the [glossary](glossary.md).
+The core layer is enough to plan a task, do it and check it. These four layers add more. Each one is optional, and you can add one later without reinstalling the rest. New words are in the [glossary](glossary.md).
 
 | Layer | What it adds | What it needs |
 |---|---|---|
 | [Map](#map-layer-optional) | Diagrams of your architecture that your agent can read and keep current | Node.js |
 | [Swarm](#swarm-layer-optional) | Helper agents in terminal panes you can watch | Pi and Herdr |
 | [EVREN](#evren-layer-optional) | Your own EVREN models, through a local bridge | An EVREN account |
+| [Statechart](#statechart-layer-optional) | mise, which the `pm-statechart` skill uses to get Java and TLC: a flow with states checked and drawn, bug paths marked | Node.js (core) |
 
-Tick a layer in the setup screen, or add `--map` / `--swarm` to the installer command. EVREN has no installer flag: its step comes from the setup screen's check list.
+Tick a layer in the setup screen, or add `--map` / `--swarm` to the installer command. EVREN and Statechart have no installer flag: their steps come from the setup screen's check list.
 
 ## Map layer (optional)
 
@@ -38,3 +39,11 @@ A worker in Claude Code starts without Claude Code's bundled skills (such as `/c
 [evren-bridge](https://github.com/Kscl1/evren-bridge) is a local bridge to the models of [EVREN](https://evren.ssyz.org.tr), for agents that speak OpenAI Chat Completions, such as Pi; it is not an official EVREN project. EVREN is a model service some people already pay for. Tick EVREN in the setup screen (it starts unticked) only if you have your own EVREN account. Setup follows the bridge's own README: it clones the repo to `~/evren-bridge` and installs its one dependency, `rich` (on Omarchy from pacman, because Arch's Python refuses `pip install`); start the bridge with the same `python`. The check reads the release tag of that clone, and an older clone is updated with `git pull`.
 
 Setup never asks for your EVREN API key, and never reads it. Put it in place yourself as the Quick start of the [evren-bridge README](https://github.com/Kscl1/evren-bridge#quick-start) says (get one from [EVREN API keys](https://evren.ssyz.org.tr/api-keys)), run `python evren_bridge.py` in `~/evren-bridge` and leave it running, then add an OpenAI-compatible provider with base URL `http://127.0.0.1:8787/v1` in your agent; the bridge's README shows Pi's `models.json`. Nothing else depends on it: without the EVREN layer the other screens and the installer work the same, and deleting `~/evren-bridge` only makes its row missing while EVREN is ticked.
+
+## Statechart layer (optional)
+
+The `pm-statechart` skill checks a flow that moves between states, such as a sign-up, a payment or a server that starts and stops, and draws it as a Mermaid statechart with the shortest path to each state that breaks a rule marked. Your agent writes a small TLA+ model of the flow, the TLC model checker tries every path through it, and you read the chart. The skill is a copy of the [statechart skill](https://github.com/cursor/plugins/tree/main/pstack/skills/statechart) of [P-Stack](https://github.com/cursor/plugins/tree/main/pstack) (MIT, by Lauren Tan) with fixes that let it run on Windows; it comes with the core package in every project.
+
+TLC is a Java program, so the skill needs Java and TLC. It gets both with mise, a tool installer, on its first run, which needs the network. The Statechart layer installs mise; tick it in the setup screen (it starts unticked). By hand: `winget install --id jdx.mise --exact --source winget` on Windows, `sudo pacman -S --needed mise` on Omarchy, or [mise's own guide](https://mise.jdx.dev/getting-started.html).
+
+Type `/pm-statechart` when you want a flow checked. The skill runs with Node.js, which the core layer installs; on Windows it runs through the Git Bash that Claude Code uses. Some antivirus programs stop mise while it unpacks Java on the first run; let that one run finish, or install Java and TLC yourself and set `JAVA` and `TLA2TOOLS` to them. A model that passes is not proof that the code does the same: the skill asks the agent to replay each bug path against the real code.

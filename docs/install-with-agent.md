@@ -37,7 +37,7 @@ Ask these, one at a time, with one sentence on each choice:
 3. **Map** (default yes): a picture of how the project's parts connect, which the agent can read and keep current. It needs Node.js. Tell the user it can be skipped now and added later.
 4. **Swarm** (default no): helper agents that run in terminal panes the user can watch. It needs Pi and Herdr; say it can be added later.
 
-The layers are `core`, plus `map`, `swarm` and `evren` when chosen; offer `evren` (a model service some people already pay for) only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
+The layers are `core`, plus `map`, `swarm`, `evren` and `statechart` when chosen; offer `evren` (a model service some people already pay for) only to a user who already has an EVREN account. Use them below as `<layers>`, for example `core,map`.
 
 ### 2. Check Python and Git, and get project-manager
 

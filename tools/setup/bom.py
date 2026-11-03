@@ -29,8 +29,9 @@ import tomllib
 
 BOM = Path(__file__).with_name("bom.toml")
 KINDS = ("command", "project-file", "manual")
-LAYERS = ("core", "map", "swarm", "evren")
-DEFAULT_LAYERS = ("core", "map")  # swarm and evren are opted into: they need accounts of the user's own
+LAYERS = ("core", "map", "swarm", "evren", "statechart")
+# swarm and evren are opted into: they need accounts of the user's own; statechart brings Java, which few need
+DEFAULT_LAYERS = ("core", "map")
 # What a layer still needs after every step is done, said on Done and in the plain output: nothing checks it.
 AFTER = {
     "evren": (
@@ -43,6 +44,10 @@ AFTER = {
         "and sign in to a model in Pi (run pi, then /login; with a ChatGPT plan, choose OpenAI, then Sign in with ChatGPT). "
         "Pi may then pick a model a ChatGPT plan cannot use: type /model, choose openai/gpt-6.1-sol and press Ctrl+S "
         "to keep it for new sessions."
+    ),
+    "statechart": (
+        "Type /pm-statechart in a session when you want a flow checked and drawn. Its first run downloads Java and TLC "
+        "through mise and needs the network."
     ),
 }
 SYSTEMS = ("windows", "linux", "macos", "all")  # the keys of install.<os> and upgrade.<os>

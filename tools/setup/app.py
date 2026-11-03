@@ -52,6 +52,7 @@ LAYER_TEXT = {
     "map": "Map: architecture diagrams of your project (optional)",
     "swarm": "Swarm: worker agents in visible Herdr panes, run by pm_run (optional)",
     "evren": "EVREN: evren-bridge to EVREN's models, with your own key (optional)",
+    "statechart": "Statechart: mise, so /pm-statechart can check a flow with states and draw it (optional)",
 }
 # Install screen: what each step state shows, and its level for the colour (bom.outcome names the states).
 STATES = {

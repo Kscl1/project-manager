@@ -72,7 +72,7 @@ tools/setup/.venv/bin/python tools/setup/app.py ~/projects/my-project
 | Screen | What happens | Keys |
 |---|---|---|
 | Check | Shows each program and project file: installed, minimum and tested version. Nothing changes here. On a rerun with nothing left, `Enter` goes straight to Done. | `Enter` continues, `r` checks again, `c` copies a path, `l` changes the layers on a rerun |
-| Choose | Core is always on; tick Map if you want diagrams, Swarm if you want visible worker agents, EVREN only if you have an EVREN account. Lists the steps this machine needs. | `Space` ticks, `Enter` continues, `Esc` goes back |
+| Choose | Core is always on; tick Map if you want diagrams, Swarm if you want visible worker agents, EVREN only if you have an EVREN account, Statechart if you want flows checked and drawn. Lists the steps this machine needs. | `Space` ticks, `Enter` continues, `Esc` goes back |
 | Install | One step at a time. It shows the command first; the project step also shows the installer's plan. | `y` runs, `s` skips, `c` copies, `r` checks again |
 | Done | What is ready, what is left, and how to open your project. | `o` opens Claude Desktop (Windows), `c` copies the commands |
 
@@ -91,7 +91,7 @@ What every project needs. By hand, work down the table.
 | [Node.js](https://nodejs.org/en/download) | Runs the JavaScript tools below. Windows: `winget install --id OpenJS.NodeJS.LTS --exact --source winget`. Omarchy: `omarchy install dev-env node`. |
 | [Backlog.md](https://github.com/MrLesk/Backlog.md) | Your tasks, as Markdown files in the project. `npm i -g backlog.md@1.55.3`. If npm says `EACCES`, follow [npm's guide](https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally); do not add `sudo`. |
 | [Claude Code](https://code.claude.com/docs/en/setup) | Your coding agent. Windows PowerShell: `irm https://claude.ai/install.ps1 \| iex`. Linux: `curl -fsSL https://claude.ai/install.sh \| bash`. Both put `claude` in `.local\bin` (`~/.local/bin`) in your home folder; on Windows that folder is not added to PATH (the list of folders where the system looks for commands), so the TUI's step adds it to your user PATH for you (by hand: add `%USERPROFILE%\.local\bin`, then open a new terminal). Sign in when you first run `claude`. |
-| The `.pm` package | Rules, decisions, checks and the `pm-` skills (`pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`). |
+| The `.pm` package | Rules, decisions, checks and the `pm-` skills (`pm-setup`, `pm-grilling`, `pm-grill-me`, `pm-scratch`, `pm-feedback`, `pm-statechart`). |
 | Session hooks | Show your agent where work stopped when a session starts and after its memory is compacted. |
 | [Context7](https://github.com/upstash/context7) | Gives your agent current library docs. No account needed; a free key only raises its rate limit. |
 
@@ -110,9 +110,9 @@ Replace `<your-project-folder>` with the name of your project's folder.
 
 ## Optional layers
 
-Map adds architecture diagrams your agent can keep current, Swarm runs helper agents in panes you can watch, and EVREN connects your own EVREN models through a local bridge. None of them is needed for a first task, and you can add one later.
+Map adds architecture diagrams your agent can keep current, Swarm runs helper agents in panes you can watch, EVREN connects your own EVREN models through a local bridge, and Statechart checks a flow with states and draws it. None of them is needed for a first task, and you can add one later.
 
-[Map, Swarm and EVREN](optional-layers.md): what each one adds, what it needs and how to add it.
+[Map, Swarm, EVREN and Statechart](optional-layers.md): what each one adds, what it needs and how to add it.
 
 ## After setup: /pm-setup
 

@@ -639,6 +639,28 @@ PROJECT_ITEMS = [
 ]  # fmt: skip
 
 
+class StatechartLayer(unittest.TestCase):
+    """The pm-statechart skill ships in core; the unticked Statechart layer adds mise, which it runs Java and TLC with."""
+
+    def setUp(self):
+        self.items = bom.load()
+
+    def test_the_skill_is_core_and_the_layer_is_mise_alone(self):
+        skill = next(item for item in self.items if item["id"] == "pm-statechart")
+        self.assertEqual((skill["kind"], skill["layer"]), ("project-file", "core"))
+        self.assertEqual([item["id"] for item in self.items if item["layer"] == "statechart"], ["mise"])
+        self.assertNotIn("statechart", bom.DEFAULT_LAYERS)
+        self.assertIn("/pm-statechart", bom.AFTER["statechart"])
+
+    def test_ticked_and_absent_is_one_step_and_unticked_is_none(self):
+        layer = [item for item in self.items if item["layer"] == "statechart"]
+        rows = [bom.check_one(item, lambda check, **_: (None, False, None)) for item in layer]
+        steps, notes = bom.plan(layer, rows, layers=("core", "statechart"), system="windows")
+        self.assertEqual([(s["id"], s["needs"]) for s in steps], [("mise", "winget")])
+        self.assertEqual(notes, [])
+        self.assertEqual(bom.plan(layer, rows, layers=bom.DEFAULT_LAYERS, system="windows"), ([], []))
+
+
 class Project(unittest.TestCase):
     """Project files: checked only with a project folder, set up by one installer step."""
 

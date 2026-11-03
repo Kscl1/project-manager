@@ -130,6 +130,10 @@ redraws Check under it. The swarm starts unticked (`DEFAULT_LAYERS`), because it
 sign in to a model in Pi); Done and the plain output say it on a "Then:" line. Herdr comes from its own installer,
 which installs the newest release and checks its SHA-256, so it often shows as not tested yet, like Claude Code.
 
+The Statechart layer starts unticked too: one item, mise, which the `pm-statechart` skill (core, copied from P-Stack)
+uses to download Java and TLC on its first run. P-Stack publishes no releases, so Renovate reads the version in its
+plugin manifest (`renovate-pstack`), the way it reads Herdr's.
+
 The EVREN layer starts unticked too: one item, evren-bridge, from its own repo. Its install line is the repo's README
 (clone to `~/evren-bridge` and its dependency; on Linux from pacman, since Arch's Python refuses pip), and its check
 reads the clone's release tag (`git describe --tags --abbrev=0`), which `tested` follows. An older clone is pulled
