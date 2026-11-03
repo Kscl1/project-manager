@@ -670,13 +670,40 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         )
         self.jobs(self.job("a", "ok"))
         status = self.run_pm("--status")
-        self.assertNotIn("failures:", status.stdout)
+        self.assertNotIn("fixed by pm_run itself", status.stdout)
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("failures: PROMPT=2, WAITING=2, RETRY=1", result.stdout)
-        self.assertEqual(result.stdout.count("failures:"), 1)
+        self.assertIn("fixed by pm_run itself: PROMPT=2, RETRY=1", result.stdout)
+        self.assertIn("needed a person or a look: WAITING=2", result.stdout)
+        self.assertEqual(result.stdout.count("fixed by pm_run itself:"), 1)
         self.assertNotIn("LAUNCH=", result.stdout)
         self.assertFalse(self.fake_state.exists())
+
+    def test_status_tally_keeps_the_two_groups_apart_and_orders_each(self):
+        failures = self.tmp / ".pm" / "local" / "failures.log"
+        failures.parent.mkdir(parents=True)
+        failures.write_text(
+            "2026-11-01 00:00:00 run QUOTA-WAIT a: waited out a reset\n"
+            "2026-11-01 00:00:01 run RESUME a: nudged\n"
+            "2026-11-01 00:00:02 run RESUME a: nudged\n"
+            "2026-11-01 00:00:03 run BLOCKED b: a dependency failed\n"
+            "2026-11-01 00:00:04 run CHECK-FAILED c: the check failed\n"
+            "2026-11-01 00:00:05 run CHECK-FAILED c: the check failed\n"
+            "2026-11-01 00:00:06 run CHECK-FAILED c: the check failed\n",
+            encoding="utf-8",
+        )
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("fixed by pm_run itself: RESUME=2, QUOTA-WAIT=1", result.stdout)
+        self.assertIn("needed a person or a look: CHECK-FAILED=3, BLOCKED=1", result.stdout)
+        self.assertLess(
+            result.stdout.index("fixed by pm_run itself:"),
+            result.stdout.index("needed a person or a look:"),
+            "the line a person must read comes second",
+        )
+        person_line = result.stdout.split("needed a person or a look:", 1)[1].splitlines()[0]
+        self.assertNotIn("RESUME=", person_line, "what pm_run fixed itself is not a person's work")
+        self.assertNotIn("QUOTA-WAIT=", person_line)
 
     def test_status_tally_reports_an_unreadable_log_without_stopping(self):
         run = pm_run.Run(self.run_dir)
@@ -690,7 +717,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_status_tally_with_no_failure_log_says_none(self):
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("failures: none", result.stdout)
+        self.assertIn("fixed by pm_run itself: none", result.stdout)
+        self.assertIn("needed a person or a look: none", result.stdout)
         self.assertFalse((self.tmp / ".pm" / "local" / "failures.log").exists())
 
     def test_a_held_failure_log_never_stops_the_logging_loop(self):
