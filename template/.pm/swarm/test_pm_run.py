@@ -284,6 +284,8 @@ class PmRunFixture:
             "verify": f'"{sys.executable}" -c "import sys; sys.exit(0)"',
         }
         job.update(extra)
+        # A real run's report folder already exists: preflight never starts a worker into a folder that is not there.
+        (self.tmp / job["out"]).parent.mkdir(parents=True, exist_ok=True)
         return job
 
     def run_pm(self, *args, timeout=60):
@@ -429,6 +431,26 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(state["a"]["attempts"]), 1)
         self.assertEqual(out.read_text(encoding="utf-8"), "previous attempt's output")
         self.assertFalse(out.with_name("a.attempt1.md").exists())
+
+    def test_agy_folder_trust_screen_is_handed_over_like_the_other_first_run_screens(self):
+        # Herdr showed the trust question as an idle agy, so pm_run used to send the brief into it; after five retries
+        # the same screen was still there. Only the owner can answer it, once per folder.
+        self.seed_reads(
+            "PS> agy --model ok", "Do you trust the contents of this project?\n  > Yes, I trust this folder"
+        )
+        self.jobs(self.job("a", "ok", harness="agy"), self.job("b", "ok", after=["a"]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertEqual(len(state["a"]["attempts"]), 1, "a retry would show the same screen again")
+        self.assertIn("first-run screen", state["a"]["attempts"][0]["why"])
+        self.assertIn("Do you trust the contents of this project?", state["a"]["attempts"][0]["why"])
+        self.assertEqual(state["b"]["state"], "blocked")
+        herdr = self.herdr_state()
+        self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the trust question")
+        self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
+        self.assertNotIn("RETRY a", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
 
     def test_first_prompt_waits_for_ready_agent_state(self):
         self.env["FAKE_START_STATES"] = json.dumps(["starting", "working", "ready"])
@@ -650,13 +672,40 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         )
         self.jobs(self.job("a", "ok"))
         status = self.run_pm("--status")
-        self.assertNotIn("failures:", status.stdout)
+        self.assertNotIn("tried again (pm_run on its own, or a --retry)", status.stdout)
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("failures: PROMPT=2, WAITING=2, RETRY=1", result.stdout)
-        self.assertEqual(result.stdout.count("failures:"), 1)
+        self.assertIn("tried again (pm_run on its own, or a --retry): PROMPT=2, RETRY=1", result.stdout)
+        self.assertIn("needed a person or a look: WAITING=2", result.stdout)
+        self.assertEqual(result.stdout.count("tried again (pm_run on its own, or a --retry):"), 1)
         self.assertNotIn("LAUNCH=", result.stdout)
         self.assertFalse(self.fake_state.exists())
+
+    def test_status_tally_keeps_the_two_groups_apart_and_orders_each(self):
+        failures = self.tmp / ".pm" / "local" / "failures.log"
+        failures.parent.mkdir(parents=True)
+        failures.write_text(
+            "2026-11-01 00:00:00 run QUOTA-WAIT a: waited out a reset\n"
+            "2026-11-01 00:00:01 run RESUME a: nudged\n"
+            "2026-11-01 00:00:02 run RESUME a: nudged\n"
+            "2026-11-01 00:00:03 run BLOCKED b: a dependency failed\n"
+            "2026-11-01 00:00:04 run CHECK-FAILED c: the check failed\n"
+            "2026-11-01 00:00:05 run CHECK-FAILED c: the check failed\n"
+            "2026-11-01 00:00:06 run CHECK-FAILED c: the check failed\n",
+            encoding="utf-8",
+        )
+        result = self.run_pm("--status", "--tally")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tried again (pm_run on its own, or a --retry): RESUME=2, QUOTA-WAIT=1", result.stdout)
+        self.assertIn("needed a person or a look: CHECK-FAILED=3, BLOCKED=1", result.stdout)
+        self.assertLess(
+            result.stdout.index("tried again (pm_run on its own, or a --retry):"),
+            result.stdout.index("needed a person or a look:"),
+            "the line a person must read comes second",
+        )
+        person_line = result.stdout.split("needed a person or a look:", 1)[1].splitlines()[0]
+        self.assertNotIn("RESUME=", person_line, "what pm_run fixed itself is not a person's work")
+        self.assertNotIn("QUOTA-WAIT=", person_line)
 
     def test_status_tally_reports_an_unreadable_log_without_stopping(self):
         run = pm_run.Run(self.run_dir)
@@ -670,7 +719,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_status_tally_with_no_failure_log_says_none(self):
         result = self.run_pm("--status", "--tally")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("failures: none", result.stdout)
+        self.assertIn("tried again (pm_run on its own, or a --retry): none", result.stdout)
+        self.assertIn("needed a person or a look: none", result.stdout)
         self.assertFalse((self.tmp / ".pm" / "local" / "failures.log").exists())
 
     def test_a_held_failure_log_never_stops_the_logging_loop(self):
@@ -722,6 +772,12 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("brief not found: missing.md", state["a"]["why"])
         self.assertEqual(state["b"]["state"], "blocked")
         self.assertFalse(self.fake_state.exists(), "Herdr must not be called")
+        self.assertIn(
+            "PREFLIGHT a: brief not found: missing.md; fix jobs.json, then --retry a",
+            (self.run_dir / "pm_run.log").read_text(encoding="utf-8"),
+        )
+        failures = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8")
+        self.assertRegex(failures, r"run PREFLIGHT a: brief not found: missing.md")
         self.assertEqual(out.read_text(encoding="utf-8"), "old output")
         self.assertFalse(out.with_name("a.kept.md").exists())
         self.assertIn("brief not found: missing.md", self.run_pm("--status").stdout)
@@ -739,6 +795,100 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn(r"a backslash in jobs.json was read as an escape: write \\ or /", state["why"])
         self.assertNotRegex(state["why"], r"[\x00-\x1f\x7f-\x9f]")
         self.assertFalse(self.fake_state.exists())
+
+    def test_preflight_does_not_read_a_file_path_out_of_verify(self):
+        # Text between quotes is not reliably a file: echo prints it. The path check was dropped for this, and the
+        # glitch that started it (a Windows path in a non-raw string) is caught by the control-character check.
+        self.jobs(self.job("a", "ok", verify='echo "Z:/this-is-a-literal-not-a-file"'))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
+    def test_preflight_finds_a_control_character_in_verify_and_setup(self):
+        # The Windows path of the glitch: \r, \n and \v became control characters, so the shell could not find its
+        # own script. Plain words, and the character is shown as it would be written in JSON.
+        cases = (
+            ("verify", 'python -c "import sys\r; sys.exit(0)"'),
+            ("setup", "set X=1\v"),
+        )
+        for key, line in cases:
+            with self.subTest(key=key):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
+                run.repo = self.tmp
+                (self.tmp / "out").mkdir(exist_ok=True)
+                job[key] = line
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertIn(f"{key} holds a control character", state["a"]["why"])
+                self.assertIn("write \\ or / in jobs.json", state["a"]["why"])
+                self.assertNotRegex(state["a"]["why"], r"[\x00-\x1f\x7f-\x9f]")
+
+    def test_preflight_lets_a_tab_through_in_setup(self):
+        # A tab separates words in a shell line, so it is not a broken Windows path; the job starts.
+        self.jobs(self.job("a", "ok", setup="echo\tready"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
+    def test_preflight_fails_a_command_that_is_not_text(self):
+        # A number is not a command line, so the job ends PREFLIGHT before a worker is paid for.
+        for key in ("verify", "setup"):
+            with self.subTest(key=key):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
+                run.repo = self.tmp
+                job[key] = 17
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertIn(f"{key} must be one command line (text)", state["a"]["why"])
+                self.assertIn(f"PREFLIGHT a: {key} must be one command line (text)", run.log_path.read_text("utf-8"))
+
+    def test_preflight_requires_the_folder_that_will_hold_the_report(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
+        run.repo = self.tmp
+        job["out"] = "reports/a.md"  # a typo in jobs.json: the folder is not there
+        with patch.object(run, "launch") as launch:
+            run.tick([job], state, {})
+            launch.assert_not_called()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertIn(f"output folder not found: {self.tmp / 'reports'}", state["a"]["why"])
+
+    def test_preflight_never_runs_the_verify_command(self):
+        # A verify command may run whole test suites, so preflight only reads its text.
+        marker = self.tmp / "ran.txt"
+        verify = f'"{sys.executable}" -c "import pathlib; pathlib.Path(r\'{marker}\').touch()"'
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", verify=verify), {}
+        run.repo = self.tmp
+        job["out"] = "reports/a.md"
+        with patch.object(run, "launch") as launch:
+            run.tick([job], state, {})
+            launch.assert_not_called()
+        self.assertEqual(state["a"]["state"], "failed")
+        self.assertFalse(marker.exists(), "a pre-flight must never run the check itself")
+
+    def test_preflight_runs_again_before_a_retry_launches_the_job(self):
+        job = self.job("a", "ok", verify="echo\x0b", retry=1)
+        state = {"a": {"state": "failed", "attempts": [{"started": 0}], "why": "old reason"}}
+        run = pm_run.Run(self.run_dir)
+        run.repo = self.tmp
+
+        def started(job, attempt, state):
+            attempt["pane"] = "p1"
+            return True
+
+        with patch.object(run, "launch", side_effect=started) as launch:
+            run.tick([job], state, {})
+            launch.assert_not_called()
+            self.assertEqual(state["a"]["state"], "failed")
+            self.assertIn("verify holds a control character", state["a"]["why"])
+            job.update(retry=2, verify=f'"{sys.executable}" -c "import sys; sys.exit(0)"')
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "started")
+        launch.assert_called_once()
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("PREFLIGHT a:", log)
+        self.assertIn("RETRY a: failed cleared, back to pending for a new attempt", log)
 
     def test_jobs_file_with_a_byte_order_mark_is_read(self):
         (self.run_dir / "jobs.json").write_text(json.dumps([self.job("a", "ok")]), encoding="utf-8-sig")
@@ -1090,6 +1240,33 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("wait until it has ended", prompt)
         self.assertIn("Your output file is out/a.md. Create", prompt, "the output sentence is unchanged")
 
+    def test_a_helper_object_tells_the_worker_its_harness_and_thinking(self):
+        helper = {"model": "big", "harness": "claude", "thinking": "low"}
+        job = self.job("a", "ok", writes=["sub/"], helpers=["cheap-a", helper])
+        prompt = pm_run.launch_prompt(job)
+        self.assertIn("on these models: cheap-a, big (harness claude, thinking low).", prompt)
+        self.assertNotIn("Do not start a helper", prompt)
+
+    def test_a_job_with_helper_objects_passes_preflight_and_starting_it(self):
+        helper = {"model": "big", "harness": "claude", "thinking": "low"}
+        self.jobs(self.job("a", "ok", writes=["sub/"], helpers=["cheap-a", helper]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        prompt = self.herdr_state()["gone"][self.a1]["prompts"][0]
+        self.assertIn("on these models: cheap-a, big (harness claude, thinking low).", prompt)
+
+    def test_preflight_rejects_a_helper_object_that_misses_one_of_its_three(self):
+        for helper in ({"model": "big", "harness": "pi"}, {"model": "big", "thinking": "low"}, 7):
+            with self.subTest(helper=helper):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", helpers=[helper]), {}
+                run.repo = self.tmp
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertEqual(state["a"]["why"], "helper 1 needs model, harness and thinking, or a plain model name")
+
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
         (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
@@ -1342,7 +1519,6 @@ class CheckAndRetryTest(PmRunFixture, unittest.TestCase):
         run = pm_run.Run(self.run_dir)
         run.repo = self.tmp
         out = self.tmp / "out" / "a.md"
-        out.parent.mkdir(parents=True)
         cases = [
             ("a deleted report", None, "pending"),
             ("a report without the done marker", "word " * 60 + "\n", "pending"),
@@ -1630,10 +1806,39 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(self.tick_at(run, state, 1030, **consts)), 1, "Pi wrote its log 30 s ago: no nudge")
         self.assertEqual(state["a"]["state"], "started")
         self.assertIn("HOLD a: turn looks settled but Pi wrote its log 30 s ago", run.log_path.read_text("utf-8"))
+        self.assertIn("; pm_run nudges it in the same session", run.log_path.read_text("utf-8"))
         prompts = self.tick_at(run, state, 1100, **consts)
         self.assertEqual(len(prompts), 2, "quiet for 100 s: Pi has stopped, so the same session is nudged")
         self.assertIn("previous turn ended", prompts[-1])
         self.assertEqual(attempt["nudges"], 1)
+
+    def test_hold_line_says_the_brief_is_resent_and_when(self):
+        run, _, attempt, state = self.settled_worker()
+        attempt.update(worked=False, seq0=0, completion_seq=0)  # the worker never took the brief
+        self.assertEqual(
+            len(self.tick_at(run, state, 1030, QUIET_S=90, MAX_NUDGES=3)), 1, "a held turn is not sent yet"
+        )
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("HOLD a: turn looks settled but Pi wrote its log 30 s ago; ", log)
+        self.assertIn("; if Pi's log stays quiet for 90 s, pm_run resends the brief", log)
+        self.assertNotIn("pm_run nudges it in the same session", log)
+
+    def test_hold_line_names_the_pane_as_the_source_it_watches(self):
+        # No session log, so the pane is the clock: the condition must say so, not name Pi's log.
+        run, log, attempt, state = self.settled_worker()
+        log.unlink()
+        del attempt["session_log"]
+        attempt.update(worked=False, seq0=0, completion_seq=0)  # the worker never took the brief
+        self.assertEqual(len(self.tick_at(run, state, 1100, QUIET_S=90, MAX_NUDGES=3)), 1)
+        log_text = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("its pane last changed 0 s ago", log_text)
+        self.assertIn("; if the pane stays quiet for 90 s, pm_run resends the brief", log_text)
+
+    def test_no_turn_yet_needs_a_quiet_sequence_and_no_working_state(self):
+        self.assertTrue(pm_run.no_turn_yet({}), "an attempt without a sequence ran no turn")
+        self.assertTrue(pm_run.no_turn_yet({"seq0": 1, "completion_seq": 1}))
+        self.assertFalse(pm_run.no_turn_yet({"seq0": 1, "completion_seq": 2}), "the sequence advanced")
+        self.assertFalse(pm_run.no_turn_yet({"worked": True}), "the worker was seen working")
 
     def test_used_up_quota_is_handed_over_without_a_nudge(self):
         claude_pane = 'some earlier output\n  API Error: 429 {"error":{"message":"usage limit reached"}}\n\n'

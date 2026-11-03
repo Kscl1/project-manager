@@ -23,8 +23,10 @@ Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
 quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry. When the log is not found (another harness, a Pi
 folder moved by the setup line) the pane stands in for it: the nudge waits until the pane's content has stayed the
-same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. A nudge goes to the same session: RESUME, or the
-full brief again when no turn ran (no completion_seq advance and no observed working state).
+same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. The HOLD line it logs meanwhile states the
+condition on the source it watches (Pi's log, or the pane): the brief again once that source has stayed quiet for
+PM_RUN_QUIET_S when no turn ran yet, otherwise a nudge in the same session. A nudge goes to the same session:
+RESUME, or the full brief again when no turn ran (no completion_seq advance and no observed working state).
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
@@ -54,7 +56,10 @@ says what that means, so a partial sum is never read as the whole.
 `--status` shows tokens and turns per job, then one line per model and a grand total; the end of the loop prints the
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
-successors. Before each launch every brief must exist as a file; a missing one fails the job without starting a worker.
+successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
+exists as a file, the folder that will hold the report exists, `verify` and `setup` are one line of text with no
+control character except a tab, and every entry of `helpers` names a model, or model, harness and thinking. The check
+never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -66,7 +71,9 @@ that pane; pm_run closes it and starts the job once the screen changes. A failed
 
 usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job has ended (see ENDED)
        python .pm/swarm/pm_run.py <run-dir> --status        print the receipt table with tokens and turns, then exit
-       python .pm/swarm/pm_run.py <run-dir> --status --tally  also count shared failure-log events, most frequent first
+       python .pm/swarm/pm_run.py <run-dir> --status --tally  also count shared failure-log events, in two lines:
+                                                            what was tried again (pm_run on its own, or a --retry),
+                                                            then what needed a person or a look, most frequent first
        python .pm/swarm/pm_run.py <run-dir> --check <job>   check one job's current artifact and verify command, no Herdr
        python .pm/swarm/pm_run.py <run-dir> --stop <job>    stop one job of a live run: the loop closes its pane and
                                                             blocks its successors (never delete a live job from
@@ -84,8 +91,11 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
-                       "helpers": ["model", ...],  (lets the worker start helpers as its own pm_run jobs, in a run
-                                                    dir inside `writes`, on these models only; default: none)
+                       "helpers": ["model" | {"model": ..., "harness": ..., "thinking": ...}, ...],
+                                                (lets the worker start helpers as its own pm_run jobs, in a run
+                                                 dir inside `writes`, on these models only; an object also names
+                                                 the harness and thinking level to start that helper with;
+                                                 default: none)
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
@@ -96,8 +106,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
                         it is visible too; a worker without "helpers" writes "Helper needed" in its output for the lead;
                         agy has no switch for its sub-agents, so there only the brief forbids them.
-                        A first-run screen that only the owner can pass (agy: colour scheme, then its terms) is handed
-                        over before the brief is sent: finish it once in that Herdr tab, then rerun the job)
+                        A first-run screen that only the owner can pass (agy: colour scheme, then its terms, then the
+                        question whether to trust the folder) is handed over before the brief is sent: finish it once
+                        in that Herdr tab, then rerun the job)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
 The loop re-reads jobs.json and caps.json every tick; a copy that is not valid JSON (an edit saved half-way) is
 skipped with one log line. An error inside one tick is logged and the loop goes on.
@@ -160,7 +171,10 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
-FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED"}
+FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED", "PREFLIGHT"}
+# The events that mark another attempt, not proof of a fix: a person's --retry logs RETRY too. The tally prints these
+# apart from the ones that needed a person or a look.
+SELF_FIXED = ("PROMPT", "RESUME", "RETRY", "QUOTA-WAIT")
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -221,8 +235,12 @@ NO_HELPERS = {
     "agy": [],  # no switch for its sub-agents; the brief forbids them
 }
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
-# no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms.
-FIRST_RUN = re.compile(r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use")
+# no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms,
+# or say that agy may trust this folder: a retry shows the same screen again.
+FIRST_RUN = re.compile(
+    r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use"
+    r"|Do you trust the contents of this project\?"
+)
 PERMISSION = re.compile(
     r"allow\s+access\s+to\s+this\s+file\s*\?|run\s+this\s+command\s*\?|requesting\s+permission\s+for\s*:", re.I
 )
@@ -560,6 +578,55 @@ def missing_brief(job, repo):
     return None
 
 
+def control_mark(text):
+    """The first control character in a jobs.json string, shown as a person would write it in JSON, or None.
+
+    A tab is allowed: it separates words in a shell line. A Windows path written with single backslashes in a JSON
+    string turns "\\r", "\\n" and "\\v" into control characters, so the shell line can no longer name its own file.
+    """
+    for char in text if isinstance(text, str) else "":
+        if ord(char) < 32 and char != "\t":
+            return json.dumps(char)[1:-1]
+    return None
+
+
+def complete_helper(helper):
+    """True when a `helpers` entry is an object that names its model, harness and thinking level."""
+    keys = ("model", "harness", "thinking")
+    return isinstance(helper, dict) and all(isinstance(helper.get(key), str) and helper[key] for key in keys)
+
+
+def preflight(job, repo):
+    """What is wrong with the job itself, in plain words, or None when it may start a worker.
+
+    Checks the job before a worker is paid for: its briefs, the folder that holds its report, that `verify` and
+    `setup` are one line of text, and how `helpers` is written. It never runs `verify`, which may run whole test
+    suites. A control character there is almost always a Windows path whose backslashes a JSON string read as escapes,
+    so the shell line could not name its own file; text in a shell line is not read as a file, because
+    `echo "Z:/literal"` is not one.
+    """
+    why = missing_brief(job, repo)
+    if why:
+        return why
+    out = repo / job["out"]
+    if not out.parent.is_dir():
+        return f"output folder not found: {out.parent}"
+    for key in ("verify", "setup"):
+        line = job.get(key)
+        if line is not None and not isinstance(line, str):
+            return f"{key} must be one command line (text)"
+        mark = control_mark(line)
+        if mark:
+            return f"{key} holds a control character ({mark}); write \\ or / in jobs.json"
+    helpers = job.get("helpers")
+    if helpers and not isinstance(helpers, list):
+        return "helpers must be a list of model names or objects"
+    for n, helper in enumerate(helpers or [], 1):
+        if not isinstance(helper, str) and not complete_helper(helper):
+            return f"helper {n} needs model, harness and thinking, or a plain model name"
+    return None
+
+
 def brief_digest(job, repo):
     """One hash over the job's brief files as they are now; a missing brief counts as its own content."""
     digest = sha256()
@@ -578,9 +645,17 @@ def agent_name(job_id, n, root):
     return re.sub(r"[^a-z0-9-]", "-", f"run-{job_id}".lower())[: 32 - len(suffix)] + suffix
 
 
+def helper_label(helper):
+    """One entry of `helpers` as the brief reads it: the model name, or the name with how that helper starts."""
+    if isinstance(helper, str):
+        return helper
+    return f"{helper.get('model')} (harness {helper.get('harness')}, thinking {helper.get('thinking')})"
+
+
 def launch_prompt(job):
     also = f" and the paths {', '.join(job['writes'])}" if job.get("writes") else ""
-    helpers = HELPERS.format(models=", ".join(job["helpers"]), job=job["id"]) if job.get("helpers") else NO_HELPER
+    models = ", ".join(helper_label(helper) for helper in job.get("helpers") or [])
+    helpers = HELPERS.format(models=models, job=job["id"]) if job.get("helpers") else NO_HELPER
     return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also, helpers=helpers)
 
 
@@ -713,6 +788,18 @@ def usage_of(job, attempt, repo, log=None):
     if not totals_known:  # a message without the field: the parts still add up to what was used
         sums["total_tokens"] = sum(sums[name] for name, _ in keys)
     return {**sums, "turns": counted, "cost_usd": round(cost, 9) if cost_known else None}
+
+
+def no_turn_yet(attempt):
+    """True when no turn ran after the brief was sent: no completion_seq advance and no observed working state.
+
+    Such a worker never took the brief, so it needs the whole brief again, not a resume of a turn that never happened.
+    """
+    return not attempt.get("worked") and (
+        attempt.get("seq0") is None
+        or attempt.get("completion_seq") is None
+        or attempt["completion_seq"] == attempt["seq0"]
+    )
 
 
 class Run:
@@ -1114,13 +1201,18 @@ class Run:
                     self.fail_or_retry(job, s, f"worker is gone and {why}")
                     continue
                 size, quiet = session_log(a, now)
-                source = "Pi wrote its log"
+                source, watched = "Pi wrote its log", "Pi's log"
                 if quiet is None:
-                    quiet, source = self.pane_quiet(a, now), "its pane last changed"
+                    quiet, source, watched = self.pane_quiet(a, now), "its pane last changed", "the pane"
                 if quiet is not None and quiet < QUIET_S:
                     if not a.get("held"):
                         a["held"] = True
-                        self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}")
+                        then = (
+                            f"if {watched} stays quiet for {QUIET_S:g} s, pm_run resends the brief"
+                            if no_turn_yet(a)
+                            else "pm_run nudges it in the same session"
+                        )
+                        self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}; {then}")
                 elif a.get("wait_until", 0) > now:
                     pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
                 elif self.stop_hand_over(job, s, a, why, now):
@@ -1171,10 +1263,10 @@ class Run:
             bucket = job.get("bucket", "default")
             if busy.get(bucket, 0) >= caps.get(bucket, 2):
                 continue
-            why = missing_brief(job, self.repo)
+            why = preflight(job, self.repo)
             if why:
                 s.update(state="failed", why=why)
-                self.log(f"FAILED {job['id']}: {why}; fix the path in jobs.json and start a new run")
+                self.log(f"PREFLIGHT {job['id']}: {why}; fix jobs.json, then --retry {job['id']}")
                 continue
             n = len(s["attempts"]) + 1
             out = self.repo / job["out"]
@@ -1442,9 +1534,7 @@ class Run:
             a["overtime"] = OVERTIME_S
             note = f" You are past the time limit: finish within {OVERTIME_S / 60:g} minutes."
         a["nudges"] = a.get("nudges", 0) + 1
-        lost = not a.get("worked") and (
-            a.get("seq0") is None or a.get("completion_seq") is None or a["completion_seq"] == a["seq0"]
-        )
+        lost = no_turn_yet(a)
         prompt = (
             launch_prompt(job) if lost else RESUME.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"])
         )
@@ -1543,7 +1633,12 @@ class Run:
         self.print_totals(per_model)
 
     def failure_tally(self):
-        """Count shared failure-log events, not event names mentioned in a message."""
+        """Count shared failure-log events, not event names mentioned in a message.
+
+        Two lines, each most frequent first: what was tried again (PROMPT, RESUME, RETRY, QUOTA-WAIT; a retry is an
+        attempt, not proof of a fix, and a person's --retry logs RETRY too), and everything else, which needed a person
+        or a look.
+        """
         path = self.repo / ".pm" / "local" / "failures.log"
         counts = Counter()
         try:
@@ -1562,8 +1657,14 @@ class Run:
         except OSError as exc:
             print(f"failures: could not read {path}: {exc}; check access and try --status --tally again")
             return
-        ordered = sorted(counts, key=lambda kind: (-counts[kind], kind))
-        print("failures: " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
+
+        def print_line(label, kinds):
+            """One line of counts, most frequent first and ties by name, as the single line was printed before."""
+            ordered = sorted(kinds, key=lambda kind: (-counts[kind], kind))
+            print(label + ": " + (", ".join(f"{kind}={counts[kind]}" for kind in ordered) or "none"))
+
+        print_line("tried again (pm_run on its own, or a --retry)", [kind for kind in counts if kind in SELF_FIXED])
+        print_line("needed a person or a look", [kind for kind in counts if kind not in SELF_FIXED])
 
     def print_totals(self, per_model):
         """One line per model and the grand total; a sum that an attempt did not report ends in "+?".
