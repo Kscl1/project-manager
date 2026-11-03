@@ -1153,9 +1153,8 @@ class PlatformTest(unittest.TestCase):
 
     def test_stop_elsewhere_signals_the_process_group(self):
         killpg = mock.Mock()
-        group = mock.patch.object(
-            pm_open.os, "getpgid", lambda pid: pid, create=True
-        )  # its own group, as start() gave it
+        # A server starts in a session of its own, so its group id is its own process id.
+        group = mock.patch.object(pm_open.os, "getpgid", lambda pid: pid, create=True)
         signal_group = mock.patch.object(pm_open.os, "killpg", killpg, create=True)
         with mock.patch.object(pm_open.os, "name", "posix"), group, signal_group:
             self.assertTrue(pm_open.terminate(4321))
