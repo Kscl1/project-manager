@@ -48,6 +48,7 @@ python .pm/tools/pm_board.py --next      # the one task to work on now
 python .pm/tools/pm_board.py --resume
 python .pm/tools/pm_board.py --tree
 python .pm/tools/pm_board.py --did      # the Did part of a worklog for a session that spans several goals
+python .pm/tools/pm_board.py --state    # the live state as JSON: open tasks, pm_run jobs by task, Herdr agents, git, today's events
 python .pm/tools/pm_open.py board       # the board in your browser, started once; 'map' opens the map
 python .pm/tools/pm_open.py list        # every project opened this way: its board and map, running or stopped
 python .pm/tools/pm_open.py stop board  # stops the board this tool started ('stop map' for the map)

@@ -655,20 +655,23 @@ def local_day(stamp):
         return as_date(stamp)
 
 
-def commits(revisions="HEAD"):
-    """Commits with short hash, local author day, subject, Refs task IDs and Assisted-by models."""
-    log = git_stdout(["log", "--date=short", "--format=%h%x1f%ad%x1f%s%x1f%B%x1e", revisions], "")
+def commits(*revisions):
+    """Commits with short hash, local author day and time, subject, Refs task IDs and Assisted-by models.
+
+    `revisions` are git log arguments, HEAD by default: a range, `-5` or `--since=midnight`."""
+    log = git_stdout(["log", "--date=short", "--format=%h%x1f%ad%x1f%aI%x1f%s%x1f%B%x1e", *(revisions or ["HEAD"])], "")
     found = []
     for record in log.split("\x1e"):
         parts = record.strip("\n").split("\x1f")
-        if len(parts) != 4:
+        if len(parts) != 5:
             continue
-        sha, day, subject, body = parts
+        sha, day, when, subject, body = parts
         refs = re.search(r"^Refs:\s*(.+)$", body, re.MULTILINE)
         found.append(
             {
                 "sha": sha,
                 "day": day,
+                "time": when,
                 "subject": subject,
                 "refs": {item.strip() for item in refs.group(1).split(",")} if refs else set(),
                 "models": re.findall(r"^Assisted-by:\s*(.+?)\s*$", body, re.MULTILINE),
