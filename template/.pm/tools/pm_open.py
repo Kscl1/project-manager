@@ -695,12 +695,17 @@ def open_server(name, download=False, root=None):
         if not port:
             return 1
         address = ADDRESS.format(port=port)
-        state, served = ownership(root, name, server_of(data, root, name), port)
+        recorded = server_of(data, root, name)
+        state, served = ownership(root, name, recorded, port)
         if state == OURS:
             print(f"The {name} is already running at {address}; I opened it in your browser.")
             webbrowser.open(address)
             if name == "board":
                 keep(data, root, port)
+            return 0
+        if state == STOPPED and recorded.get("port") == port and process_of(recorded):
+            # The lock is released before the wait, so a second run can arrive while ours is started but silent.
+            print(f"The {name} is still starting at {address}; run this command again in a few seconds.")
             return 0
         if state == ANSWERS:
             who = f"another project ({served})" if served else "another program"

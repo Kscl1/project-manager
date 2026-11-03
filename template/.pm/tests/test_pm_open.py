@@ -28,6 +28,7 @@ SCRIPT = Path(__file__).resolve().parent.parent / "tools" / "pm_open.py"
 spec = importlib.util.spec_from_file_location("pm_open", SCRIPT)
 pm_open = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pm_open)
+REAL_ALIVE, REAL_START_TIME = pm_open.alive, pm_open.start_time  # before setUp puts its fakes in their place
 
 BOARD = {
     "name": "board",
@@ -217,6 +218,28 @@ class LauncherTest(unittest.TestCase):
             {"port": 6420, "pid": 4321, "started": "start-of-4321"},
             "the port, the process id and the time it started are recorded",
         )
+
+    def test_a_second_open_while_ours_is_still_starting_starts_nothing(self):
+        started = REAL_START_TIME(os.getpid())
+        if not started:
+            self.skipTest("this machine cannot read the start time of a process")
+        self.write_store(
+            {
+                "projects": {
+                    self.key(): {"name": "shop", "board": {"port": 6420, "pid": os.getpid(), "started": started}}
+                }
+            }
+        )
+        # The port stays silent, as it does while the server that was just started boots.
+        with mock.patch.object(pm_open, "alive", REAL_ALIVE), mock.patch.object(pm_open, "start_time", REAL_START_TIME):
+            code, out = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out,
+            "The board is still starting at http://127.0.0.1:6420; run this command again in a few seconds.\n",
+        )
+        self.assertEqual(self.runs, [], "the server that is still starting is not started a second time")
+        self.assertEqual(self.opened, [], "the browser opens once the server answers, not before")
 
     def test_a_board_that_is_ours_already_is_opened_and_nothing_starts(self):
         self.busy(6420)
