@@ -54,7 +54,11 @@ says what that means, so a partial sum is never read as the whole.
 `--status` shows tokens and turns per job, then one line per model and a grand total; the end of the loop prints the
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
-successors. Before each launch every brief must exist as a file; a missing one fails the job without starting a worker.
+successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
+exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character, every
+quoted absolute path in `verify` is there (except the report itself), and every entry of `helpers` names a model, or
+model, harness and thinking. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting
+a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -160,7 +164,7 @@ QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
 FAILURES |= {"STALLED", "LOOP", "OVERTIME", "SAVE-FAILED", "TICK-ERROR", "SKIPPED", "REMOVED", "STOPPED"}
-FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED"}
+FAILURES |= {"BRIEF-CHANGED", "QUOTA-WAIT", "KEPT-FAILED", "RETRY-REFUSED", "RETRY-IGNORED", "PREFLIGHT"}
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]  # tests pass a JSON command list
 SETTLED = ("done", "idle")
@@ -557,6 +561,60 @@ def missing_brief(job, repo):
             )
             hint = r" (a backslash in jobs.json was read as an escape: write \\ or /)" if control else ""
             return f"brief not found: {shown}{hint}"
+    return None
+
+
+def control_mark(text):
+    """The first control character in a jobs.json string, shown as a person would write it in JSON, or None.
+
+    A Windows path written with single backslashes in a JSON string turns "\\r", "\\n" and "\\v" into control
+    characters, so the shell line can no longer name its own file.
+    """
+    for char in text if isinstance(text, str) else "":
+        if ord(char) < 32:
+            return json.dumps(char)[1:-1]
+    return None
+
+
+def quoted_paths(line):
+    """The strings a shell line writes between single or double quotes, in order."""
+    return [double or single for double, single in re.findall(r'"([^"]+)"|\'([^\']+)\'', line or "")]
+
+
+def complete_helper(helper):
+    """True when a `helpers` entry is an object that names its model, harness and thinking level."""
+    keys = ("model", "harness", "thinking")
+    return isinstance(helper, dict) and all(isinstance(helper.get(key), str) and helper[key] for key in keys)
+
+
+def preflight(job, repo):
+    """What is wrong with the job itself, in plain words, or None when it may start a worker.
+
+    Checks the job before a worker is paid for: its briefs, the folder that holds its report, the text of `verify`
+    and `setup`, the paths `verify` names, and how `helpers` is written. It never runs `verify`, which may run whole
+    test suites. A quoted absolute path that is not there is almost always a Windows path whose backslashes a JSON
+    string read as escapes, so the check could not find its own script.
+    """
+    why = missing_brief(job, repo)
+    if why:
+        return why
+    out = repo / job["out"]
+    if not out.parent.is_dir():
+        return f"output folder not found: {out.parent}"
+    for key in ("verify", "setup"):
+        mark = control_mark(job.get(key))
+        if mark:
+            return f"{key} holds a control character ({mark}); write \\ or / in jobs.json"
+    own = os.path.normcase(os.path.abspath(out))
+    for path in quoted_paths(job.get("verify")):
+        if os.path.isabs(path) and os.path.normcase(os.path.abspath(path)) != own and not Path(path).exists():
+            return f"verify names a path that is not there: {path}"
+    helpers = job.get("helpers")
+    if helpers and not isinstance(helpers, list):
+        return "helpers must be a list of model names or objects"
+    for n, helper in enumerate(helpers or [], 1):
+        if not isinstance(helper, str) and not complete_helper(helper):
+            return f"helper {n} needs model, harness and thinking, or a plain model name"
     return None
 
 
@@ -1171,10 +1229,10 @@ class Run:
             bucket = job.get("bucket", "default")
             if busy.get(bucket, 0) >= caps.get(bucket, 2):
                 continue
-            why = missing_brief(job, self.repo)
+            why = preflight(job, self.repo)
             if why:
                 s.update(state="failed", why=why)
-                self.log(f"FAILED {job['id']}: {why}; fix the path in jobs.json and start a new run")
+                self.log(f"PREFLIGHT {job['id']}: {why}; fix jobs.json, then --retry {job['id']}")
                 continue
             n = len(s["attempts"]) + 1
             out = self.repo / job["out"]
