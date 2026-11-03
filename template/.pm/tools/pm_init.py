@@ -21,6 +21,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   .claude/launch.json, which Claude Desktop opens in a preview pane: the board, and the map with --map, so the
   board needs no terminal.
   A user's own copy is never edited: what it lacks goes to the "Merge by hand" list.
+- With the map layer, the folder the map serves gets a likec4.config.json when it has no LikeC4 config: a name made
+  of the folder's name and a short code from its full path, which pm_open uses to know this project's running map.
 - A real install prints a few lines when it is done (what it added or changed, what it kept of the user's, what to
   merge by hand) and then what to do next; --check prints the whole plan and the conflicts instead. A first install
   into a project that already has its own AGENTS.md, CLAUDE.md, Backlog.md or git hooks stops there (exit 3) and
@@ -120,6 +122,20 @@ stay English. A change to this line affects only what is written next; older rec
 """
 # Shipped skills sit next to the package; their names all start with pm-, a namespace apart from the user's own skills.
 SKILLS = PKG.parent / ".agents" / "skills"
+MAP_ENTRIES = ("map", "likec4")  # the names a launch.json map entry may have; pm_open reads both
+# Every config file name LikeC4 reads, JSON and code; a map folder with any of them already names its project.
+LIKEC4_CONFIGS = (
+    ".likec4rc",
+    ".likec4.config.json",
+    "likec4.config.json",
+    "likec4.config.js",
+    "likec4.config.cjs",
+    "likec4.config.mjs",
+    "likec4.config.ts",
+    "likec4.config.cts",
+    "likec4.config.mts",
+)
+LIKEC4_SCHEMA = "https://likec4.dev/schemas/config.json"
 MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
@@ -629,6 +645,69 @@ def launch_action(target, map_layer):
     return ("merge", missing) if missing else ("keep", [])
 
 
+def map_folder(target):
+    """The folder the project's map serves: the path right after `start` in launch.json's map entry, else the root.
+
+    pm_open reads the folder the same way; a path given after other options is not looked for.
+    """
+    data = read_json(target / ".claude" / "launch.json")
+    found = data.get("configurations") if isinstance(data, dict) else None
+    for config in found if isinstance(found, list) else []:
+        if not isinstance(config, dict) or str(config.get("name", "")).casefold() not in MAP_ENTRIES:
+            continue
+        arguments = config.get("runtimeArgs")
+        if not config.get("runtimeExecutable") or not isinstance(arguments, list):
+            continue  # pm_open skips such an entry too
+        arguments = [str(argument) for argument in arguments]
+        if not (isinstance(config.get("port"), int) and config["port"] > 0) and "--port" not in arguments[:-1]:
+            continue  # and one without a port
+        if "start" in arguments:
+            after = arguments.index("start") + 1
+            if after < len(arguments) and not arguments[after].startswith("-"):
+                return target / arguments[after]
+        return target
+    return target
+
+
+def map_project_name(target):
+    """The map's LikeC4 name: the folder's name, then six characters from its full path, so two folders of the same
+    name get different ones; pm_open checks the code, so a config copied to another folder is not taken for its own.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", target.name.lower()).strip("-") or "project"
+    code = hashlib.sha256(os.path.normcase(str(target.resolve())).encode("utf-8")).hexdigest()[:6]
+    return f"{slug}-{code}"
+
+
+def map_config(target, args):
+    """Where the map's likec4.config.json goes, or None: only with the map layer, where its folder has no config.
+
+    A running map says which LikeC4 projects it serves, and pm_open knows this project's map by that name; without a
+    config every map is LikeC4's `default`. A config the user has, in any of LikeC4's forms and in any folder under
+    the map's, is never touched and gets no second one beside it: those projects are the user's own.
+    """
+    if not (args.map or (target / ".agents" / "skills" / "pm-likec4-dsl").is_dir()):
+        return None
+    folder = map_folder(target)
+    if not folder.is_dir() or has_likec4_config(folder):
+        return None
+    return folder / "likec4.config.json"
+
+
+def has_likec4_config(folder):
+    """True when that folder, or one under it, holds a LikeC4 config; hidden folders and node_modules are skipped."""
+    for _, folders, files in os.walk(folder):
+        folders[:] = [name for name in folders if not name.startswith(".") and name != "node_modules"]
+        if any(name in LIKEC4_CONFIGS for name in files):
+            return True
+    return False
+
+
+def map_config_text(target, args):
+    """The map's config: LikeC4's schema, the unique name and the project's own name as its title."""
+    data = {"$schema": LIKEC4_SCHEMA, "name": map_project_name(target), "title": args.name or target.name}
+    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+
 def missing_lines(target, name, wanted):
     path = target / name
     lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
@@ -820,6 +899,9 @@ def plan(target, args, conflicts):
         entries.append(
             ("write", target / ".claude" / "launch.json", ", ".join(c["name"] for c in launch["configurations"]))
         )
+    config = map_config(target, args)
+    if config:
+        entries.append(("write", config, "the map's LikeC4 name, by which pm_open knows it"))
     if args.lang:
         entries += [("set", path, note) for path, note in language_plan(target, args.lang)[0]]
     if not version_is_current(target):
@@ -1034,6 +1116,9 @@ def main(argv=None):
     action, launch = launch_action(target, args.map)
     if action == "write":
         write_once(target / ".claude" / "launch.json", text=json.dumps(launch, indent=2) + "\n")
+    config = map_config(target, args)
+    if config:
+        write_once(config, text=map_config_text(target, args))
     if args.lang:
         set_language(target, args.lang)
     write_version(target)

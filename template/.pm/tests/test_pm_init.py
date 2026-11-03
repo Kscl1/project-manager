@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -640,6 +641,84 @@ class PmInitTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["configurations"], [{"name": "mine"}])
+
+    def map_config(self, folder=None):
+        return json.loads(((folder or self.root) / "likec4.config.json").read_text(encoding="utf-8"))
+
+    def test_map_writes_a_likec4_config_named_by_the_folder_and_a_path_code(self):
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        config = self.map_config()
+        slug = re.sub(r"[^a-z0-9]+", "-", self.root.name.lower()).strip("-")
+        self.assertRegex(config["name"], rf"^{re.escape(slug)}-[0-9a-f]{{6}}$")
+        self.assertEqual(config["title"], self.root.name)
+        self.assertEqual(config["$schema"], "https://likec4.dev/schemas/config.json")
+        before = (self.root / "likec4.config.json").read_text(encoding="utf-8")
+        self.assertEqual(self.run_init(self.root, "--upgrade", "--map").returncode, 0)
+        self.assertEqual((self.root / "likec4.config.json").read_text(encoding="utf-8"), before, "written once")
+
+    def test_two_folders_with_the_same_name_get_different_map_names(self):
+        names = []
+        for side in ("a", "b"):
+            target = self.root / side / "shop"
+            target.mkdir(parents=True)
+            subprocess.run([GIT, "init", "-q"], cwd=target, check=True)
+            result = self.run_init(target, "--map")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            names.append(self.map_config(target)["name"])
+        self.assertTrue(all(name.startswith("shop-") for name in names), names)
+        self.assertNotEqual(names[0], names[1])
+
+    def test_a_likec4_config_the_project_has_is_never_touched(self):
+        (self.root / ".likec4rc").write_text('{"name": "mine"}\n', encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "likec4.config.json").exists(), "LikeC4 reads .likec4rc as the config")
+        self.assertEqual((self.root / ".likec4rc").read_text(encoding="utf-8"), '{"name": "mine"}\n')
+
+    def test_the_map_config_goes_to_the_folder_the_launch_files_map_serves(self):
+        (self.root / ".claude").mkdir()
+        (self.root / "docs" / "map").mkdir(parents=True)
+        entry = {
+            "name": "likec4",
+            "runtimeExecutable": "npx",
+            "runtimeArgs": ["-y", "likec4@1.60.0", "start", "docs/map", "--port", "5173"],
+            "port": 5173,
+        }
+        launch = {"version": "0.0.1", "configurations": [entry]}
+        (self.root / ".claude" / "launch.json").write_text(json.dumps(launch), encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("name", self.map_config(self.root / "docs" / "map"))
+        self.assertFalse((self.root / "likec4.config.json").exists())
+
+    def test_an_upgrade_names_a_map_installed_before_maps_had_a_name(self):
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)
+        (self.root / "likec4.config.json").unlink()
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("name", self.map_config(), "the map layer is installed, so it gets its name")
+
+    def test_a_map_whose_projects_have_their_own_configs_gets_no_second_one(self):
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "likec4.config.json").write_text('{"name": "existing"}\n', encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "likec4.config.json").exists(), "the user's LikeC4 projects stay as they are")
+
+    def test_without_the_map_layer_no_likec4_config_is_written(self):
+        self.assertEqual(self.run_init().returncode, 0)
+
+        self.assertFalse((self.root / "likec4.config.json").exists())
 
     def test_an_upgrade_names_the_agents_sections_the_project_lacks(self):
         self.assertEqual(self.run_init().returncode, 0)

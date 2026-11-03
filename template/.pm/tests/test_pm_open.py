@@ -2,7 +2,7 @@
 
 A throwaway project holds only a ``.pm/`` folder and, in the tests that need it, a ``.claude/launch.json``; the
 project list lives in a throwaway ``PM_HOME``. The port check, ``Popen``, ``shutil.which``, ``webbrowser.open``, the
-``npx --no-install`` check, the board's ``/api/status`` answer, the process check, the process start time and the stop
+``npx --no-install`` check, the board's ``/api/status`` answer, the names a running map serves on each loopback, the process check, the process start time and the stop
 call are fakes, so nothing is started, no browser opens and no port or process is touched. The project list, its
 temporary files and its lock are real, in the throwaway folder. Standard library only.
 """
@@ -72,6 +72,7 @@ class LauncherTest(unittest.TestCase):
         self.after_start = set()  # the ports that answer once a server was started on them
         self.ports = []  # every port the check was asked about
         self.statuses = []  # every port the board status was asked about
+        self.maps = {}  # address -> the LikeC4 project names the map there serves
         self.status = {}  # port -> the folder the board there says it serves
         self.owners = {}  # port -> the project root of the server that was started there
         self.runs = []  # (command, kwargs) of each start
@@ -93,6 +94,7 @@ class LauncherTest(unittest.TestCase):
             mock.patch.object(pm_open.subprocess, "Popen", self.spawn),
             mock.patch.object(pm_open.subprocess, "run", self.check),
             mock.patch.object(pm_open, "project_of", self.project_of),
+            mock.patch.object(pm_open, "served_maps", lambda base: self.maps.get(base, [])),
             mock.patch.object(pm_open, "alive", self.is_alive),
             mock.patch.object(pm_open, "start_time", self.start_of),
             mock.patch.object(pm_open, "terminate", self.terminate),
@@ -181,6 +183,11 @@ class LauncherTest(unittest.TestCase):
 
     def record(self, root=None):
         return self.read_store()["projects"][self.key(root)]
+
+    def write_map_config(self, name, folder=None, file="likec4.config.json"):
+        path = (folder or self.root) / file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"name": name}), encoding="utf-8")
 
     def busy(self, *ports):
         """Make those ports answer, for good."""
@@ -495,6 +502,106 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("Port 5173 answers for another program", out, "without a start time nothing proves it is ours")
         self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
+
+    def test_a_running_map_that_serves_this_projects_name_is_opened_and_left_running(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")  # a name the user chose
+        self.busy(5173)  # started by the Claude preview or a terminal, on ::1 only
+        self.maps["http://[::1]:5173"] = ["shop-map"]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("The map is already running at http://[::1]:5173", out)
+        self.assertEqual(self.runs, [], "no second map beside it")
+        self.assertEqual(self.opened, ["http://[::1]:5173"], "the browser goes where the name was served")
+        self.assertEqual(self.record()["map"], {"port": 5173}, "not started here, so no process id")
+        code, out = self.run_tool("stop", "map")
+        self.assertEqual(code, 0)
+        self.assertIn("was not started by this tool, so I left it running", out)
+        self.assertEqual(self.ended, [])
+
+    def test_the_map_is_ours_on_the_loopback_that_serves_its_name_not_on_the_other(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = ["other-map"]  # another program holds the port on IPv4
+        self.maps["http://[::1]:5173"] = ["shop-map"]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.opened, ["http://[::1]:5173"], "never the IPv4 program")
+        self.assertEqual(self.runs, [])
+
+    def test_a_running_map_of_another_likec4_project_is_foreign(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = ["other-9f8e7d"]
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("Port 5173 answers for another project (the LikeC4 project other-9f8e7d)", out)
+        self.assertNotIn("no name I can read", out)
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
+
+    def test_a_made_name_with_this_folders_code_is_recognised(self):
+        self.write_launch(MAP)
+        name = f"shop-{pm_open.path_code(self.root)}"
+        self.write_map_config(name)
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = [name]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs, [])
+        self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
+
+    def test_a_made_name_copied_from_another_folder_does_not_claim_its_map(self):
+        self.write_launch(MAP)
+        copied = f"shop-{pm_open.path_code(self.other)}"  # the other folder's config, copied here
+        self.write_map_config(copied)
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = [copied]  # that folder's map
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn(f"The map name {copied} was made for another folder", out)
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"], "the other folder's map is not taken for ours")
+
+    def test_a_made_name_is_checked_by_its_code_whatever_the_folders_are_called(self):
+        for name in ("other", "project", "x"):  # a copy into shop-copy, a renamed folder, an empty slug's fallback
+            with self.subTest(made_for=name):
+                self.assertFalse(pm_open.made_here(self.root, f"{name}-{pm_open.path_code(self.other)}"))
+        self.assertTrue(pm_open.made_here(self.root, f"other-{pm_open.path_code(self.root)}"), "a renamed made name")
+        self.assertTrue(pm_open.made_here(self.root, "shop-map"), "a name the user chose has no code to check")
+
+    def test_a_map_without_a_config_name_starts_beside_a_running_one_and_says_why(self):
+        self.write_launch(MAP)
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = ["default"]  # LikeC4's name for a project without a config
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("Port 5173 answers for another project (the LikeC4 project default)", out)
+        self.assertIn("This project's map has no name I can read", out)
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
+
+    def test_the_map_name_comes_from_the_folder_the_map_serves(self):
+        entry = dict(MAP, runtimeArgs=["-y", "likec4@1.60.0", "start", "docs/map", "--port", "5173"])
+        self.write_launch(entry)
+        self.write_map_config("at-the-root")
+        self.write_map_config("in-docs", folder=self.root / "docs" / "map", file=".likec4rc")
+        self.assertEqual(pm_open.map_name(self.root), "in-docs")
+
+    def test_a_code_config_or_a_broken_one_gives_no_map_name(self):
+        self.write_launch(MAP)
+        (self.root / "likec4.config.ts").write_text("export default {}", encoding="utf-8")
+        self.assertIsNone(pm_open.map_name(self.root), "a code config cannot be read here")
+        (self.root / "likec4.config.json").write_text("{ // JSON5, which LikeC4 reads\n name: 'x' }", encoding="utf-8")
+        self.assertIsNone(pm_open.map_name(self.root))
+
+    def test_a_first_config_that_cannot_be_read_is_not_skipped_for_the_next(self):
+        self.write_launch(MAP)
+        (self.root / ".likec4rc").write_text("{ name: 'json5' }", encoding="utf-8")
+        self.write_map_config("not-the-maps")
+        self.assertIsNone(pm_open.map_name(self.root), "the next file's name may not be the map's")
 
     def test_keep_does_not_carry_a_process_id_to_another_port(self):
         self.write_store(
@@ -913,6 +1020,16 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("stop board", out)
 
+    def test_list_calls_a_map_that_serves_this_projects_name_running(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        self.write_store({"projects": {self.key(): {"name": "shop", "map": {"port": 5173}}}})
+        self.busy(5173)
+        self.maps["http://[::1]:5173"] = ["shop-map"]
+        code, out = self.run_tool("list")
+        self.assertEqual(code, 0)
+        self.assertIn("map http://[::1]:5173 running", out)
+
     def test_list_names_each_project_with_its_board_and_map(self):
         self.write_store(
             {
@@ -1020,6 +1137,70 @@ class CommandTest(unittest.TestCase):
             pm_open.map_command(["/bin/npx", "likec4", "start", "--hmr-port", "25000"], 24679),
             ["/bin/npx", "likec4", "start", "--hmr-port", "24679", "--listen", "127.0.0.1"],
         )
+
+
+class Answer:
+    """What urlopen hands back: a body to read, in a with block."""
+
+    def __init__(self, text):
+        self.text = text
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *problem):
+        return False
+
+    def read(self):
+        return self.text.encode("utf-8")
+
+
+class ServedMapsTest(unittest.TestCase):
+    """A running LikeC4 map names the projects it serves in its likec4:projects module; nothing else is read."""
+
+    HEAD = (
+        'import { createHotContext as __vite__createHotContext } from "/@vite/client";'
+        'import.meta.hot = __vite__createHotContext("likec4:plugin/projects.js");'
+        'import { atom, useStore } from "/@fs/likec4_vite-plugin_internal.js";\n'
+    )
+    MODULE = HEAD + (
+        "export const isSingleProject = false;\n"
+        "export const projects = [{\n"
+        '\tid: "shop-map",\n\ttitle: "Shop",\n\tpath: "",\n\texportFormats: [\n\t\t"png",\n\t\t"drawio"\n\t]\n'
+        '}, {\n\tid: "lib",\n\ttitle: "Lib"\n}];\n'
+        "export const $projects = atom([...projects]);\n"
+    )
+
+    def served(self, text, base="http://127.0.0.1:5173"):
+        asked = []
+
+        def urlopen(url, timeout):
+            asked.append(url)
+            return Answer(text)
+
+        with mock.patch.object(pm_open.urllib.request, "urlopen", urlopen):
+            return pm_open.served_maps(base), asked
+
+    def test_the_names_come_from_likec4s_projects_module(self):
+        names, asked = self.served(self.MODULE)
+        self.assertEqual(names, ["shop-map", "lib"])
+        self.assertEqual(asked, ["http://127.0.0.1:5173/@id/likec4:projects"])
+
+    def test_an_id_inside_a_title_is_not_a_served_name(self):
+        text = self.HEAD + 'export const projects = [{\n\tid: "other",\n\ttitle: "Project id: \'ours\'"\n}];\n'
+        self.assertEqual(self.served(text)[0], ["other"])
+
+    def test_a_page_that_only_quotes_the_module_names_nothing(self):
+        page = '<html><pre>export const projects = [{\n\tid: "ours"\n}];</pre></html>'
+        self.assertEqual(self.served(page)[0], [])
+        self.assertEqual(self.served("<html>" + self.MODULE)[0], [], "the module's mark must be its first line")
+
+    def test_no_answer_names_nothing(self):
+        def refused(url, timeout):
+            raise OSError("connection refused")
+
+        with mock.patch.object(pm_open.urllib.request, "urlopen", refused):
+            self.assertEqual(pm_open.served_maps("http://[::1]:5173"), [])
 
 
 class PortTest(unittest.TestCase):

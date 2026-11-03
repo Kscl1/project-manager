@@ -17,7 +17,8 @@ that cannot take the lock changes nothing and says so, so two runs never write t
 
 A port that answers is not proof that the server is ours, and a running process id is not proof that it is our
 process: the system hands the id out again once ours ends. The board is ours while its /api/status names this
-project's folder; the map is ours while its port answers and the recorded process still started when it was recorded.
+project's folder; the map is ours while its port answers and the recorded process still started when it was recorded,
+or while it serves the LikeC4 name in this project's map config, as one the Claude preview or a terminal started does.
 Anything else is foreign: this project's own server then starts on the first free port above. A port counts as taken
 when something answers on 127.0.0.1 or ::1.
 
@@ -28,9 +29,11 @@ The servers outlive this command: no console window on Windows, their own sessio
 import argparse
 import contextlib
 import ctypes
+import hashlib
 import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -66,6 +69,15 @@ INSTALL = {
 }
 # .claude/launch.json entries may name either; the installer writes the first of each pair.
 ENTRY_NAMES = {"board": "board", "backlog-board": "board", "map": "map", "likec4": "map"}
+# A running map is known by the `name` in its LikeC4 config: these are the config files LikeC4 reads as JSON.
+LIKEC4_CONFIGS = (".likec4rc", ".likec4.config.json", "likec4.config.json")
+# The LikeC4 dev server lists the projects it serves in a module of its Vite plugin, at this address. Its first line
+# imports and names the module, so a page that only quotes one is not taken for it; each project's id is one line.
+PROJECTS_PATH = "/@id/likec4:projects"
+PROJECTS_MARK = '__vite__createHotContext("likec4:plugin/projects.js")'
+SERVED_LIST = re.compile(r"^export const projects = \[(.*?)\];$", re.S | re.M)
+SERVED_ID = re.compile(r'^\tid: ("(?:[^"\\]|\\.)*"),?$', re.M)
+MADE_NAME = re.compile(r"(.+)-([0-9a-f]{6})")  # the name pm_init writes: the folder's name, then its path code
 OPENINGS = ("ask", "always", "never")
 OPENING_MEANINGS = {
     "ask": "at session start the agent asks once whether to open the board.",
@@ -163,6 +175,69 @@ def project_of(port):
         return None
     path = data.get("projectPath") if isinstance(data, dict) else None
     return str(path) if path else None
+
+
+def map_folder(root, command):
+    """The folder the map command serves: the path right after `start`, else the project root."""
+    if "start" in command:
+        after = command.index("start") + 1
+        if after < len(command) and not command[after].startswith("-"):
+            return Path(root) / command[after]
+    return Path(root)
+
+
+def map_name(root):
+    """This project's map name: `name` in the first of the JSON configs in the folder its map serves, else None.
+
+    The first config found is the one read, even when it cannot be: LikeC4 also reads comments and JSON5 there, which
+    this does not, and taking the next file instead could pick a name that is not the map's.
+    """
+    found = entry(Path(root), "map")
+    if found is None:
+        return None
+    folder = map_folder(root, found[0])
+    for config in LIKEC4_CONFIGS:
+        path = folder / config
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        name = data.get("name") if isinstance(data, dict) else None
+        return name if isinstance(name, str) and name else None
+    return None
+
+
+def path_code(folder):
+    """Six characters from the project's full path; pm_init.py puts the same code in the map name it writes."""
+    return hashlib.sha256(os.path.normcase(str(Path(folder).resolve())).encode("utf-8")).hexdigest()[:6]
+
+
+def made_here(folder, name):
+    """False for a name pm_init made for another folder: a likec4.config.json that was copied or moved here.
+
+    Such a name ends in the path code of the folder it was made for, whatever the folders are called, so a copy or a
+    renamed folder would take the first folder's map for its own. A name the user chose carries no code and is taken
+    as it is; one that only looks like ours (ends in six hex characters) is asked to carry this folder's code too.
+    """
+    made = MADE_NAME.fullmatch(name)
+    return not made or made.group(2) == path_code(folder)
+
+
+def served_maps(base):
+    """The LikeC4 project names the server at that address serves; empty for anything that is not LikeC4's list."""
+    try:
+        with urllib.request.urlopen(base + PROJECTS_PATH, timeout=STATUS_TIMEOUT) as answer:
+            text = answer.read().decode("utf-8", "replace")
+    except (OSError, ValueError, http.client.HTTPException):
+        return []  # nothing there, or not on this loopback
+    head = text.split("\n", 1)[0]
+    found = SERVED_LIST.search(text) if head.startswith("import ") and PROJECTS_MARK in head else None
+    try:
+        return [json.loads(quoted) for quoted in SERVED_ID.findall(found.group(1))] if found else []
+    except ValueError:
+        return []
 
 
 def folder_key(folder):
@@ -499,22 +574,35 @@ def process_of(server):
 
 
 def ownership(folder, name, server, port):
-    """(state, served): whether this project's server at that port is ours and running, for open, list and stop.
+    """(state, served, address): whether this project's server at that port is ours and running, for open, list, stop.
 
     state is OURS, ANSWERS (the port answers, but not for this project's own server) or STOPPED (nothing answers
-    there). served is the folder a board at that port names, when it names one. The board is ours while its status
-    names this folder; the map is ours while its port answers and its recorded process is still the one we started.
+    there). served says what the server there names, when it names something: a board's folder, a map's LikeC4
+    projects. The board is ours while its status names this folder. The map is ours while its recorded process is
+    still the one we started, or while it serves this project's map name on one loopback; address is where a browser
+    reaches it, which for a map someone else started may be ::1 alone.
     """
+    address = ADDRESS.format(port=port)
     if not isinstance(port, int) or port <= 0:
-        return STOPPED, None
+        return STOPPED, None, address
     if name == "board":
         served = project_of(port)
         if same_folder(served, folder):
-            return OURS, served
-        return (ANSWERS if answers(port) else STOPPED), served
+            return OURS, served, address
+        return (ANSWERS if answers(port) else STOPPED), served, address
     if not answers(port):
-        return STOPPED, None
-    return (OURS if process_of(server) else ANSWERS), None
+        return STOPPED, None, address
+    if process_of(server):
+        return OURS, None, address
+    # A map this tool did not start (the Claude preview, a terminal) is this project's when it serves its name. Each
+    # loopback is asked on its own: 127.0.0.1 and ::1 may be two different programs on the same port.
+    own, served = map_name(folder), []
+    for base in (address, f"http://[::1]:{port}"):
+        names = served_maps(base)
+        if own and own in names and made_here(folder, own):
+            return OURS, None, base
+        served += [item for item in names if item not in served]
+    return ANSWERS, (f"the LikeC4 project {', '.join(served)}" if served else None), address
 
 
 def own_group(pid):
@@ -739,12 +827,11 @@ def open_server(name, download=False, root=None):
             return 1
         address = ADDRESS.format(port=port)
         recorded = server_of(data, root, name)
-        state, served = ownership(root, name, recorded, port)
+        state, served, address = ownership(root, name, recorded, port)
         if state == OURS:
             print(f"The {name} is already running at {address}; I opened it in your browser.")
             webbrowser.open(address)
-            if name == "board":
-                keep(data, root, port)
+            keep(data, root, name, port)
             return 0
         if state == STOPPED and recorded.get("port") == port and process_of(recorded):
             # The lock is released before the wait, so a second run can arrive while ours is started but silent.
@@ -753,6 +840,8 @@ def open_server(name, download=False, root=None):
         if state == ANSWERS:
             who = f"another project ({served})" if served else "another program"
             print(f"Port {port} answers for {who}, so this project's {name} starts on a free port above.")
+            if name == "map":
+                why_not_recognised(root)
             free = choose_port(port, other_ports(data, root))
             if not free:
                 print(f"The {PORTS_TRIED} ports from {port} up are all taken, so the {name} was not started.")
@@ -768,11 +857,27 @@ def open_server(name, download=False, root=None):
     return wait_until_open(name, process, port, root, made, log_path)  # the lock is not held while it starts
 
 
-def keep(data, root, port):
-    """Remember a board that was already running on this port: its process id only while that process is ours."""
-    server = server_of(data, root, "board")
+def why_not_recognised(root):
+    """One line when this project's map name cannot tell a running map apart: no readable name, or a copied one."""
+    own = map_name(root)
+    if not own:
+        print(
+            "This project's map has no name I can read (plain JSON `name` in likec4.config.json), so a map already"
+            " running cannot be recognised as this one; `pm_init.py --upgrade --map` writes one where none exists."
+        )
+    elif not made_here(root, own):
+        print(
+            f"The map name {own} was made for another folder (a copied or moved likec4.config.json), so a map serving"
+            " it is not taken for this one; delete that file and run `pm_init.py --upgrade --map` to write this one's."
+        )
+
+
+def keep(data, root, name, port):
+    """Remember a server that was already running on this port: its process id only while that process is ours."""
+    server = server_of(data, root, name)
     pid = process_of(server) if server.get("port") == port else None
-    if not save(data, root, "board", port, pid=pid, started=server.get("started") if pid else None):
+    started, hmr = (server.get("started"), server.get("hmr_port")) if pid else (None, None)
+    if not save(data, root, name, port, pid=pid, started=started, hmr=hmr):
         warn_store()
 
 
@@ -836,8 +941,8 @@ def server_state(folder, name, server):
     port = server.get("port")
     if not isinstance(port, int) or port <= 0:
         return f"{name} not started yet"
-    state = ownership(folder, name, server, port)[0]
-    return f"{name} {ADDRESS.format(port=port)} {WORDS[state]}"
+    state, _, address = ownership(folder, name, server, port)
+    return f"{name} {address} {WORDS[state]}"
 
 
 def set_opening(value):
