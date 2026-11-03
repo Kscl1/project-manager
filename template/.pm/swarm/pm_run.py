@@ -105,8 +105,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
                         it is visible too; a worker without "helpers" writes "Helper needed" in its output for the lead;
                         agy has no switch for its sub-agents, so there only the brief forbids them.
-                        A first-run screen that only the owner can pass (agy: colour scheme, then its terms) is handed
-                        over before the brief is sent: finish it once in that Herdr tab, then rerun the job)
+                        A first-run screen that only the owner can pass (agy: colour scheme, then its terms, then the
+                        question whether to trust the folder) is handed over before the brief is sent: finish it once
+                        in that Herdr tab, then rerun the job)
 <run-dir>/caps.json: {"<bucket>": max parallel}.
 The loop re-reads jobs.json and caps.json every tick; a copy that is not valid JSON (an edit saved half-way) is
 skipped with one log line. An error inside one tick is logged and the loop goes on.
@@ -230,8 +231,12 @@ NO_HELPERS = {
     "agy": [],  # no switch for its sub-agents; the brief forbids them
 }
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
-# no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms.
-FIRST_RUN = re.compile(r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use")
+# no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms,
+# or say that agy may trust this folder: a retry shows the same screen again.
+FIRST_RUN = re.compile(
+    r"Welcome to Antigravity CLI|Choose your color scheme|Terms of Service & Data Use"
+    r"|Do you trust the contents of this project\?"
+)
 PERMISSION = re.compile(
     r"allow\s+access\s+to\s+this\s+file\s*\?|run\s+this\s+command\s*\?|requesting\s+permission\s+for\s*:", re.I
 )

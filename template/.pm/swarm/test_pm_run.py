@@ -432,6 +432,26 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(out.read_text(encoding="utf-8"), "previous attempt's output")
         self.assertFalse(out.with_name("a.attempt1.md").exists())
 
+    def test_agy_folder_trust_screen_is_handed_over_like_the_other_first_run_screens(self):
+        # Herdr showed the trust question as an idle agy, so pm_run used to send the brief into it; after five retries
+        # the same screen was still there. Only the owner can answer it, once per folder.
+        self.seed_reads(
+            "PS> agy --model ok", "Do you trust the contents of this project?\n  > Yes, I trust this folder"
+        )
+        self.jobs(self.job("a", "ok", harness="agy"), self.job("b", "ok", after=["a"]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertEqual(len(state["a"]["attempts"]), 1, "a retry would show the same screen again")
+        self.assertIn("first-run screen", state["a"]["attempts"][0]["why"])
+        self.assertIn("Do you trust the contents of this project?", state["a"]["attempts"][0]["why"])
+        self.assertEqual(state["b"]["state"], "blocked")
+        herdr = self.herdr_state()
+        self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the trust question")
+        self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
+        self.assertNotIn("RETRY a", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
+
     def test_first_prompt_waits_for_ready_agent_state(self):
         self.env["FAKE_START_STATES"] = json.dumps(["starting", "working", "ready"])
         self.jobs(self.job("a", "ok"))
