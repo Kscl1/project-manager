@@ -1761,7 +1761,12 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    if sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return
     run = Run(sys.argv[1])
+    if not run.root.is_dir():
+        sys.exit(f"pm_run: no run folder {run.root}; the first argument is the run folder that holds jobs.json")
     jobs = run.load("jobs.json", [])
     state = run.load("receipts.json", {})
     if "--status" in sys.argv:
