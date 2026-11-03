@@ -592,7 +592,9 @@ def control_mark(text):
 
 def quoted_paths(line):
     """The strings a shell line writes between single or double quotes, in order."""
-    return [double or single for double, single in re.findall(r'"([^"]+)"|\'([^\']+)\'', line or "")]
+    if not isinstance(line, str):
+        return []
+    return [double or single for double, single in re.findall(r'"([^"]+)"|\'([^\']+)\'', line)]
 
 
 def complete_helper(helper):
