@@ -656,13 +656,16 @@ def local_day(stamp):
         return as_date(stamp)
 
 
-def commits(*revisions, timeout=None):
+def commits(*revisions, timeout=None, failed=()):
     """Commits with short hash, author day, commit time, subject, Refs task IDs and Assisted-by models.
 
     `revisions` are git log arguments, HEAD by default: a range, `-5` or `--since=midnight`. The time is the committer's,
-    the one `--since` filters on, so a rebased or amended commit counts on the day it landed."""
+    the one `--since` filters on, so a rebased or amended commit counts on the day it landed. When git fails or does
+    not answer in `timeout`, the result is `failed`: an empty list unless the caller must tell the two apart."""
     log_format = "--format=%h%x1f%ad%x1f%cI%x1f%s%x1f%B%x1e"
-    log = git_stdout(["log", "--date=short", log_format, *(revisions or ["HEAD"])], "", timeout)
+    log = git_stdout(["log", "--date=short", log_format, *(revisions or ["HEAD"])], None, timeout)
+    if log is None:
+        return [] if failed == () else failed
     found = []
     for record in log.split("\x1e"):
         parts = record.strip("\n").split("\x1f")

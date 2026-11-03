@@ -11,13 +11,15 @@ The state is computed on each call from what is already there, and the call writ
 - Herdr's live snapshot (`herdr api snapshot`): the agents working in this project's folder or below it;
 - git: branch, changed files, last commits.
 `events` lists today's commits (by commit time), closed tasks and ended jobs, newest first, all in local time. A job's
-optional `task` field in jobs.json names the task it works for; `workers_by_task` groups the jobs by it. A job's `loop`
-is read from its run's pm_run.lease: `running` when the loop rewrote it in the last LEASE_FRESH_S, else `stopped`, so
-a job that is not ended under a stopped loop is left over, not running. A Herdr agent is matched to a job by the
-agent name pm_run gave the job's current attempt, never by its pane, which a later session may reuse.
+optional `task` field in jobs.json names the task it works for; `workers_by_task` groups the jobs by it. A job's `lease`
+is how fresh its run's pm_run.lease is: `fresh` when the loop rewrote it in the last LEASE_FRESH_S, else `stale`. It is
+a hint, not proof: a loop that just died stays fresh for a while, and a live loop that starts several slow workers in
+one tick can look stale until the tick ends. A not-ended job under a lease stale for long is left over. A Herdr agent
+is matched to a job by the agent name pm_run gave the job's current attempt (unique per attempt and run folder), never
+by its pane, which a later session may reuse; the match holds whatever the lease says.
 A source that cannot be read is null, never a guess: `agents` when Herdr is not installed or does not answer, `git`
-outside a repository or when git does not answer in GIT_TIMEOUT, a job's `state` when its run's receipts.json cannot
-be read. An ended job that never started a worker (a failed preflight, a blocked successor) has no end time; its
+outside a repository or when one of its git calls fails or does not answer in GIT_TIMEOUT (then `events` carries no
+commits), a job's `state` when its run's receipts.json cannot be read. An ended job that never started a worker (a failed preflight, a blocked successor) has no end time; its
 `why` says what stopped it.
 """
 
@@ -39,8 +41,8 @@ VERSION = 1  # the shape of the JSON; a reader checks it before it trusts the ke
 RECENT_S = 24 * 3600
 # pm_run's ended states (pm_run.ENDED; a test keeps the two in step). Any other state is not ended yet.
 ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
-# pm_run's loop rewrites pm_run.lease once a tick (PM_RUN_TICK, 15 s) and treats it as silent after three ticks; one
-# tick may also wait up to 60 s for a worker to be ready, so a live loop's lease can be that much older.
+# pm_run's loop rewrites pm_run.lease once a tick (PM_RUN_TICK, 15 s) and treats it as silent after three ticks; a
+# tick that starts a worker may also wait up to 60 s for it to be ready.
 LEASE_FRESH_S = 3 * float(os.environ.get("PM_RUN_TICK", 15)) + 60
 NO_TASK = "(none)"
 # Herdr as pm_run finds it: PM_RUN_HERDR (tests pass a JSON command list), else `herdr` on PATH.
@@ -79,7 +81,7 @@ def read_json(path):
         return None
 
 
-def loop_alive(run_dir, now):
+def lease_fresh(run_dir, now):
     try:
         _pid, written = (run_dir / "pm_run.lease").read_text().split()
         return now - float(written) < LEASE_FRESH_S
@@ -106,7 +108,7 @@ def recent_jobs(now):
             continue  # without its job list a run cannot be shown
         state = read_json(path)
         readable = isinstance(state, dict)
-        alive = loop_alive(run, now)
+        fresh = lease_fresh(run, now)
         for job in listed:
             if not isinstance(job, dict) or not isinstance(job.get("id"), str):
                 continue
@@ -125,7 +127,7 @@ def recent_jobs(now):
                     "job": job["id"],
                     "task": job["task"] if isinstance(job.get("task"), str) and job["task"].strip() else None,
                     "state": job_state,
-                    "loop": "running" if alive else "stopped",
+                    "lease": "fresh" if fresh else "stale",
                     "model": last.get("model") or job.get("model"),
                     "harness": job.get("harness", "pi"),
                     "thinking": job.get("thinking"),
@@ -164,11 +166,11 @@ def herdr_agents(jobs):
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError, AttributeError):
         return None
     root_key = pm_resume.path_key(ROOT)
-    # pm_run names each attempt's Herdr agent; only a job still under a live loop can own one
+    # pm_run names each attempt's Herdr agent; a job that has ended no longer owns one
     owners = {
         job["agent_name"]: f"{job['run']}/{job['job']}"
         for job in jobs
-        if job["agent_name"] and job["loop"] == "running" and job["state"] not in ENDED
+        if job["agent_name"] and job["state"] not in ENDED
     }
     agents = []
     for agent in listed:
@@ -203,18 +205,25 @@ def commit_entry(commit):
 
 
 def git_state():
-    """Branch line, changed files and the last five commits; None outside a git repository."""
+    """(git, today's commits): branch line, changed files and the last five commits, then today's commits.
+
+    Both are None outside a git repository or when one of the calls fails or does not answer: an empty list must
+    mean no commits, never "could not ask"."""
     # --no-optional-locks: a reader that runs often must not rewrite the index
     status = pm_resume.git_stdout(["--no-optional-locks", "status", "--porcelain=v1", "-b"], None, GIT_TIMEOUT)
     if status is None:
-        return None
+        return None, None
     lines = status.splitlines()
     branch = lines[0][3:] if lines and lines[0].startswith("## ") else None
-    return {
-        "branch": branch,
-        "changed": [line for line in lines if not line.startswith("## ")],
-        "last_commits": [commit_entry(commit) for commit in pm_resume.commits("-5", timeout=GIT_TIMEOUT)],
-    }
+    if branch and branch.startswith("No commits yet"):
+        last, todays = [], []  # git log fails in a new repository; there is nothing to list
+    else:
+        last = pm_resume.commits("-5", timeout=GIT_TIMEOUT, failed=None)
+        todays = pm_resume.commits("--since=midnight", timeout=GIT_TIMEOUT, failed=None)
+    if last is None or todays is None:
+        return None, None
+    changed = [line for line in lines if not line.startswith("## ")]
+    return {"branch": branch, "changed": changed, "last_commits": [commit_entry(c) for c in last]}, todays
 
 
 def task_entry(task, by_task):
@@ -263,7 +272,7 @@ def snapshot(now=None):
     open_tasks = pm_resume.load_tasks()
     drafts = pm_resume.load_tasks(pm_resume.DRAFTS_DIR)
     jobs = recent_jobs(now)
-    todays = pm_resume.commits("--since=midnight", timeout=GIT_TIMEOUT)
+    git, todays = git_state()
     by_task = {}
     for job in jobs:
         by_task.setdefault(job["task"] or NO_TASK, []).append(f"{job['run']}/{job['job']}")
@@ -281,8 +290,8 @@ def snapshot(now=None):
         "jobs": jobs,
         "workers_by_task": by_task,
         "agents": herdr_agents(jobs),
-        "git": git_state(),
-        "events": events(today, open_tasks + pm_resume.load_closed(), jobs, todays),
+        "git": git,
+        "events": events(today, open_tasks + pm_resume.load_closed(), jobs, todays or []),
     }
 
 

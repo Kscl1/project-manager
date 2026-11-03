@@ -200,7 +200,7 @@ class StateTest(unittest.TestCase):
         self.assertEqual(sorted(found), ["early", "loose", "review", "work"])
         self.assertEqual((found["early"]["ended"], found["early"]["why"]), (None, "PREFLIGHT: brief not found"))
         self.assertEqual(
-            (found["work"]["state"], found["work"]["loop"], found["work"]["model"]), ("started", "running", "m1")
+            (found["work"]["state"], found["work"]["lease"], found["work"]["model"]), ("started", "fresh", "m1")
         )
         self.assertIsNone(found["work"]["ended"])
         self.assertEqual((found["review"]["words"], found["review"]["check_exit"]), (812, 0))
@@ -222,11 +222,11 @@ class StateTest(unittest.TestCase):
         found = {job["job"]: job["state"] for job in self.snapshot()["jobs"]}
         self.assertEqual(found, {"a": None, "b": "verified"})
 
-    def test_a_job_left_over_by_a_stopped_loop_says_so(self):
+    def test_a_job_left_over_by_a_dead_loop_has_a_stale_lease(self):
         self.commit("feat: start")
         receipts = {"a": {"state": "started", "attempts": [{"started": time.time() - 600}]}}
         self.run_folder("dead-run", [{"id": "a"}], receipts, lease_age=10 * 60)
-        self.assertEqual(self.snapshot()["jobs"][0]["loop"], "stopped")
+        self.assertEqual(self.snapshot()["jobs"][0]["lease"], "stale")
 
     def test_herdr_agents_in_this_project_are_listed_and_matched_to_their_job(self):
         self.commit("feat: start")
@@ -258,10 +258,11 @@ class StateTest(unittest.TestCase):
             ]
         )
         agents = self.snapshot()["agents"]
-        # the dead run's agent is listed but not owned: its loop no longer watches it
+        # the agent name is unique to the attempt, so it names its job even under a stale lease: a slow tick of a live
+        # loop, or a worker left over by a dead one, which is still that job's worker
         self.assertEqual(
             [(a["pane"], a["status"], a["job"]) for a in agents],
-            [("w1:p2", "working", "r1/a"), ("w1:p3", "done", None), ("w1:p4", "idle", None)],
+            [("w1:p2", "working", "r1/a"), ("w1:p3", "done", None), ("w1:p4", "idle", "dead/b")],
         )
 
     def test_a_reused_pane_is_not_matched_to_the_old_job(self):
@@ -302,18 +303,38 @@ class StateTest(unittest.TestCase):
         self.assertIsNone(state["git"])
         self.assertEqual((state["tasks"], state["jobs"], state["events"]), ([], [], []))
 
-    def test_a_git_that_does_not_answer_leaves_git_unknown(self):
+    def test_a_new_repository_has_git_and_no_commits(self):
+        state = self.snapshot()
+        self.assertEqual((state["git"]["last_commits"], state["events"]), ([], []))
+
+    def test_a_git_call_that_does_not_answer_leaves_git_unknown(self):
         sys.path.insert(0, str(TOOLS))
         try:
             import pm_resume
             import pm_state
         finally:
             sys.path.remove(str(TOOLS))
+
+        def slow(hang):
+            """git status answers; the git log call named by `hang` times out."""
+
+            def run(command, **options):
+                if "status" in command:
+                    return subprocess.CompletedProcess(command, 0, "## main\n", "")
+                if hang in command:
+                    raise subprocess.TimeoutExpired(command, options["timeout"])
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            return run
+
+        for hang in ("-5", "--since=midnight"):
+            with self.subTest(hang=hang), patch.object(pm_resume.subprocess, "run", side_effect=slow(hang)) as run:
+                self.assertEqual(pm_state.git_state(), (None, None))  # unknown, never an empty history
+                self.assertTrue(all(call.kwargs["timeout"] == pm_state.GIT_TIMEOUT for call in run.call_args_list))
         hung = subprocess.TimeoutExpired(["git"], pm_state.GIT_TIMEOUT)
-        with patch.object(pm_resume.subprocess, "run", side_effect=hung) as run:
-            self.assertIsNone(pm_state.git_state())
-            self.assertEqual(pm_resume.commits("--since=midnight", timeout=pm_state.GIT_TIMEOUT), [])
-        self.assertTrue(all(call.kwargs["timeout"] == pm_state.GIT_TIMEOUT for call in run.call_args_list))
+        with patch.object(pm_resume.subprocess, "run", side_effect=hung):
+            self.assertEqual(pm_state.git_state(), (None, None))
+            self.assertEqual(pm_resume.commits("-5"), [])  # the old callers still get an empty list
 
     @unittest.skipUnless(PM_RUN.exists(), "the swarm layer is not installed")
     def test_ended_states_match_pm_run(self):
