@@ -828,6 +828,20 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.run_pm()
         self.assertEqual(self.receipts()["a"]["state"], "verified")
 
+    def test_preflight_fails_a_command_that_is_not_text(self):
+        # A number is not a command line, so the job ends PREFLIGHT before a worker is paid for.
+        for key in ("verify", "setup"):
+            with self.subTest(key=key):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
+                run.repo = self.tmp
+                job[key] = 17
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertIn(f"{key} must be one command line (text)", state["a"]["why"])
+                self.assertIn(f"PREFLIGHT a: {key} must be one command line (text)", run.log_path.read_text("utf-8"))
+
     def test_preflight_requires_the_folder_that_will_hold_the_report(self):
         run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
         run.repo = self.tmp

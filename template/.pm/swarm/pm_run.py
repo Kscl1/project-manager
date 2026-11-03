@@ -57,9 +57,9 @@ says what that means, so a partial sum is never read as the whole.
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
-exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character except a
-tab, and every entry of `helpers` names a model, or model, harness and thinking. The check never runs `verify`. A job
-that fails ends failed as PREFLIGHT, without starting a worker.
+exists as a file, the folder that will hold the report exists, `verify` and `setup` are one line of text with no
+control character except a tab, and every entry of `helpers` names a model, or model, harness and thinking. The check
+never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -598,11 +598,11 @@ def complete_helper(helper):
 def preflight(job, repo):
     """What is wrong with the job itself, in plain words, or None when it may start a worker.
 
-    Checks the job before a worker is paid for: its briefs, the folder that holds its report, the text of `verify`
-    and `setup`, and how `helpers` is written. It never runs `verify`, which may run whole test suites. A control
-    character there is almost always a Windows path whose backslashes a JSON string read as escapes, so the shell
-    line could not name its own file; text in a shell line is not read as a file, because `echo "Z:/literal"` is
-    not one.
+    Checks the job before a worker is paid for: its briefs, the folder that holds its report, that `verify` and
+    `setup` are one line of text, and how `helpers` is written. It never runs `verify`, which may run whole test
+    suites. A control character there is almost always a Windows path whose backslashes a JSON string read as escapes,
+    so the shell line could not name its own file; text in a shell line is not read as a file, because
+    `echo "Z:/literal"` is not one.
     """
     why = missing_brief(job, repo)
     if why:
@@ -611,7 +611,10 @@ def preflight(job, repo):
     if not out.parent.is_dir():
         return f"output folder not found: {out.parent}"
     for key in ("verify", "setup"):
-        mark = control_mark(job.get(key))
+        line = job.get(key)
+        if line is not None and not isinstance(line, str):
+            return f"{key} must be one command line (text)"
+        mark = control_mark(line)
         if mark:
             return f"{key} holds a control character ({mark}); write \\ or / in jobs.json"
     helpers = job.get("helpers")
