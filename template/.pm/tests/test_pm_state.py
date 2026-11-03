@@ -17,6 +17,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 TOOLS = Path(__file__).resolve().parent.parent / "tools"
 PM_RUN = Path(__file__).resolve().parent.parent / "swarm" / "pm_run.py"
@@ -47,6 +48,13 @@ def write_task(root, task_id, title, status, notes=None, updated=None):
             "",
         ]
     (tasks / f"{task_id.lower()} - fixture.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def skip_near_midnight(test, minutes=10):
+    """A test about "today" cannot hold while the day turns between its setup and the snapshot."""
+    clock = datetime.now()
+    if clock.hour == 0 and clock.minute < minutes or clock.hour == 23 and clock.minute >= 60 - minutes:
+        test.skipTest("too close to midnight for a test about today")
 
 
 def tree_digest(folder):
@@ -90,10 +98,19 @@ class StateTest(unittest.TestCase):
     def snapshot(self):
         return self.state(".pm/tools/pm_state.py")
 
-    def commit(self, message, name="history.txt"):
+    def commit(self, message, name="history.txt", when=None, authored=None):
+        """A commit; `when` and `authored` are git dates ('@<epoch> <offset>') for the committer and the author."""
         (self.root / name).write_text(message + "\n", encoding="utf-8")
         run_git(self.root, "add", name)
-        run_git(self.root, "commit", "-q", "-m", message)
+        env = dict(os.environ)
+        if when:
+            env["GIT_COMMITTER_DATE"] = when
+        if authored:
+            env["GIT_AUTHOR_DATE"] = authored
+        result = subprocess.run(
+            ["git", "commit", "-q", "-m", message], cwd=self.root, capture_output=True, text=True, env=env, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def run_folder(self, name, jobs, receipts, lease_age=None, written_ago=0):
         run = self.runs / name
@@ -154,6 +171,7 @@ class StateTest(unittest.TestCase):
             {"id": "review", "task": "REQ-1", "model": "m2"},
             {"id": "old", "task": "REQ-1", "model": "m3"},
             {"id": "loose", "model": "m4"},
+            {"id": "early", "task": "REQ-1", "model": "m5"},
         ]
         receipts = {
             "_herdr_workspace": "w1",
@@ -172,24 +190,37 @@ class StateTest(unittest.TestCase):
             },
             "old": {"state": "verified", "attempts": [{"started": now - 50 * HOUR, "ended": now - 49 * HOUR}]},
             "loose": {"state": "pending", "attempts": []},
+            "early": {"state": "failed", "why": "PREFLIGHT: brief not found", "attempts": []},
         }
         self.run_folder("live-run", jobs, receipts, lease_age=5)
         self.run_folder("old-run", [{"id": "x", "task": "REQ-1"}], {"x": {"state": "started"}}, written_ago=48 * HOUR)
         state = self.snapshot()
         found = {job["job"]: job for job in state["jobs"]}
-        self.assertEqual(sorted(found), ["loose", "review", "work"])  # the long-ended job and the old run are out
+        # the long-ended job and the old run are out; a job that failed before any worker started is in
+        self.assertEqual(sorted(found), ["early", "loose", "review", "work"])
+        self.assertEqual((found["early"]["ended"], found["early"]["why"]), (None, "PREFLIGHT: brief not found"))
         self.assertEqual(
             (found["work"]["state"], found["work"]["loop"], found["work"]["model"]), ("started", "running", "m1")
         )
         self.assertIsNone(found["work"]["ended"])
         self.assertEqual((found["review"]["words"], found["review"]["check_exit"]), (812, 0))
         self.assertEqual(
-            state["workers_by_task"], {"REQ-1": ["live-run/work", "live-run/review"], "(none)": ["live-run/loose"]}
+            state["workers_by_task"],
+            {"REQ-1": ["live-run/work", "live-run/review", "live-run/early"], "(none)": ["live-run/loose"]},
         )
-        self.assertEqual(state["tasks"][0]["workers"], ["live-run/work", "live-run/review"])
+        self.assertEqual(state["tasks"][0]["workers"], ["live-run/work", "live-run/review", "live-run/early"])
         ended = [event for event in state["events"] if event["kind"] == "job-ended"]
         if datetime.fromtimestamp(now - 60).date() == datetime.fromtimestamp(now).date():
             self.assertEqual([event["ref"] for event in ended], ["live-run/review"])
+
+    def test_unreadable_receipts_leave_the_state_unknown_and_a_bom_is_read(self):
+        self.commit("feat: start")
+        broken = self.run_folder("broken", [{"id": "a"}], {}, lease_age=1)
+        (broken / "receipts.json").write_text('{"a": {"state": "star', encoding="utf-8")
+        bom = self.run_folder("bom", [{"id": "b"}], {}, lease_age=1)
+        (bom / "receipts.json").write_text('{"b": {"state": "verified"}}', encoding="utf-8-sig")
+        found = {job["job"]: job["state"] for job in self.snapshot()["jobs"]}
+        self.assertEqual(found, {"a": None, "b": "verified"})
 
     def test_a_job_left_over_by_a_stopped_loop_says_so(self):
         self.commit("feat: start")
@@ -199,42 +230,90 @@ class StateTest(unittest.TestCase):
 
     def test_herdr_agents_in_this_project_are_listed_and_matched_to_their_job(self):
         self.commit("feat: start")
-        receipts = {"a": {"state": "started", "attempts": [{"started": time.time() - 60, "pane": "w1:p2"}]}}
-        self.run_folder("r1", [{"id": "a", "task": "REQ-9"}], receipts, lease_age=1)
-        elsewhere = self.root.parent / "another-project"
+        attempt = {"started": time.time() - 60, "pane": "w1:p2", "name": "run-a-1-ab12"}
+        self.run_folder(
+            "r1", [{"id": "a", "task": "REQ-9"}], {"a": {"state": "started", "attempts": [attempt]}}, lease_age=1
+        )
+        left = {"started": time.time() - 600, "pane": "w1:p4", "name": "run-b-1-cd34"}
+        self.run_folder("dead", [{"id": "b"}], {"b": {"state": "started", "attempts": [left]}}, lease_age=10 * 60)
+        elsewhere = self.root.parent / (self.root.name + "-copy")  # a sibling whose name starts with ours
         self.fake_herdr(
             [
-                {"pane_id": "w1:p2", "agent": "pi", "agent_status": "working", "cwd": str(self.root)},
+                {
+                    "pane_id": "w1:p2",
+                    "name": "run-a-1-ab12",
+                    "agent": "pi",
+                    "agent_status": "working",
+                    "cwd": str(self.root),
+                },
                 {"pane_id": "w1:p3", "agent": "claude", "agent_status": "done", "cwd": str(self.root / "src")},
+                {
+                    "pane_id": "w1:p4",
+                    "name": "run-b-1-cd34",
+                    "agent": "pi",
+                    "agent_status": "idle",
+                    "cwd": str(self.root),
+                },
                 {"pane_id": "w2:p1", "agent": "pi", "agent_status": "working", "cwd": str(elsewhere)},
             ]
         )
         agents = self.snapshot()["agents"]
+        # the dead run's agent is listed but not owned: its loop no longer watches it
         self.assertEqual(
             [(a["pane"], a["status"], a["job"]) for a in agents],
-            [("w1:p2", "working", "r1/a"), ("w1:p3", "done", None)],
+            [("w1:p2", "working", "r1/a"), ("w1:p3", "done", None), ("w1:p4", "idle", None)],
         )
 
+    def test_a_reused_pane_is_not_matched_to_the_old_job(self):
+        self.commit("feat: start")
+        attempt = {"started": time.time() - 60, "pane": "w1:p2", "name": "run-a-1-ab12"}
+        self.run_folder("r1", [{"id": "a"}], {"a": {"state": "started", "attempts": [attempt]}}, lease_age=1)
+        self.fake_herdr([{"pane_id": "w1:p2", "name": "someone-else", "agent": "claude", "cwd": str(self.root)}])
+        self.assertIsNone(self.snapshot()["agents"][0]["job"])
+
     def test_todays_commits_and_closed_tasks_are_events_newest_first(self):
+        skip_near_midnight(self)
+        now = time.time()
         closed_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         write_task(self.root, "REQ-5", "Finished today", "Done", updated=closed_at.strftime("%Y-%m-%dT%H:%M:00Z"))
         write_task(self.root, "REQ-6", "Finished long ago", "Done", updated="2026-01-02T10:00:00Z")
-        self.commit("feat: first")
-        self.commit("fix: second", name="other.txt")
-        events = self.snapshot()["events"]
+        # Both committed today, the earlier in a far-west offset and the later in a far-east one: as text the west
+        # one would sort as newer. The second was authored days ago and landed today, as a rebase does.
+        self.commit("feat: first\n\nRefs: none", when=f"@{int(now - 120)} -0500")
+        self.commit(
+            "fix: second", name="other.txt", when=f"@{int(now - 60)} +0900", authored=f"@{int(now - 72 * HOUR)} +0300"
+        )
+        state = self.snapshot()
+        events = state["events"]
         kinds = [(event["kind"], event["ref"] if event["kind"] == "task-closed" else event["what"]) for event in events]
         self.assertIn(("task-closed", "REQ-5"), kinds)
         self.assertNotIn(("task-closed", "REQ-6"), kinds)
         commits = [what for kind, what in kinds if kind == "commit"]
         self.assertEqual(commits, ["fix: second", "feat: first"])
-        times = [event["time"] for event in events]
-        self.assertEqual(times, sorted(times, reverse=True))
+        moments = [datetime.fromisoformat(event["time"]).timestamp() for event in events]
+        self.assertEqual(moments, sorted(moments, reverse=True))
+        offset = datetime.now().astimezone().isoformat()[-6:]
+        self.assertTrue(all(event["time"].endswith(offset) for event in events))  # one clock for the reader
+        self.assertEqual([c["tasks"] for c in state["git"]["last_commits"]], [[], []])  # `Refs: none` is no task
 
     def test_a_folder_without_git_or_runs_still_answers(self):
         shutil.rmtree(self.root / ".git")
         state = self.snapshot()
         self.assertIsNone(state["git"])
         self.assertEqual((state["tasks"], state["jobs"], state["events"]), ([], [], []))
+
+    def test_a_git_that_does_not_answer_leaves_git_unknown(self):
+        sys.path.insert(0, str(TOOLS))
+        try:
+            import pm_resume
+            import pm_state
+        finally:
+            sys.path.remove(str(TOOLS))
+        hung = subprocess.TimeoutExpired(["git"], pm_state.GIT_TIMEOUT)
+        with patch.object(pm_resume.subprocess, "run", side_effect=hung) as run:
+            self.assertIsNone(pm_state.git_state())
+            self.assertEqual(pm_resume.commits("--since=midnight", timeout=pm_state.GIT_TIMEOUT), [])
+        self.assertTrue(all(call.kwargs["timeout"] == pm_state.GIT_TIMEOUT for call in run.call_args_list))
 
     @unittest.skipUnless(PM_RUN.exists(), "the swarm layer is not installed")
     def test_ended_states_match_pm_run(self):

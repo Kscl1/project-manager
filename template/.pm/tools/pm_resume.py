@@ -484,7 +484,7 @@ def map_warning():
     return f"- ⚠️ Map may be out of date: folders added or removed since the map last changed ({last[:7]}): {shown}"
 
 
-def git_stdout(arguments, failure_warning):
+def git_stdout(arguments, failure_warning, timeout=None):
     try:
         result = subprocess.run(
             ["git", *arguments],
@@ -493,9 +493,10 @@ def git_stdout(arguments, failure_warning):
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=timeout,
             check=False,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return failure_warning
     if result.returncode != 0:
         return failure_warning
@@ -655,11 +656,13 @@ def local_day(stamp):
         return as_date(stamp)
 
 
-def commits(*revisions):
-    """Commits with short hash, local author day and time, subject, Refs task IDs and Assisted-by models.
+def commits(*revisions, timeout=None):
+    """Commits with short hash, author day, commit time, subject, Refs task IDs and Assisted-by models.
 
-    `revisions` are git log arguments, HEAD by default: a range, `-5` or `--since=midnight`."""
-    log = git_stdout(["log", "--date=short", "--format=%h%x1f%ad%x1f%aI%x1f%s%x1f%B%x1e", *(revisions or ["HEAD"])], "")
+    `revisions` are git log arguments, HEAD by default: a range, `-5` or `--since=midnight`. The time is the committer's,
+    the one `--since` filters on, so a rebased or amended commit counts on the day it landed."""
+    log_format = "--format=%h%x1f%ad%x1f%cI%x1f%s%x1f%B%x1e"
+    log = git_stdout(["log", "--date=short", log_format, *(revisions or ["HEAD"])], "", timeout)
     found = []
     for record in log.split("\x1e"):
         parts = record.strip("\n").split("\x1f")
