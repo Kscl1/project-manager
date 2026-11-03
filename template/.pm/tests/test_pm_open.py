@@ -1,16 +1,20 @@
 """Tests for ``python .pm/tools/pm_open.py``.
 
-A throwaway project holds only a ``.pm/`` folder and, in the tests that need it, a ``.claude/launch.json``. The port
-check, ``Popen``, ``shutil.which``, ``webbrowser.open`` and the ``npx --no-install`` check are fakes, so nothing is
-started, no browser opens and no port is touched. Standard library only.
+A throwaway project holds only a ``.pm/`` folder and, in the tests that need it, a ``.claude/launch.json``; the
+project list lives in a throwaway ``PM_HOME``. The port check, ``Popen``, ``shutil.which``, ``webbrowser.open``, the
+``npx --no-install`` check, the board's ``/api/status`` answer, the process check and the stop call are fakes, so
+nothing is started, no browser opens and no port or process is touched. Standard library only.
 """
 
+import contextlib
 import importlib.util
 import io
 import json
 import os
+import signal
 import subprocess
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -33,84 +37,236 @@ MAP = {
     "runtimeArgs": ["-y", "likec4@1.60.0", "start", "--port", "5173"],
     "port": 5173,
 }
+DEFAULT_BOARD = ["/bin/backlog", "browser", "--no-open", "--port", "6420", "--non-interactive"]
 
 
 class FakeProcess:
     """Stands in for a started server: its process id, and whether it has stopped (None while it runs)."""
 
-    pid = 4321
-    returncode = None
+    def __init__(self, pid, returncode=None):
+        self.pid = pid
+        self.returncode = returncode
 
     def poll(self):
         return self.returncode
 
 
-class OpenTest(unittest.TestCase):
+class LauncherTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
-        (self.root / ".pm").mkdir()
-        self.answers = []  # the port check's answers, in order; the last one repeats
+        self.work = Path(temporary.name)
+        self.root = self.project("shop")  # the project this command runs in
+        self.other = self.project("other")  # a second project, for the shared port list
+        self.store = self.work / "home" / "projects.json"
+        environment = mock.patch.dict(os.environ, {"PM_HOME": str(self.store.parent)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.answers = {}  # port -> the port check's answers, in order; the last one repeats
+        self.after_start = set()  # the ports that answer once a server was started on them
         self.ports = []  # every port the check was asked about
+        self.statuses = []  # every port the board status was asked about
+        self.status = {}  # port -> the folder the board there says it serves; the default is this project
         self.runs = []  # (command, kwargs) of each start
         self.checks = []  # every npx download check
         self.opened = []  # every address handed to the browser
         self.programs = {"backlog": "/bin/backlog", "npx": "/bin/npx"}
-        self.check_code = 0
+        self.check_code = 0  # the npx check's answer: 0 when the package is already downloaded
         self.exit_code = None  # the started server's exit code; None while it runs
+        self.pids = []  # every process id a start handed out
+        self.serving = self.root  # the project the board under test belongs to
+        self.live = set()  # the process ids the check calls alive
+        self.ended = []  # every process id a stop asked to end
         for patch in (
-            mock.patch.object(pm_open, "ROOT", self.root),
-            mock.patch.object(pm_open, "WAIT_SECONDS", 0.05),
-            mock.patch.object(pm_open, "POLL_SECONDS", 0),
+            mock.patch.object(pm_open, "WAIT_SECONDS", 0.1),
+            mock.patch.object(pm_open, "POLL_SECONDS", 0.01),
             mock.patch.object(pm_open, "listening", self.listen),
             mock.patch.object(pm_open.subprocess, "Popen", self.spawn),
             mock.patch.object(pm_open.subprocess, "run", self.check),
+            mock.patch.object(pm_open, "project_of", self.project_of),
+            mock.patch.object(pm_open, "alive", self.is_alive),
+            mock.patch.object(pm_open, "terminate", self.terminate),
             mock.patch.object(pm_open.shutil, "which", self.which),
             mock.patch.object(pm_open.webbrowser, "open", self.opened.append),
         ):
             patch.start()
             self.addCleanup(patch.stop)
 
+    def project(self, name):
+        """A throwaway project root: a folder with a .pm/ folder in it."""
+        root = self.work / name
+        (root / ".pm").mkdir(parents=True)
+        return root
+
     def listen(self, port):
         self.ports.append(port)
-        if len(self.answers) > 1:
-            return self.answers.pop(0)
-        return self.answers[0] if self.answers else False
+        if port in self.after_start and any(str(port) in command for command, _ in self.runs):
+            return True  # the server that was started on it holds it
+        answers = self.answers.get(port)
+        if not answers:
+            return False
+        return answers.pop(0) if len(answers) > 1 else answers[0]
 
     def spawn(self, command, **kwargs):
+        self.pids.append(4321 + len(self.runs))
         self.runs.append((command, kwargs))
-        process = FakeProcess()
-        process.returncode = self.exit_code
-        return process
+        return FakeProcess(self.pids[-1], self.exit_code)
 
     def check(self, command, **kwargs):
         self.checks.append(command)
         return subprocess.CompletedProcess(command, self.check_code)
 
+    def project_of(self, port):
+        self.statuses.append(port)
+        return self.status.get(port, self.serving.as_posix())
+
+    def is_alive(self, pid):
+        return pid in self.live
+
+    def terminate(self, pid):
+        self.ended.append(pid)
+        return True
+
     def which(self, name):
         return self.programs.get(name)
 
-    def run_tool(self, *args):
+    def run_tool(self, *args, root=None):
+        self.serving = root or self.root
         out = io.StringIO()
-        with redirect_stdout(out):
+        with mock.patch.object(pm_open, "ROOT", self.serving), redirect_stdout(out):
             code = pm_open.main(list(args))
         return code, out.getvalue()
 
-    def write_launch(self, *configs):
-        path = self.root / ".claude" / "launch.json"
+    def write_launch(self, *configs, root=None):
+        path = (root or self.root) / ".claude" / "launch.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"version": "0.0.1", "configurations": list(configs)}), encoding="utf-8")
+        return path
 
-    def test_board_that_is_already_open_is_opened_and_nothing_starts(self):
-        self.answers = [True]
+    def write_store(self, data):
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        self.store.write_text(json.dumps(data), encoding="utf-8")
+
+    def read_store(self):
+        return json.loads(self.store.read_text(encoding="utf-8"))
+
+    def key(self, root=None):
+        return pm_open.folder_key(root or self.root)
+
+    def record(self, root=None):
+        return self.read_store()["projects"][self.key(root)]
+
+    def busy(self, *ports):
+        """Make those ports answer, for good."""
+        for port in ports:
+            self.answers[port] = [True]
+
+    def answering_after_a_start(self, *ports):
+        """Those ports are free until a server starts on them, then they answer."""
+        self.after_start.update(ports)
+
+    # -- the board ---------------------------------------------------------------------------------------------
+
+    def test_board_starts_without_a_console_window_and_says_how_to_stop(self):
+        self.answering_after_a_start(6420)
         code, out = self.run_tool("board")
         self.assertEqual(code, 0)
-        self.assertIn("Something already answers", out)
-        self.assertIn("another program holds port 6420", out)
-        self.assertIn("http://127.0.0.1:6420", out)
+        command, kwargs = self.runs[0]
+        self.assertEqual(command, DEFAULT_BOARD, "a `backlog browser` server gets --non-interactive")
+        self.assertEqual(kwargs["cwd"], self.root)
+        if os.name == "nt":
+            self.assertEqual(
+                kwargs["creationflags"],
+                subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP,
+                "no console window: its output goes to the log alone",
+            )
+        else:
+            self.assertTrue(kwargs["start_new_session"])
+        self.assertTrue((self.root / ".pm" / "local" / "open-board.log").exists())
+        self.assertEqual(self.opened, ["http://127.0.0.1:6420"])
+        self.assertIn("The board is open at http://127.0.0.1:6420", out)
+        self.assertIn("python .pm/tools/pm_open.py stop board", out)
+        self.assertNotIn("close the window", out)
+        self.assertEqual(
+            self.record()["board"], {"port": 6420, "pid": 4321}, "the port and the process id are recorded"
+        )
+
+    def test_a_board_that_is_ours_already_is_opened_and_nothing_starts(self):
+        self.busy(6420)
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertIn("The board is already running at http://127.0.0.1:6420", out)
         self.assertEqual(self.opened, ["http://127.0.0.1:6420"])
         self.assertEqual(self.runs, [])
+        self.assertEqual(self.statuses, [6420], "an answering port is asked who it serves")
+        self.assertEqual(self.record()["board"], {"port": 6420}, "a board this tool did not start keeps no process id")
+
+    def test_a_recorded_port_is_used_again_though_a_lower_one_is_free(self):
+        self.write_store({"projects": {self.key(): {"name": "shop", "board": {"port": 7050, "pid": 999}}}})
+        self.answering_after_a_start(7050)
+        code, _ = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs[0][0][-2], "7050", "the address of a project stays the same")
+        self.assertEqual(self.record()["board"], {"port": 7050, "pid": 4321}, "the new process id replaces the old one")
+
+    def test_a_port_that_answers_for_another_folder_is_foreign_and_ours_starts_above(self):
+        self.busy(6420)
+        self.status[6420] = self.other.as_posix()
+        self.answering_after_a_start(6421)
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertIn(f"Port 6420 answers for another project ({self.other.as_posix()})", out)
+        self.assertEqual(
+            self.runs[0][0], ["/bin/backlog", "browser", "--no-open", "--port", "6421", "--non-interactive"]
+        )
+        self.assertEqual(self.opened, ["http://127.0.0.1:6421"])
+        self.assertEqual(self.record()["board"], {"port": 6421, "pid": 4321}, "ours is recorded on its own port")
+
+    def test_a_port_that_answers_without_a_board_status_is_foreign(self):
+        self.busy(6420)
+        self.status[6420] = None  # it answers, but with nothing we can read
+        self.answering_after_a_start(6421)
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertIn("Port 6420 answers for another program", out)
+        self.assertEqual(self.runs[0][0][-2:], ["6421", "--non-interactive"])
+        self.assertEqual(self.opened, ["http://127.0.0.1:6421"])
+        self.assertEqual(self.statuses, [6420, 6421], "the board that was started is asked too")
+
+    def test_a_board_that_starts_but_serves_another_project_is_not_reported_open(self):
+        self.answering_after_a_start(6420)
+        self.status[6420] = self.other.as_posix()
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("it is not this project's board", out)
+        self.assertNotIn("is open at", out)
+        self.assertEqual(self.opened, [])
+
+    def test_a_board_that_never_answers_names_the_command_and_the_log(self):
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("did not answer", out)
+        self.assertIn("backlog browser --no-open --port 6420 --non-interactive", out)
+        self.assertIn(".pm/local/open-board.log", out)
+        self.assertEqual(self.opened, [])
+
+    def test_board_that_stops_at_once_is_reported_without_the_full_wait(self):
+        self.exit_code = 3
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("stopped before it answered", out)
+        self.assertIn("exit code 3", out)
+        self.assertIn(".pm/local/open-board.log", out)
+        self.assertEqual(self.opened, [])
+
+    def test_a_port_that_answers_after_the_started_server_quit_is_not_reported_open(self):
+        self.answering_after_a_start(6420)  # free before the start, then something answers
+        self.exit_code = 1  # but what was started has already quit
+        code, out = self.run_tool("board")
+        self.assertEqual(code, 1)
+        self.assertIn("Another program may hold port 6420", out)
+        self.assertNotIn("is open", out)
+        self.assertEqual(self.opened, [])
 
     def test_board_without_backlog_says_how_to_get_it(self):
         self.programs = {}
@@ -121,33 +277,100 @@ class OpenTest(unittest.TestCase):
         self.assertEqual(self.runs, [])
         self.assertEqual(self.opened, [])
 
-    def test_board_starts_a_window_waits_for_the_port_and_reports_how_to_stop(self):
-        self.answers = [False, False, True]
+    def test_launch_file_wins_over_the_built_in_defaults(self):
+        self.write_launch(
+            {
+                "name": "board",
+                "runtimeExecutable": "backlog",
+                "runtimeArgs": ["browser", "--port", "7001"],
+                "port": 7001,
+            }
+        )
+        self.answering_after_a_start(7001)
         code, out = self.run_tool("board")
         self.assertEqual(code, 0)
-        command, kwargs = self.runs[0]
-        self.assertEqual(command, ["/bin/backlog", "browser", "--no-open", "--port", "6420"])
-        self.assertEqual(kwargs["cwd"], self.root)
-        if os.name == "nt":
-            self.assertEqual(kwargs["creationflags"], subprocess.CREATE_NEW_CONSOLE)
-            self.assertIn("close the window", out)
-        else:
-            self.assertTrue(kwargs["start_new_session"])
-            self.assertIn("4321", out)
-        self.assertTrue((self.root / ".pm" / "local" / "open-board.log").exists())
-        self.assertEqual(self.opened, ["http://127.0.0.1:6420"])
-        self.assertEqual(self.ports, [6420, 6420, 6420])
-        self.assertIn("http://127.0.0.1:6420", out)
-        self.assertIn("backlog browser --no-open --port 6420", out)
+        self.assertEqual(self.runs[0][0], ["/bin/backlog", "browser", "--port", "7001", "--non-interactive"])
+        self.assertIn("http://127.0.0.1:7001", out)
 
-    def test_board_that_never_answers_names_the_command_and_the_log(self):
-        self.answers = [False]
-        code, out = self.run_tool("board")
-        self.assertEqual(code, 1)
-        self.assertIn("did not answer", out)
-        self.assertIn("backlog browser --no-open --port 6420", out)
-        self.assertIn(".pm/local/open-board.log", out)
-        self.assertEqual(self.opened, [])
+    def test_a_board_command_that_is_already_non_interactive_is_left_alone(self):
+        self.write_launch(
+            {
+                "name": "board",
+                "runtimeExecutable": "backlog",
+                "runtimeArgs": ["browser", "--non-interactive"],
+                "port": 7002,
+            }
+        )
+        self.answering_after_a_start(7002)
+        code, _ = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs[0][0], ["/bin/backlog", "browser", "--non-interactive", "--port", "7002"])
+
+    # -- the map -----------------------------------------------------------------------------------------------
+
+    def test_the_map_gets_a_local_listen_address_and_its_own_hmr_port(self):
+        self.write_launch(MAP)
+        self.answering_after_a_start(5173)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self.runs[0][0],
+            [
+                "/bin/npx",
+                "--no-install",
+                "likec4@1.60.0",
+                "start",
+                "--port",
+                "5173",
+                "--listen",
+                "127.0.0.1",
+                "--hmr-port",
+                "24678",
+            ],
+        )
+        self.assertEqual(self.record()["map"], {"port": 5173, "hmr_port": 24678, "pid": 4321})
+        self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
+        self.assertIn("--listen 127.0.0.1 --hmr-port 24678", out)
+
+    def test_the_map_takes_an_hmr_port_no_other_project_holds(self):
+        self.write_store(
+            {"projects": {self.key(self.other): {"name": "other", "map": {"port": 5174, "hmr_port": 24678, "pid": 9}}}}
+        )
+        self.write_launch(MAP)
+        self.answering_after_a_start(5173)
+        code, _ = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("24679", self.runs[0][0])
+        self.assertNotIn("24678", self.runs[0][0])
+        self.assertEqual(self.record()["map"]["hmr_port"], 24679)
+
+    def test_a_map_whose_recorded_process_still_runs_is_opened_and_nothing_starts(self):
+        self.write_launch(MAP)
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 4321, "hmr_port": 24678}}}}
+        )
+        self.live = {4321}
+        self.busy(5173)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn("The map is already running at http://127.0.0.1:5173", out)
+        self.assertEqual(self.runs, [])
+        self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
+
+    def test_a_map_whose_recorded_process_is_gone_is_foreign_even_though_the_port_answers(self):
+        self.write_launch(MAP)
+        self.write_store(
+            {"projects": {self.key(): {"name": "shop", "map": {"port": 5173, "pid": 999, "hmr_port": 24678}}}}
+        )
+        self.busy(5173)
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn(
+            "Port 5173 answers for another program", out, "a running map of ours would have a live process id"
+        )
+        self.assertEqual(self.runs[0][0][:6], ["/bin/npx", "--no-install", "likec4@1.60.0", "start", "--port", "5174"])
+        self.assertEqual(self.record()["map"], {"port": 5174, "hmr_port": 24678, "pid": 4321})
 
     def test_map_without_the_layer_is_reported_as_not_installed(self):
         code, out = self.run_tool("map")
@@ -156,16 +379,6 @@ class OpenTest(unittest.TestCase):
         self.assertIn("--map", out)
         self.assertEqual(self.runs, [])
         self.assertEqual(self.checks, [])
-        self.assertEqual(self.opened, [])
-
-    def test_board_that_stops_at_once_is_reported_without_the_full_wait(self):
-        self.answers = [False]
-        self.exit_code = 3
-        code, out = self.run_tool("board")
-        self.assertEqual(code, 1)
-        self.assertIn("stopped before it answered", out)
-        self.assertIn("exit code 3", out)
-        self.assertIn(".pm/local/open-board.log", out)
         self.assertEqual(self.opened, [])
 
     def test_map_layer_without_its_entry_points_to_the_upgrade(self):
@@ -190,23 +403,37 @@ class OpenTest(unittest.TestCase):
     def test_map_starts_the_entry_command_after_a_download_yes(self):
         self.write_launch(MAP)
         self.check_code = 1
-        self.answers = [False, True]
+        self.answering_after_a_start(5173)
         code, out = self.run_tool("map", "--download")
         self.assertEqual(code, 0)
         self.assertEqual(self.checks, [])
-        self.assertEqual(self.runs[0][0], ["/bin/npx", "-y", "likec4@1.60.0", "start", "--port", "5173"])
+        self.assertEqual(
+            self.runs[0][0],
+            [
+                "/bin/npx",
+                "-y",
+                "likec4@1.60.0",
+                "start",
+                "--port",
+                "5173",
+                "--listen",
+                "127.0.0.1",
+                "--hmr-port",
+                "24678",
+            ],
+        )
         self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
         self.assertIn("http://127.0.0.1:5173", out)
 
     def test_map_starts_without_the_flag_when_the_package_is_already_there(self):
         self.write_launch(MAP)
-        self.answers = [False, True]
+        self.answering_after_a_start(5173)
         code, _ = self.run_tool("map")
         self.assertEqual(code, 0)
         self.assertEqual(self.checks, [["/bin/npx", "--no-install", "likec4@1.60.0", "--version"]])
         self.assertEqual(
-            self.runs[0][0],
-            ["/bin/npx", "--no-install", "likec4@1.60.0", "start", "--port", "5173"],
+            self.runs[0][0][:2],
+            ["/bin/npx", "--no-install"],
             "without --download the start itself may not download, so -y becomes --no-install",
         )
 
@@ -219,45 +446,277 @@ class OpenTest(unittest.TestCase):
         self.assertEqual(self.checks, [["/bin/npx", "--no-install", "likec4", "--version"]])
         self.assertEqual(self.runs, [])
 
-    def test_a_port_that_answers_after_the_started_server_quit_is_not_reported_open(self):
-        self.answers = [False, True]  # free before the start, then something answers
-        self.exit_code = 1  # but what was started has already quit
-        code, out = self.run_tool("board")
-        self.assertEqual(code, 1)
-        self.assertIn("Another program may hold port 6420", out)
-        self.assertNotIn("is open", out)
-        self.assertEqual(self.opened, [])
+    # -- entry names, files and the project list ----------------------------------------------------------------
 
-    def test_launch_file_wins_over_the_built_in_defaults(self):
+    def test_both_entry_name_pairs_work(self):
         self.write_launch(
-            {
-                "name": "board",
-                "runtimeExecutable": "backlog",
-                "runtimeArgs": ["browser", "--no-open", "--port", "7001"],
-                "port": 7001,
-            }
+            dict(BOARD, name="backlog-board"),
+            dict(MAP, name="likec4"),
         )
-        self.answers = [False, True]
-        code, out = self.run_tool("board")
-        self.assertEqual(code, 0)
-        self.assertEqual(self.runs[0][0], ["/bin/backlog", "browser", "--no-open", "--port", "7001"])
-        self.assertIn("http://127.0.0.1:7001", out)
+        self.answering_after_a_start(6420, 5173)
+        board_code, _ = self.run_tool("board")
+        map_code, _ = self.run_tool("map")
+        self.assertEqual(board_code, 0)
+        self.assertEqual(map_code, 0)
+        self.assertEqual(self.runs[0][0][-2:], ["6420", "--non-interactive"])
+        self.assertIn("likec4@1.60.0", self.runs[1][0])
 
-    def test_the_port_field_counts_when_the_arguments_carry_no_port(self):
-        self.write_launch({"name": "board", "runtimeExecutable": "backlog", "runtimeArgs": ["browser"], "port": 7002})
-        self.answers = [True]
+    def test_the_launch_file_is_byte_identical_after_a_run(self):
+        path = self.root / ".claude" / "launch.json"
+        path.parent.mkdir(parents=True)
+        original = '{"version":"0.0.1",  "configurations":[{"name":"board","runtimeExecutable":"backlog",\n "runtimeArgs":["browser","--port","7003"],"port":7003}]}'
+        path.write_text(original, encoding="utf-8")
+        self.answering_after_a_start(7003)
         code, _ = self.run_tool("board")
         self.assertEqual(code, 0)
-        self.assertEqual(self.ports, [7002])
+        self.assertEqual(path.read_text(encoding="utf-8"), original, "launch.json is tracked in git: it is only read")
 
-    def test_help_explains_both_names_and_the_download_flag(self):
+    def test_a_project_joins_the_list_the_first_time_its_board_opens(self):
+        self.assertFalse(self.store.exists())
+        self.answering_after_a_start(6420)
+        self.run_tool("board")
+        line = self.record()
+        self.assertEqual(line["name"], "shop")
+        self.assertEqual(line["board"]["port"], 6420)
+
+    def test_two_projects_get_different_board_ports(self):
+        self.answering_after_a_start(6420, 6421)
+        first, _ = self.run_tool("board")
+        second, out = self.run_tool("board", root=self.other)
+        self.assertEqual((first, second), (0, 0))
+        self.assertEqual(self.runs[0][0][-2], "6420")
+        self.assertEqual(self.runs[1][0][-2], "6421", "another project already holds 6420")
+        self.assertIn("http://127.0.0.1:6421", out)
+        data = self.read_store()
+        self.assertEqual(data["projects"][self.key()]["board"]["port"], 6420)
+        self.assertEqual(data["projects"][self.key(self.other)]["board"]["port"], 6421)
+
+    def test_the_project_list_is_written_to_a_temporary_file_and_moved(self):
+        moves = []
+        replace = os.replace
+
+        def record_move(source, target):
+            moves.append((Path(source), Path(target)))
+            replace(source, target)
+
+        with mock.patch.object(pm_open.os, "replace", record_move):
+            code, _ = self.run_tool("opening", "always")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(moves), 1)
+        source, target = moves[0]
+        self.assertEqual(target, self.store)
+        self.assertEqual(source.parent, self.store.parent, "the temporary file sits next to its final name")
+        self.assertEqual([path.name for path in self.store.parent.iterdir()], ["projects.json"])
+
+    def test_a_broken_project_list_reads_as_empty_and_is_rewritten(self):
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        self.store.write_text("{ this is not json", encoding="utf-8")
+        self.assertEqual(pm_open.opening(), "ask", "a broken file means the default")
+        self.answering_after_a_start(6420)
+        code, _ = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.record()["board"], {"port": 6420, "pid": 4321})
+
+    # -- stop and list ------------------------------------------------------------------------------------------
+
+    def test_stop_with_no_record_does_nothing(self):
+        code, out = self.run_tool("stop", "board")
+        self.assertEqual(code, 0)
+        self.assertIn("No board is recorded for this project, so I stopped nothing.", out)
+        self.assertEqual(self.ended, [])
+
+    def test_stop_ends_the_recorded_server_and_keeps_the_address(self):
+        self.answering_after_a_start(6420)
+        self.run_tool("board")
+        self.live = {self.pids[-1]}
+        code, out = self.run_tool("stop", "board")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ended, [4321])
+        self.assertIn("Stopped the board (process id 4321).", out)
+        self.assertEqual(self.record()["board"], {"port": 6420}, "the port stays, the claim to a process goes")
+        self.assertEqual(self.record()["name"], "shop", "the project itself stays in the list")
+        self.after_start.clear()  # the stopped server no longer answers there
+        _, listed = self.run_tool("list")
+        self.assertIn("board http://127.0.0.1:6420 stopped", listed)
+
+    def test_stop_of_a_server_that_is_gone_says_so_and_does_nothing(self):
+        self.write_store({"projects": {self.key(): {"name": "shop", "board": {"port": 6420, "pid": 999}}}})
+        code, out = self.run_tool("stop", "board")
+        self.assertEqual(code, 0)
+        self.assertIn("The board recorded for this project is not running, so I stopped nothing.", out)
+        self.assertEqual(self.ended, [])
+
+    def test_stop_needs_to_know_which_server(self):
+        code, out = self.run_tool("stop")
+        self.assertEqual(code, 1)
+        self.assertIn("stop board", out)
+
+    def test_list_names_each_project_with_its_board_and_map(self):
+        self.write_store(
+            {
+                "projects": {
+                    self.key(): {"name": "shop", "board": {"port": 6421, "pid": 4321}, "map": {"port": 5173}},
+                    self.key(self.other): {"name": "other", "map": {"port": 5174, "pid": 9, "hmr_port": 24678}},
+                }
+            }
+        )
+        self.live = {4321}
+        self.busy(5173)
+        code, out = self.run_tool("list")
+        self.assertEqual(code, 0)
+        lines = out.splitlines()
+        self.assertEqual(len(lines), 2, "one line per project")
+        shop = next(line for line in lines if line.startswith("shop"))
+        self.assertIn("board http://127.0.0.1:6421 running", shop)
+        self.assertIn("map http://127.0.0.1:5173 running", shop)
+        other = next(line for line in lines if line.startswith("other"))
+        self.assertIn("board not started yet", other)
+        self.assertIn("map http://127.0.0.1:5174 stopped", other, "a dead process id is not a running map")
+
+    def test_list_with_nothing_registered_says_how_to_add_a_project(self):
+        code, out = self.run_tool("list")
+        self.assertEqual(code, 0)
+        self.assertIn("No project is registered yet", out)
+        self.assertIn("pm_open.py board", out)
+
+    # -- the opening setting -------------------------------------------------------------------------------------
+
+    def test_opening_stores_the_choice_and_says_what_it_means(self):
+        code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.read_store()["opening"], "always")
+        self.assertIn("The project window is now 'always'", out)
+        self.assertIn("opens the board without asking", out)
+
+    def test_opening_without_a_word_is_refused(self):
+        code, out = self.run_tool("opening", "sometimes")
+        self.assertEqual(code, 1)
+        self.assertIn("ask`, `always` or `never`", out)
+        self.assertFalse(self.store.exists(), "a refused choice writes nothing")
+
+    def test_the_window_lines_read_as_plain_words(self):
+        self.assertEqual(
+            pm_open.WINDOW_LINES["ask"],
+            "Project window: ask the user once whether to open the board (python .pm/tools/pm_open.py board).",
+        )
+        self.assertEqual(
+            pm_open.WINDOW_LINES["always"],
+            "Project window: the user chose always; open the board now with python .pm/tools/pm_open.py board.",
+        )
+        self.assertEqual(pm_open.WINDOW_LINES["never"], "")
+
+    def test_help_explains_every_command(self):
         out = io.StringIO()
         with redirect_stdout(out), self.assertRaises(SystemExit) as raised:
             pm_open.main(["--help"])
         self.assertEqual(raised.exception.code, 0)
         text = out.getvalue()
-        for word in ("board", "map", "--download"):
+        for word in ("board", "map", "--download", "stop", "list", "opening"):
             self.assertIn(word, text)
+
+
+class FakeKernel32:
+    """Stands in for the Windows kernel: an OpenProcess handle and the exit code GetExitCodeProcess writes."""
+
+    def __init__(self, code=pm_open.STILL_ACTIVE, handle=1234):
+        self.code, self.handle, self.closed = code, handle, []
+        self.OpenProcess = mock.Mock(return_value=handle)
+        self.GetExitCodeProcess = mock.Mock(side_effect=self.exit_code)
+        self.CloseHandle = mock.Mock(side_effect=self.closed.append)
+
+    def exit_code(self, handle, pointer):
+        pointer._obj.value = self.code
+        return 1
+
+
+class PlatformTest(unittest.TestCase):
+    """The Windows branches run on any system, and nothing real is signalled or started."""
+
+    def setUp(self):
+        self.kill = mock.Mock()
+
+    def windows(self, kernel):
+        """os.name says nt, os.kill is recorded, and ctypes.windll is this fake kernel; all restored afterwards."""
+        stack = contextlib.ExitStack()
+        stack.enter_context(mock.patch.object(pm_open.os, "name", "nt"))
+        stack.enter_context(mock.patch.object(pm_open.os, "kill", self.kill))
+        stack.enter_context(
+            mock.patch.object(pm_open.ctypes, "windll", types.SimpleNamespace(kernel32=kernel), create=True)
+        )
+        return stack
+
+    def test_the_alive_check_never_calls_os_kill_on_windows(self):
+        kernel = FakeKernel32()
+        with self.windows(kernel):
+            self.assertTrue(pm_open.alive(4321))
+        self.kill.assert_not_called()
+        self.assertEqual(kernel.OpenProcess.call_args[0], (pm_open.QUERY_LIMITED, False, 4321))
+        self.assertEqual(kernel.CloseHandle.call_count, 1, "the handle is closed again")
+
+    def test_a_windows_process_that_has_exited_reads_as_gone(self):
+        with self.windows(FakeKernel32(code=0)):
+            self.assertFalse(pm_open.alive(4321))
+
+    def test_a_windows_process_that_cannot_be_opened_reads_as_gone(self):
+        with self.windows(FakeKernel32(handle=0)):
+            self.assertFalse(pm_open.alive(4321))
+
+    def test_stop_on_windows_ends_the_whole_tree(self):
+        run = mock.Mock(return_value=subprocess.CompletedProcess([], 0))
+        with self.windows(FakeKernel32()), mock.patch.object(pm_open.subprocess, "run", run):
+            self.assertTrue(pm_open.terminate(4321))
+        self.assertEqual(run.call_args[0][0], ["taskkill", "/T", "/F", "/PID", "4321"])
+        self.kill.assert_not_called()
+
+    def test_stop_elsewhere_signals_the_process_group(self):
+        killpg = mock.Mock()
+        group = mock.patch.object(pm_open.os, "getpgid", lambda pid: 77, create=True)
+        signal_group = mock.patch.object(pm_open.os, "killpg", killpg, create=True)
+        with mock.patch.object(pm_open.os, "name", "posix"), group, signal_group:
+            self.assertTrue(pm_open.terminate(4321))
+        killpg.assert_called_once_with(77, signal.SIGTERM)
+
+    def test_the_alive_check_elsewhere_only_asks(self):
+        with mock.patch.object(pm_open.os, "name", "posix"), mock.patch.object(pm_open.os, "kill", self.kill):
+            self.assertTrue(pm_open.alive(4321))
+        self.kill.assert_called_once_with(4321, 0)
+
+    def test_a_process_id_of_zero_is_never_checked(self):
+        with mock.patch.object(pm_open.os, "name", "posix"), mock.patch.object(pm_open.os, "kill", self.kill):
+            self.assertFalse(pm_open.alive(0))
+            self.assertFalse(pm_open.alive(None))
+        self.kill.assert_not_called()
+
+
+class StartTest(unittest.TestCase):
+    """A started server outlives the command: no console window on Windows, its own session elsewhere."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.popen = mock.Mock(return_value="process")
+        patch = mock.patch.object(pm_open.subprocess, "Popen", self.popen)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def start(self):
+        log = self.root / ".pm" / "local" / "open-board.log"
+        return pm_open.start(["/bin/backlog", "browser"], self.root, log)
+
+    def test_elsewhere_the_server_gets_a_session_of_its_own(self):
+        with mock.patch.object(pm_open.os, "name", "posix"):
+            self.assertEqual(self.start(), "process")
+        options = self.popen.call_args[1]
+        self.assertTrue(options["start_new_session"])
+        self.assertNotIn("creationflags", options)
+        self.assertEqual(options["stderr"], subprocess.STDOUT, "the server's own output goes to the log")
+
+    @unittest.skipUnless(os.name == "nt", "the two creation flags exist on Windows only")
+    def test_on_windows_the_server_gets_no_console_window(self):
+        self.start()
+        options = self.popen.call_args[1]
+        self.assertEqual(options["creationflags"], subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
 
 
 if __name__ == "__main__":
