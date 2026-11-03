@@ -88,8 +88,11 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
-                       "helpers": ["model", ...],  (lets the worker start helpers as its own pm_run jobs, in a run
-                                                    dir inside `writes`, on these models only; default: none)
+                       "helpers": ["model" | {"model": ..., "harness": ..., "thinking": ...}, ...],
+                                                (lets the worker start helpers as its own pm_run jobs, in a run
+                                                 dir inside `writes`, on these models only; an object also names
+                                                 the harness and thinking level to start that helper with;
+                                                 default: none)
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
@@ -636,9 +639,17 @@ def agent_name(job_id, n, root):
     return re.sub(r"[^a-z0-9-]", "-", f"run-{job_id}".lower())[: 32 - len(suffix)] + suffix
 
 
+def helper_label(helper):
+    """One entry of `helpers` as the brief reads it: the model name, or the name with how that helper starts."""
+    if isinstance(helper, str):
+        return helper
+    return f"{helper.get('model')} (harness {helper.get('harness')}, thinking {helper.get('thinking')})"
+
+
 def launch_prompt(job):
     also = f" and the paths {', '.join(job['writes'])}" if job.get("writes") else ""
-    helpers = HELPERS.format(models=", ".join(job["helpers"]), job=job["id"]) if job.get("helpers") else NO_HELPER
+    models = ", ".join(helper_label(helper) for helper in job.get("helpers") or [])
+    helpers = HELPERS.format(models=models, job=job["id"]) if job.get("helpers") else NO_HELPER
     return PROMPT.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"], also=also, helpers=helpers)
 
 

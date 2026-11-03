@@ -1187,6 +1187,33 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertIn("wait until it has ended", prompt)
         self.assertIn("Your output file is out/a.md. Create", prompt, "the output sentence is unchanged")
 
+    def test_a_helper_object_tells_the_worker_its_harness_and_thinking(self):
+        helper = {"model": "big", "harness": "claude", "thinking": "low"}
+        job = self.job("a", "ok", writes=["sub/"], helpers=["cheap-a", helper])
+        prompt = pm_run.launch_prompt(job)
+        self.assertIn("on these models: cheap-a, big (harness claude, thinking low).", prompt)
+        self.assertNotIn("Do not start a helper", prompt)
+
+    def test_a_job_with_helper_objects_passes_preflight_and_starting_it(self):
+        helper = {"model": "big", "harness": "claude", "thinking": "low"}
+        self.jobs(self.job("a", "ok", writes=["sub/"], helpers=["cheap-a", helper]))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+        prompt = self.herdr_state()["gone"][self.a1]["prompts"][0]
+        self.assertIn("on these models: cheap-a, big (harness claude, thinking low).", prompt)
+
+    def test_preflight_rejects_a_helper_object_that_misses_one_of_its_three(self):
+        for helper in ({"model": "big", "harness": "pi"}, {"model": "big", "thinking": "low"}, 7):
+            with self.subTest(helper=helper):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", helpers=[helper]), {}
+                run.repo = self.tmp
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertEqual(state["a"]["why"], "helper 1 needs model, harness and thinking, or a plain model name")
+
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
         (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
