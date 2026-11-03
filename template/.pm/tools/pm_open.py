@@ -12,7 +12,7 @@ the board runs `backlog browser --no-open --port 6420`, and the map has no defau
 The project list in ~/.pm/projects.json (or the folder PM_HOME names) is what lets several projects run at once. It
 holds one entry per project, keyed by its resolved folder: the port of each server, the map's HMR port, and the
 process this tool started, with its id and the time it started. A project joins it the first time this command opens
-something in it.
+something in it. A lock file next to the list lets one run at a time read it, choose ports and write it back.
 
 A port that answers is not proof that the server is ours, and a running process id is not proof that it is our
 process: the system hands the id out again once ours ends. The board is ours while its /api/status names this
@@ -25,6 +25,7 @@ The servers outlive this command: no console window on Windows, their own sessio
 """
 
 import argparse
+import contextlib
 import ctypes
 import http.client
 import json
@@ -46,6 +47,9 @@ STATUS_TIMEOUT = 2  # a board answers /api/status at once; a slower answer is no
 ADDRESS = "http://127.0.0.1:{port}"
 LOOPBACKS = ("127.0.0.1", "::1")  # a port is taken when either answers there; the launcher itself runs on IPv4
 LOG = "open-{name}.log"  # under .pm/local/; holds the server's own output
+LOCK = "projects.lock"  # next to projects.json: one run at a time reads the list, chooses ports and writes it back
+LOCK_WAIT = 10  # seconds to wait for another run to finish with the list
+LOCK_STALE = 60  # a lock file older than this was left behind by a run that died
 PORTS_TRIED = 50  # how many ports a taken first choice may push us up
 HMR_FIRST = 24678  # the map's HMR port counts up from here; two maps may not share one
 STILL_ACTIVE = 259  # GetExitCodeProcess answers this while the process runs
@@ -224,6 +228,45 @@ def write_store(data):
 def warn_store():
     """One plain line: the ports and process ids are not remembered, but the server still runs."""
     print(f"I could not write the project list at {store_path()}; the ports and process ids are not remembered.")
+
+
+@contextlib.contextmanager
+def locked():
+    """Hold the project list's lock while it is read, ports are chosen and the result is written back.
+
+    The lock is a file next to the list, made with O_EXCL. A lock file older than LOCK_STALE was left behind by a run
+    that died, so it is removed; a run that still waits after LOCK_WAIT seconds goes on and says so. Always released.
+    """
+    folder, handle = store_dir(), None
+    lock = folder / LOCK
+    deadline = time.monotonic() + LOCK_WAIT
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        while handle is None:
+            try:
+                handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError:
+                try:
+                    age = time.time() - lock.stat().st_mtime
+                except OSError:
+                    continue  # released just now: try again
+                if age > LOCK_STALE:
+                    lock.unlink(missing_ok=True)  # a run that died left it behind: take it now
+                elif time.monotonic() > deadline:
+                    print(f"Another run is holding the project list at {lock}, so I went on without the lock.")
+                    break
+                else:
+                    time.sleep(0.05)
+            except OSError:
+                break  # no folder for a lock: the write itself says what went wrong
+    except OSError:
+        pass
+    try:
+        yield
+    finally:
+        if handle is not None:
+            os.close(handle)
+            lock.unlink(missing_ok=True)
 
 
 def record_of(data, folder):
@@ -607,34 +650,35 @@ def open_server(name, download=False, root=None):
         print(missing_entry_message(name))
         return 1
     command, wanted = found
-    data = read_store()
-    port, hmr = choose_ports(data, root, name, command, wanted)
-    if not port:
-        return 1
-    address = ADDRESS.format(port=port)
-    state, served = ownership(root, name, server_of(data, root, name), port)
-    if state == OURS:
-        print(f"The {name} is already running at {address}; I opened it in your browser.")
-        webbrowser.open(address)
-        if name == "board":
-            keep(data, root, port)
-        return 0
-    if state == ANSWERS:
-        who = f"another project ({served})" if served else "another program"
-        print(f"Port {port} answers for {who}, so this project's {name} starts on a free port above.")
-        free = choose_port(port, other_ports(data, root))
-        if not free:
-            print(f"The {PORTS_TRIED} ports from {port} up are all taken, so the {name} was not started.")
+    with locked():
+        data = read_store()
+        port, hmr = choose_ports(data, root, name, command, wanted)
+        if not port:
             return 1
-        port, address = free, ADDRESS.format(port=free)
-    made, program, code = build(name, command, port, hmr, download)
-    if made is None:
-        return code
-    log_path = root / ".pm" / "local" / LOG.format(name=name)
-    process = start([program, *made[1:]], root, log_path)
-    if not save(data, root, name, port, pid=process.pid, started=start_time(process.pid), hmr=hmr):
-        warn_store()
-    return wait_until_open(name, process, port, root, made, log_path)
+        address = ADDRESS.format(port=port)
+        state, served = ownership(root, name, server_of(data, root, name), port)
+        if state == OURS:
+            print(f"The {name} is already running at {address}; I opened it in your browser.")
+            webbrowser.open(address)
+            if name == "board":
+                keep(data, root, port)
+            return 0
+        if state == ANSWERS:
+            who = f"another project ({served})" if served else "another program"
+            print(f"Port {port} answers for {who}, so this project's {name} starts on a free port above.")
+            free = choose_port(port, other_ports(data, root))
+            if not free:
+                print(f"The {PORTS_TRIED} ports from {port} up are all taken, so the {name} was not started.")
+                return 1
+            port, address = free, ADDRESS.format(port=free)
+        made, program, code = build(name, command, port, hmr, download)
+        if made is None:
+            return code
+        log_path = root / ".pm" / "local" / LOG.format(name=name)
+        process = start([program, *made[1:]], root, log_path)
+        if not save(data, root, name, port, pid=process.pid, started=start_time(process.pid), hmr=hmr):
+            warn_store()
+    return wait_until_open(name, process, port, root, made, log_path)  # the lock is not held while it starts
 
 
 def keep(data, root, port):
@@ -647,30 +691,33 @@ def keep(data, root, port):
 
 def stop_server(name):
     """Stop the server this tool started for this project, and nothing else."""
-    data = read_store()
-    server = server_of(data, ROOT, name)
-    if not server:
-        print(f"No {name} is recorded for this project, so I stopped nothing.")
+    with locked():
+        data = read_store()
+        server = server_of(data, ROOT, name)
+        if not server:
+            print(f"No {name} is recorded for this project, so I stopped nothing.")
+            return 0
+        address = ADDRESS.format(port=server.get("port"))
+        pid, state = process_of(server), ownership(ROOT, name, server, server.get("port"))[0]
+        if state == STOPPED:
+            forget(data, ROOT, name)
+            print(f"The {name} recorded for this project is not running, so I stopped nothing.")
+            return 0
+        if not pid:
+            forget(data, ROOT, name)
+            print(f"The {name} at {address} was not started by this tool, so I left it running.")
+            return 0
+        if not terminate(pid):
+            print(
+                f"I could not stop the {name} (process id {pid}); it may already have stopped. Nothing else was touched."
+            )
+            return 1
+        # The port stays, so this project keeps its address; only the claim to a running process goes.
+        record_of(data, ROOT)[name] = {key: value for key, value in server.items() if key not in ("pid", "started")}
+        if not write_store(data):
+            warn_store()
+        print(f"Stopped the {name} (process id {pid}).")
         return 0
-    address = ADDRESS.format(port=server.get("port"))
-    pid, state = process_of(server), ownership(ROOT, name, server, server.get("port"))[0]
-    if state == STOPPED:
-        forget(data, ROOT, name)
-        print(f"The {name} recorded for this project is not running, so I stopped nothing.")
-        return 0
-    if not pid:
-        forget(data, ROOT, name)
-        print(f"The {name} at {address} was not started by this tool, so I left it running.")
-        return 0
-    if not terminate(pid):
-        print(f"I could not stop the {name} (process id {pid}); it may already have stopped. Nothing else was touched.")
-        return 1
-    # The port stays, so this project keeps its address; only the claim to a running process goes.
-    record_of(data, ROOT)[name] = {key: value for key, value in server.items() if key not in ("pid", "started")}
-    if not write_store(data):
-        warn_store()
-    print(f"Stopped the {name} (process id {pid}).")
-    return 0
 
 
 def show_list():
@@ -699,11 +746,12 @@ def server_state(folder, name, server):
 
 def set_opening(value):
     """Store the opening choice in the project list and say what it means."""
-    data = read_store()
-    data["opening"] = value
-    if not write_store(data):
-        warn_store()
-        return 1
+    with locked():
+        data = read_store()
+        data["opening"] = value
+        if not write_store(data):
+            warn_store()
+            return 1
     print(f"The project window is now '{value}': {OPENING_MEANINGS[value]}")
     return 0
 

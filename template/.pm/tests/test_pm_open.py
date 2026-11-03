@@ -17,6 +17,7 @@ import socket
 import subprocess
 import tempfile
 import threading
+import time
 import types
 import unittest
 from contextlib import redirect_stdout
@@ -62,6 +63,7 @@ class LauncherTest(unittest.TestCase):
         self.root = self.project("shop")  # the project this command runs in
         self.other = self.project("other")  # a second project, for the shared port list
         self.store = self.work / "home" / "projects.json"
+        self.lock = self.store.parent / "projects.lock"
         environment = mock.patch.dict(os.environ, {"PM_HOME": str(self.store.parent)})
         environment.start()
         self.addCleanup(environment.stop)
@@ -155,6 +157,10 @@ class LauncherTest(unittest.TestCase):
         with mock.patch.object(pm_open, "ROOT", self.serving), redirect_stdout(out):
             code = pm_open.main(list(args))
         return code, out.getvalue()
+
+    def open_in(self, root):
+        """One `board` run in that project, the way a second command runs it: the root is passed in, not patched."""
+        return pm_open.open_server("board", root=root)
 
     def write_launch(self, *configs, root=None):
         path = (root or self.root) / ".claude" / "launch.json"
@@ -598,6 +604,58 @@ class LauncherTest(unittest.TestCase):
         data = self.read_store()
         self.assertEqual(data["projects"][self.key()]["board"]["port"], 6420)
         self.assertEqual(data["projects"][self.key(self.other)]["board"]["port"], 6421)
+
+    def test_two_runs_that_read_the_list_at_once_keep_both_records_and_different_ports(self):
+        real_read, reads, guard = pm_open.read_store, [], threading.Lock()
+
+        def read_at_once():
+            data = real_read()
+            with guard:
+                reads.append(1)
+                first = len(reads) <= 2
+            if first:  # give the other run the same list to read, unless the lock holds it back
+                time.sleep(0.3)
+            return data
+
+        self.answering_after_a_start(6420, 6421)
+        with redirect_stdout(io.StringIO()), mock.patch.object(pm_open, "read_store", read_at_once):
+            runs = [threading.Thread(target=self.open_in, args=(root,)) for root in (self.root, self.other)]
+            for run in runs:
+                run.start()
+            for run in runs:
+                run.join(30)
+        data = self.read_store()["projects"]
+        self.assertIn(self.key(), data, "the first run keeps its record")
+        self.assertIn(self.key(self.other), data, "the second run keeps its record")
+        ports = {data[self.key()]["board"]["port"], data[self.key(self.other)]["board"]["port"]}
+        self.assertEqual(len(ports), 2, "two runs that read the list at once must not choose the same port")
+
+    def test_the_lock_is_held_while_the_list_is_chosen_and_released_before_the_wait(self):
+        probes = []
+
+        def probe(port):
+            probes.append((self.lock.exists(), bool(self.runs)))  # (holding the lock, a server already started)
+            return self.listen(port)
+
+        self.answering_after_a_start(6420)
+        with mock.patch.object(pm_open, "answers", probe):
+            code, _ = self.run_tool("board")
+        self.assertEqual(code, 0)
+        self.assertTrue(probes[0][0], "the port is chosen while the lock is held")
+        self.assertFalse(probes[-1][0], "the wait for the server runs without the lock")
+        self.assertFalse(self.lock.exists(), "the lock is released at the end")
+
+    def test_a_lock_left_behind_by_a_run_that_died_is_removed(self):
+        self.lock.parent.mkdir(parents=True, exist_ok=True)
+        self.lock.write_text("", encoding="utf-8")
+        old = time.time() - 2 * pm_open.LOCK_STALE
+        os.utime(self.lock, (old, old))
+        with mock.patch.object(pm_open, "LOCK_WAIT", 0.5):
+            code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 0)
+        self.assertNotIn("went on without the lock", out)
+        self.assertFalse(self.lock.exists())
+        self.assertEqual(self.read_store()["opening"], "always")
 
     def test_the_project_list_is_written_to_a_temporary_file_and_moved(self):
         moves = []
