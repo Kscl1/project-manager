@@ -818,6 +818,15 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.run_pm()
         self.assertEqual(self.receipts()["a"]["state"], "verified")
 
+    def test_preflight_lets_verify_name_what_the_worker_may_write(self):
+        # A check may read a file the worker builds inside `writes`; it is not there before the worker starts.
+        built = self.tmp / "site" / "index.html"
+        job = self.job("a", "ok", verify=f'"{sys.executable}" -c "import sys; sys.exit(0)" "{built}"')
+        job["writes"] = [str(self.tmp / "site")]
+        self.jobs(job)
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
     def test_preflight_finds_a_control_character_in_verify_and_setup(self):
         # The Windows path of the glitch: \r, \n and \v became control characters, so the shell could not find its
         # own script. Plain words, and the character is shown as it would be written in JSON.

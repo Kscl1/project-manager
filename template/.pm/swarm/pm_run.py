@@ -621,9 +621,13 @@ def preflight(job, repo):
         mark = control_mark(job.get(key))
         if mark:
             return f"{key} holds a control character ({mark}); write \\ or / in jobs.json"
-    own = os.path.normcase(os.path.abspath(out))
+    # The worker makes the report and what it may write, so those need not exist before it starts.
+    made = [os.path.normcase(os.path.abspath(repo / place)) for place in [job["out"], *(job.get("writes") or [])]]
     for path in quoted_paths(job.get("verify")):
-        if os.path.isabs(path) and os.path.normcase(os.path.abspath(path)) != own and not Path(path).exists():
+        if not os.path.isabs(path) or Path(path).exists():
+            continue
+        full = os.path.normcase(os.path.abspath(path))
+        if not any(full == place or full.startswith(place.rstrip("/\\") + os.sep) for place in made):
             return f"verify names a path that is not there: {path}"
     helpers = job.get("helpers")
     if helpers and not isinstance(helpers, list):
