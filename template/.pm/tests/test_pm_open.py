@@ -802,6 +802,29 @@ class LauncherTest(unittest.TestCase):
         )
         self.assertEqual(self.read_store()["opening"], "always")
 
+    def test_a_broken_project_list_that_is_not_utf8_is_copied_and_replaced(self):
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        broken = b'{"opening": "\xff\xfe"}'  # not UTF-8: reading it as text fails, as a list it is broken
+        self.store.write_bytes(broken)
+        code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 0)
+        self.assertIn("could not be read", out)
+        self.assertEqual(
+            (self.store.parent / "projects.json.broken").read_bytes(), broken, "the copy holds the very bytes"
+        )
+        self.assertEqual(self.read_store()["opening"], "always")
+
+    def test_a_broken_list_whose_copy_fails_is_left_as_it_was(self):
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        self.store.write_text("{ this is not json", encoding="utf-8")
+        with mock.patch.object(pm_open.shutil, "copyfile", side_effect=OSError(28, "no space left")):
+            code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 1, "a list that could not be kept is never replaced")
+        self.assertEqual(self.store.read_text(encoding="utf-8"), "{ this is not json", "the only copy still stands")
+        self.assertFalse((self.store.parent / "projects.json.broken").exists())
+        self.assertIn("I left the list as it was", out)
+        self.assertNotIn("I kept a copy", out, "the line about a kept copy waits for the copy")
+
     # -- stop and list ------------------------------------------------------------------------------------------
 
     def test_stop_with_no_record_does_nothing(self):

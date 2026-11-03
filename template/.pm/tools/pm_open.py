@@ -210,28 +210,39 @@ def read_store():
 
 
 def keep_broken(path):
-    """Copy a project list that cannot be read to `<name>.broken`, with one plain line; nothing when it reads fine."""
+    """Whether the project list may be replaced: a copy of a list that cannot be read is kept first.
+
+    The list is read as bytes, so one that is not UTF-8 text counts as broken too, and its copy holds the very bytes
+    that were there. True when the list reads fine, or when it is broken and its copy exists now; False when the copy
+    cannot be made, and then the old file has to stand, since replacing it would leave no copy of the broken list.
+    """
     try:
-        text = path.read_text(encoding="utf-8")
+        original = path.read_bytes()
     except OSError:
-        return
+        return True  # no list yet, so there is nothing to keep
     try:
-        readable = isinstance(json.loads(text), dict)
-    except ValueError:
+        readable = isinstance(json.loads(original.decode("utf-8")), dict)
+    except ValueError:  # not UTF-8, or not JSON
         readable = False
     if readable:
-        return
-    print(f"The project list at {path} could not be read; I kept a copy at {path}.broken and started a new one.")
+        return True
     try:
         shutil.copyfile(path, Path(f"{path}.broken"))
     except OSError:
-        pass
+        print(
+            f"The project list at {path} could not be read, and its copy at {path}.broken could not be kept; "
+            "I left the list as it was."
+        )
+        return False
+    print(f"The project list at {path} could not be read; I kept a copy at {path}.broken and started a new one.")
+    return True
 
 
 def write_store(data):
     """Write the project list atomically: a temporary file next to it, then os.replace. False when that failed."""
     folder, temporary = store_dir(), None
-    keep_broken(store_path())  # before the file it copies is replaced
+    if not keep_broken(store_path()):  # before the file it copies is replaced
+        return False
     try:
         folder.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(dir=str(folder), prefix="projects-", suffix=".json")
