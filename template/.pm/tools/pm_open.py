@@ -600,6 +600,26 @@ def choose_ports(data, root, name, command, wanted):
     return port, hmr
 
 
+def npx_download_check(name, command, download):
+    """0 when the map may start; the exit code to end with, its lines already printed, when it may not.
+
+    This runs before the lock is taken: the npx check may wait up to 120 seconds, and it needs only the entry's
+    command, not the port. A map whose entry names npx would fetch its package on the first start, so the owner is
+    asked first, unless --download says yes.
+    """
+    if name != "map" or download or Path(command[0]).stem.casefold() != "npx":
+        return 0
+    if shutil.which(command[0]) is None:
+        return 0  # no npx on this machine: `build` prints how to install it
+    # Whatever the entry names (pinned or not), npx would fetch it: the first argument that is not a flag.
+    package = next((argument for argument in command[1:] if not argument.startswith("-")), "likec4")
+    if downloaded(package):
+        return 0
+    print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
+    print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
+    return 2
+
+
 def build(name, command, port, hmr, download):
     """(command, program, 0) for the server to start; (None, None, exit code) with the reason already printed."""
     command = with_port(command, port)
@@ -612,12 +632,6 @@ def build(name, command, port, hmr, download):
         )
         return None, None, 1
     if name == "map" and Path(command[0]).stem.casefold() == "npx" and not download:
-        # Whatever the entry names (pinned or not), npx would fetch it: the first argument that is not a flag.
-        package = next((argument for argument in command[1:] if not argument.startswith("-")), "likec4")
-        if not downloaded(package):
-            print(f"The map is not downloaded yet: LikeC4 comes from npm, and this machine has no copy of {package}.")
-            print("Nothing was started. After the owner says yes, run: python .pm/tools/pm_open.py map --download")
-            return None, None, 2
         # Without a yes the start itself must not download either: npx gets --no-install instead of -y.
         command = [
             command[0],
@@ -672,6 +686,9 @@ def open_server(name, download=False, root=None):
         print(missing_entry_message(name))
         return 1
     command, wanted = found
+    code = npx_download_check(name, command, download)  # up to 120 seconds: never while the lock is held
+    if code:
+        return code
     with locked():
         data = read_store()
         port, hmr = choose_ports(data, root, name, command, wanted)

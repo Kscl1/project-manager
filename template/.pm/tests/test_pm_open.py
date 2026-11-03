@@ -503,6 +503,23 @@ class LauncherTest(unittest.TestCase):
         self.assertIn("upgrading the package adds the entry", out)
         self.assertEqual(self.runs, [])
 
+    def test_the_npx_download_check_runs_before_the_lock_is_taken(self):
+        self.write_launch(MAP)
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        seen = []
+
+        def check(package):
+            seen.append(self.lock.exists())  # the npx check may take 120 seconds: no other run should wait for it
+            return True
+
+        self.answering_after_a_start(5173)
+        with mock.patch.object(pm_open, "downloaded", check):
+            code, _ = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(seen, [False], "the download check runs before the lock is taken")
+        self.assertEqual(len(self.runs), 1, "the map still starts")
+        self.assertFalse(self.lock.exists(), "the lock is released at the end")
+
     def test_map_that_is_not_downloaded_stops_before_starting(self):
         self.write_launch(MAP)
         self.check_code = 1
