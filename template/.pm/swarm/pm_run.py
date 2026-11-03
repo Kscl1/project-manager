@@ -23,8 +23,10 @@ Pi retries provider errors itself (retry.maxRetries in ~/.pi/agent/settings.json
 Herdr may show its turn as done meanwhile. So pm_run nudges a settled Pi worker only after its session log has been
 quiet for PM_RUN_QUIET_S, and never repeats Pi's own retry. When the log is not found (another harness, a Pi
 folder moved by the setup line) the pane stands in for it: the nudge waits until the pane's content has stayed the
-same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. A nudge goes to the same session: RESUME, or the
-full brief again when no turn ran (no completion_seq advance and no observed working state).
+same for PM_RUN_QUIET_S, because Herdr can show a live turn as settled. The HOLD line it logs meanwhile says what
+comes next and when: the brief again when no turn ran yet, otherwise a nudge in the same session. A nudge goes to
+the same session: RESUME, or the full brief again when no turn ran (no completion_seq advance and no observed
+working state).
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
@@ -784,6 +786,18 @@ def usage_of(job, attempt, repo, log=None):
     return {**sums, "turns": counted, "cost_usd": round(cost, 9) if cost_known else None}
 
 
+def no_turn_yet(attempt):
+    """True when no turn ran after the brief was sent: no completion_seq advance and no observed working state.
+
+    Such a worker never took the brief, so it needs the whole brief again, not a resume of a turn that never happened.
+    """
+    return not attempt.get("worked") and (
+        attempt.get("seq0") is None
+        or attempt.get("completion_seq") is None
+        or attempt["completion_seq"] == attempt["seq0"]
+    )
+
+
 class Run:
     def __init__(self, root):
         self.root = Path(root).resolve()
@@ -1189,7 +1203,12 @@ class Run:
                 if quiet is not None and quiet < QUIET_S:
                     if not a.get("held"):
                         a["held"] = True
-                        self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}")
+                        then = (
+                            f"if the pane stays the same for {round(QUIET_S - quiet)} s more, pm_run resends the brief"
+                            if no_turn_yet(a)
+                            else "pm_run nudges it in the same session"
+                        )
+                        self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}; {then}")
                 elif a.get("wait_until", 0) > now:
                     pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
                 elif self.stop_hand_over(job, s, a, why, now):
@@ -1511,9 +1530,7 @@ class Run:
             a["overtime"] = OVERTIME_S
             note = f" You are past the time limit: finish within {OVERTIME_S / 60:g} minutes."
         a["nudges"] = a.get("nudges", 0) + 1
-        lost = not a.get("worked") and (
-            a.get("seq0") is None or a.get("completion_seq") is None or a["completion_seq"] == a["seq0"]
-        )
+        lost = no_turn_yet(a)
         prompt = (
             launch_prompt(job) if lost else RESUME.format(briefs=", ".join(job["briefs"]) or "(none)", out=job["out"])
         )

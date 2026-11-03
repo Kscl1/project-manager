@@ -1753,10 +1753,28 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(len(self.tick_at(run, state, 1030, **consts)), 1, "Pi wrote its log 30 s ago: no nudge")
         self.assertEqual(state["a"]["state"], "started")
         self.assertIn("HOLD a: turn looks settled but Pi wrote its log 30 s ago", run.log_path.read_text("utf-8"))
+        self.assertIn("; pm_run nudges it in the same session", run.log_path.read_text("utf-8"))
         prompts = self.tick_at(run, state, 1100, **consts)
         self.assertEqual(len(prompts), 2, "quiet for 100 s: Pi has stopped, so the same session is nudged")
         self.assertIn("previous turn ended", prompts[-1])
         self.assertEqual(attempt["nudges"], 1)
+
+    def test_hold_line_says_the_brief_is_resent_and_when(self):
+        run, _, attempt, state = self.settled_worker()
+        attempt.update(worked=False, seq0=0, completion_seq=0)  # the worker never took the brief
+        self.assertEqual(
+            len(self.tick_at(run, state, 1030, QUIET_S=90, MAX_NUDGES=3)), 1, "a held turn is not sent yet"
+        )
+        log = run.log_path.read_text(encoding="utf-8")
+        self.assertIn("HOLD a: turn looks settled but Pi wrote its log 30 s ago; ", log)
+        self.assertIn("; if the pane stays the same for 60 s more, pm_run resends the brief", log)
+        self.assertNotIn("pm_run nudges it in the same session", log)
+
+    def test_no_turn_yet_needs_a_quiet_sequence_and_no_working_state(self):
+        self.assertTrue(pm_run.no_turn_yet({}), "an attempt without a sequence ran no turn")
+        self.assertTrue(pm_run.no_turn_yet({"seq0": 1, "completion_seq": 1}))
+        self.assertFalse(pm_run.no_turn_yet({"seq0": 1, "completion_seq": 2}), "the sequence advanced")
+        self.assertFalse(pm_run.no_turn_yet({"worked": True}), "the worker was seen working")
 
     def test_used_up_quota_is_handed_over_without_a_nudge(self):
         claude_pane = 'some earlier output\n  API Error: 429 {"error":{"message":"usage limit reached"}}\n\n'
