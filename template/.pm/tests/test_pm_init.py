@@ -706,6 +706,15 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("name", self.map_config(), "the map layer is installed, so it gets its name")
 
+    def test_a_map_whose_projects_have_their_own_configs_gets_no_second_one(self):
+        (self.root / "docs").mkdir()
+        (self.root / "docs" / "likec4.config.json").write_text('{"name": "existing"}\n', encoding="utf-8")
+
+        result = self.run_init(self.root, "--map")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.root / "likec4.config.json").exists(), "the user's LikeC4 projects stay as they are")
+
     def test_without_the_map_layer_no_likec4_config_is_written(self):
         self.assertEqual(self.run_init().returncode, 0)
 

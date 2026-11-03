@@ -2,7 +2,7 @@
 
 A throwaway project holds only a ``.pm/`` folder and, in the tests that need it, a ``.claude/launch.json``; the
 project list lives in a throwaway ``PM_HOME``. The port check, ``Popen``, ``shutil.which``, ``webbrowser.open``, the
-``npx --no-install`` check, the board's ``/api/status`` answer, the names a running map serves, the address a browser gets, the process check, the process start time and the stop
+``npx --no-install`` check, the board's ``/api/status`` answer, the names a running map serves on each loopback, the process check, the process start time and the stop
 call are fakes, so nothing is started, no browser opens and no port or process is touched. The project list, its
 temporary files and its lock are real, in the throwaway folder. Standard library only.
 """
@@ -72,8 +72,7 @@ class LauncherTest(unittest.TestCase):
         self.after_start = set()  # the ports that answer once a server was started on them
         self.ports = []  # every port the check was asked about
         self.statuses = []  # every port the board status was asked about
-        self.maps = {}  # port -> the LikeC4 project names the map there serves
-        self.ipv6_only = set()  # the ports whose server listens on ::1 alone
+        self.maps = {}  # address -> the LikeC4 project names the map there serves
         self.status = {}  # port -> the folder the board there says it serves
         self.owners = {}  # port -> the project root of the server that was started there
         self.runs = []  # (command, kwargs) of each start
@@ -95,8 +94,7 @@ class LauncherTest(unittest.TestCase):
             mock.patch.object(pm_open.subprocess, "Popen", self.spawn),
             mock.patch.object(pm_open.subprocess, "run", self.check),
             mock.patch.object(pm_open, "project_of", self.project_of),
-            mock.patch.object(pm_open, "served_maps", lambda port: self.maps.get(port, [])),
-            mock.patch.object(pm_open, "address_for", self.address_for),
+            mock.patch.object(pm_open, "served_maps", lambda base: self.maps.get(base, [])),
             mock.patch.object(pm_open, "alive", self.is_alive),
             mock.patch.object(pm_open, "start_time", self.start_of),
             mock.patch.object(pm_open, "terminate", self.terminate),
@@ -142,9 +140,6 @@ class LauncherTest(unittest.TestCase):
         if not self.opened_port(port):
             return None  # nothing answers there, so nothing names a folder
         return self.owners.get(port, self.serving.as_posix())
-
-    def address_for(self, port):
-        return f"http://[::1]:{port}" if port in self.ipv6_only else pm_open.ADDRESS.format(port=port)
 
     def is_alive(self, pid):
         return pid in self.live
@@ -510,42 +505,75 @@ class LauncherTest(unittest.TestCase):
 
     def test_a_running_map_that_serves_this_projects_name_is_opened_and_left_running(self):
         self.write_launch(MAP)
-        self.write_map_config("shop-1a2b3c")
+        self.write_map_config("shop-map")  # a name the user chose
         self.busy(5173)  # started by the Claude preview or a terminal, on ::1 only
-        self.maps[5173] = ["shop-1a2b3c"]
-        self.ipv6_only.add(5173)
+        self.maps["http://[::1]:5173"] = ["shop-map"]
         code, out = self.run_tool("map")
         self.assertEqual(code, 0)
         self.assertIn("The map is already running at http://[::1]:5173", out)
         self.assertEqual(self.runs, [], "no second map beside it")
-        self.assertEqual(self.opened, ["http://[::1]:5173"], "the browser goes where the map listens")
+        self.assertEqual(self.opened, ["http://[::1]:5173"], "the browser goes where the name was served")
         self.assertEqual(self.record()["map"], {"port": 5173}, "not started here, so no process id")
         code, out = self.run_tool("stop", "map")
         self.assertEqual(code, 0)
         self.assertIn("was not started by this tool, so I left it running", out)
         self.assertEqual(self.ended, [])
 
+    def test_the_map_is_ours_on_the_loopback_that_serves_its_name_not_on_the_other(self):
+        self.write_launch(MAP)
+        self.write_map_config("shop-map")
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = ["other-map"]  # another program holds the port on IPv4
+        self.maps["http://[::1]:5173"] = ["shop-map"]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.opened, ["http://[::1]:5173"], "never the IPv4 program")
+        self.assertEqual(self.runs, [])
+
     def test_a_running_map_of_another_likec4_project_is_foreign(self):
         self.write_launch(MAP)
-        self.write_map_config("shop-1a2b3c")
+        self.write_map_config("shop-map")
         self.busy(5173)
-        self.maps[5173] = ["other-9f8e7d"]
+        self.maps["http://127.0.0.1:5173"] = ["other-9f8e7d"]
         self.answering_after_a_start(5174)
         code, out = self.run_tool("map")
         self.assertEqual(code, 0)
         self.assertIn("Port 5173 answers for another project (the LikeC4 project other-9f8e7d)", out)
-        self.assertNotIn("has no name", out)
+        self.assertNotIn("no name I can read", out)
         self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
+
+    def test_a_made_name_with_this_folders_code_is_recognised(self):
+        self.write_launch(MAP)
+        name = f"shop-{pm_open.path_code(self.root)}"
+        self.write_map_config(name)
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = [name]
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs, [])
+        self.assertEqual(self.opened, ["http://127.0.0.1:5173"])
+
+    def test_a_made_name_copied_from_another_folder_does_not_claim_its_map(self):
+        self.write_launch(MAP)
+        copied = f"shop-{pm_open.path_code(self.other)}"  # the other folder's config, copied here
+        self.write_map_config(copied)
+        self.busy(5173)
+        self.maps["http://127.0.0.1:5173"] = [copied]  # that folder's map
+        self.answering_after_a_start(5174)
+        code, out = self.run_tool("map")
+        self.assertEqual(code, 0)
+        self.assertIn(f"The map name {copied} was made for another folder", out)
+        self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"], "the other folder's map is not taken for ours")
 
     def test_a_map_without_a_config_name_starts_beside_a_running_one_and_says_why(self):
         self.write_launch(MAP)
         self.busy(5173)
-        self.maps[5173] = ["default"]  # LikeC4's name for a project without a config
+        self.maps["http://127.0.0.1:5173"] = ["default"]  # LikeC4's name for a project without a config
         self.answering_after_a_start(5174)
         code, out = self.run_tool("map")
         self.assertEqual(code, 0)
         self.assertIn("Port 5173 answers for another project (the LikeC4 project default)", out)
-        self.assertIn("This project's map has no name in a likec4.config.json", out)
+        self.assertIn("This project's map has no name I can read", out)
         self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"])
 
     def test_the_map_name_comes_from_the_folder_the_map_serves(self):
@@ -559,8 +587,14 @@ class LauncherTest(unittest.TestCase):
         self.write_launch(MAP)
         (self.root / "likec4.config.ts").write_text("export default {}", encoding="utf-8")
         self.assertIsNone(pm_open.map_name(self.root), "a code config cannot be read here")
-        (self.root / "likec4.config.json").write_text("{not json", encoding="utf-8")
+        (self.root / "likec4.config.json").write_text("{ // JSON5, which LikeC4 reads\n name: 'x' }", encoding="utf-8")
         self.assertIsNone(pm_open.map_name(self.root))
+
+    def test_a_first_config_that_cannot_be_read_is_not_skipped_for_the_next(self):
+        self.write_launch(MAP)
+        (self.root / ".likec4rc").write_text("{ name: 'json5' }", encoding="utf-8")
+        self.write_map_config("not-the-maps")
+        self.assertIsNone(pm_open.map_name(self.root), "the next file's name may not be the map's")
 
     def test_keep_does_not_carry_a_process_id_to_another_port(self):
         self.write_store(
@@ -981,11 +1015,10 @@ class LauncherTest(unittest.TestCase):
 
     def test_list_calls_a_map_that_serves_this_projects_name_running(self):
         self.write_launch(MAP)
-        self.write_map_config("shop-1a2b3c")
+        self.write_map_config("shop-map")
         self.write_store({"projects": {self.key(): {"name": "shop", "map": {"port": 5173}}}})
         self.busy(5173)
-        self.maps[5173] = ["shop-1a2b3c"]
-        self.ipv6_only.add(5173)
+        self.maps["http://[::1]:5173"] = ["shop-map"]
         code, out = self.run_tool("list")
         self.assertEqual(code, 0)
         self.assertIn("map http://[::1]:5173 running", out)
@@ -1118,40 +1151,49 @@ class Answer:
 class ServedMapsTest(unittest.TestCase):
     """A running LikeC4 map names the projects it serves in its likec4:projects module; nothing else is read."""
 
-    MODULE = (
-        'import { atom } from "/@fs/likec4_vite-plugin_internal.js";\n'
+    HEAD = (
+        'import { createHotContext as __vite__createHotContext } from "/@vite/client";'
+        'import.meta.hot = __vite__createHotContext("likec4:plugin/projects.js");'
+        'import { atom, useStore } from "/@fs/likec4_vite-plugin_internal.js";\n'
+    )
+    MODULE = HEAD + (
         "export const isSingleProject = false;\n"
-        'export const projects = [{\n\tid: "shop-1a2b3c",\n\ttitle: "Shop",\n\tpath: ""\n}, {\n\tid: "lib"\n}];\n'
+        "export const projects = [{\n"
+        '\tid: "shop-map",\n\ttitle: "Shop",\n\tpath: "",\n\texportFormats: [\n\t\t"png",\n\t\t"drawio"\n\t]\n'
+        '}, {\n\tid: "lib",\n\ttitle: "Lib"\n}];\n'
         "export const $projects = atom([...projects]);\n"
     )
 
-    def test_the_names_come_from_likec4s_projects_module(self):
+    def served(self, text, base="http://127.0.0.1:5173"):
         asked = []
 
         def urlopen(url, timeout):
             asked.append(url)
-            return Answer(self.MODULE)
+            return Answer(text)
 
         with mock.patch.object(pm_open.urllib.request, "urlopen", urlopen):
-            self.assertEqual(pm_open.served_maps(5173), ["shop-1a2b3c", "lib"])
+            return pm_open.served_maps(base), asked
+
+    def test_the_names_come_from_likec4s_projects_module(self):
+        names, asked = self.served(self.MODULE)
+        self.assertEqual(names, ["shop-map", "lib"])
         self.assertEqual(asked, ["http://127.0.0.1:5173/@id/likec4:projects"])
 
-    def test_a_map_that_listens_only_on_ipv6_is_asked_there(self):
-        asked = []
+    def test_an_id_inside_a_title_is_not_a_served_name(self):
+        text = self.HEAD + 'export const projects = [{\n\tid: "other",\n\ttitle: "Project id: \'ours\'"\n}];\n'
+        self.assertEqual(self.served(text)[0], ["other"])
 
-        def urlopen(url, timeout):
-            asked.append(url)
-            if "127.0.0.1" in url:
-                raise OSError("connection refused")
-            return Answer(self.MODULE)
+    def test_a_page_that_only_quotes_the_module_names_nothing(self):
+        page = '<html><pre>export const projects = [{\n\tid: "ours"\n}];</pre></html>'
+        self.assertEqual(self.served(page)[0], [])
+        self.assertEqual(self.served("<html>" + self.MODULE)[0], [], "the module's mark must be its first line")
 
-        with mock.patch.object(pm_open.urllib.request, "urlopen", urlopen):
-            self.assertEqual(pm_open.served_maps(5173), ["shop-1a2b3c", "lib"])
-        self.assertEqual(asked[1], "http://[::1]:5173/@id/likec4:projects")
+    def test_no_answer_names_nothing(self):
+        def refused(url, timeout):
+            raise OSError("connection refused")
 
-    def test_an_answer_that_is_not_likec4s_list_names_nothing(self):
-        with mock.patch.object(pm_open.urllib.request, "urlopen", lambda url, timeout: Answer("<html>board</html>")):
-            self.assertEqual(pm_open.served_maps(6420), [])
+        with mock.patch.object(pm_open.urllib.request, "urlopen", refused):
+            self.assertEqual(pm_open.served_maps("http://[::1]:5173"), [])
 
 
 class PortTest(unittest.TestCase):
@@ -1198,12 +1240,6 @@ class PortTest(unittest.TestCase):
         with mock.patch.object(pm_open.socket, "socket", Probe):
             self.assertTrue(pm_open.answers(6420))
         self.assertEqual(tried, [socket.AF_INET])
-
-    def test_the_browser_goes_to_ipv6_only_when_the_server_answers_only_there(self):
-        with mock.patch.object(pm_open, "answers_at", lambda address, port: address == "::1"):
-            self.assertEqual(pm_open.address_for(5173), "http://[::1]:5173")
-        with mock.patch.object(pm_open, "answers_at", lambda address, port: True):
-            self.assertEqual(pm_open.address_for(5173), "http://127.0.0.1:5173")
 
     def test_an_ipv6_answer_without_an_ipv4_one_still_counts(self):
         class Probe:

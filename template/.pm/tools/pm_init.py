@@ -646,14 +646,19 @@ def launch_action(target, map_layer):
 
 
 def map_folder(target):
-    """The folder the project's map serves: the path after `start` in launch.json's map entry, else the root."""
+    """The folder the project's map serves: the path right after `start` in launch.json's map entry, else the root.
+
+    pm_open reads the folder the same way; a path given after other options is not looked for.
+    """
     data = read_json(target / ".claude" / "launch.json")
     found = data.get("configurations") if isinstance(data, dict) else None
     for config in found if isinstance(found, list) else []:
         if not isinstance(config, dict) or str(config.get("name", "")).casefold() not in MAP_ENTRIES:
             continue
         arguments = config.get("runtimeArgs")
-        arguments = [str(argument) for argument in arguments] if isinstance(arguments, list) else []
+        if not config.get("runtimeExecutable") or not isinstance(arguments, list):
+            continue  # pm_open skips such an entry too
+        arguments = [str(argument) for argument in arguments]
         if "start" in arguments:
             after = arguments.index("start") + 1
             if after < len(arguments) and not arguments[after].startswith("-"):
@@ -663,24 +668,36 @@ def map_folder(target):
 
 
 def map_project_name(target):
-    """A LikeC4 project name no other folder gets: the folder's name, then a short code from its full path."""
+    """The map's LikeC4 name: the folder's name, then six characters from its full path, so two folders of the same
+    name get different ones; pm_open checks the code, so a config copied to another folder is not taken for its own.
+    """
     slug = re.sub(r"[^a-z0-9]+", "-", target.name.lower()).strip("-") or "project"
-    code = hashlib.sha256(os.path.normcase(str(target)).encode("utf-8")).hexdigest()[:6]
+    code = hashlib.sha256(os.path.normcase(str(target.resolve())).encode("utf-8")).hexdigest()[:6]
     return f"{slug}-{code}"
 
 
 def map_config(target, args):
     """Where the map's likec4.config.json goes, or None: only with the map layer, where its folder has no config.
 
-    A running map says which LikeC4 project it serves, and pm_open knows this project's map by that name; without a
-    config every map is LikeC4's `default`. A config the user has, in any of LikeC4's forms, is never touched.
+    A running map says which LikeC4 projects it serves, and pm_open knows this project's map by that name; without a
+    config every map is LikeC4's `default`. A config the user has, in any of LikeC4's forms and in any folder under
+    the map's, is never touched and gets no second one beside it: those projects are the user's own.
     """
     if not (args.map or (target / ".agents" / "skills" / "pm-likec4-dsl").is_dir()):
         return None
     folder = map_folder(target)
-    if not folder.is_dir() or any((folder / name).exists() for name in LIKEC4_CONFIGS):
+    if not folder.is_dir() or has_likec4_config(folder):
         return None
     return folder / "likec4.config.json"
+
+
+def has_likec4_config(folder):
+    """True when that folder, or one under it, holds a LikeC4 config; hidden folders and node_modules are skipped."""
+    for _, folders, files in os.walk(folder):
+        folders[:] = [name for name in folders if not name.startswith(".") and name != "node_modules"]
+        if any(name in LIKEC4_CONFIGS for name in files):
+            return True
+    return False
 
 
 def map_config_text(target, args):
