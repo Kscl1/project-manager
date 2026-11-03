@@ -659,6 +659,8 @@ def map_folder(target):
         if not config.get("runtimeExecutable") or not isinstance(arguments, list):
             continue  # pm_open skips such an entry too
         arguments = [str(argument) for argument in arguments]
+        if not (isinstance(config.get("port"), int) and config["port"] > 0) and "--port" not in arguments[:-1]:
+            continue  # and one without a port
         if "start" in arguments:
             after = arguments.index("start") + 1
             if after < len(arguments) and not arguments[after].startswith("-"):

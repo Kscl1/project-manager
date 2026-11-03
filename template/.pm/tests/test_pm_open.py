@@ -565,6 +565,13 @@ class LauncherTest(unittest.TestCase):
         self.assertIn(f"The map name {copied} was made for another folder", out)
         self.assertEqual(self.runs[0][0][4:6], ["--port", "5174"], "the other folder's map is not taken for ours")
 
+    def test_a_made_name_is_checked_by_its_code_whatever_the_folders_are_called(self):
+        for name in ("other", "project", "x"):  # a copy into shop-copy, a renamed folder, an empty slug's fallback
+            with self.subTest(made_for=name):
+                self.assertFalse(pm_open.made_here(self.root, f"{name}-{pm_open.path_code(self.other)}"))
+        self.assertTrue(pm_open.made_here(self.root, f"other-{pm_open.path_code(self.root)}"), "a renamed made name")
+        self.assertTrue(pm_open.made_here(self.root, "shop-map"), "a name the user chose has no code to check")
+
     def test_a_map_without_a_config_name_starts_beside_a_running_one_and_says_why(self):
         self.write_launch(MAP)
         self.busy(5173)

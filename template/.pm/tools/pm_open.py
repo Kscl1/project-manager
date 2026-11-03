@@ -217,13 +217,12 @@ def path_code(folder):
 def made_here(folder, name):
     """False for a name pm_init made for another folder: a likec4.config.json that was copied or moved here.
 
-    Such a name is the folder's name and that folder's path code, so a copy would take the first folder's map for its
-    own. A name the user chose carries no code, and is taken as it is.
+    Such a name ends in the path code of the folder it was made for, whatever the folders are called, so a copy or a
+    renamed folder would take the first folder's map for its own. A name the user chose carries no code and is taken
+    as it is; one that only looks like ours (ends in six hex characters) is asked to carry this folder's code too.
     """
     made = MADE_NAME.fullmatch(name)
-    if not made or made.group(1) != re.sub(r"[^a-z0-9]+", "-", Path(folder).name.lower()).strip("-"):
-        return True
-    return made.group(2) == path_code(folder)
+    return not made or made.group(2) == path_code(folder)
 
 
 def served_maps(base):
