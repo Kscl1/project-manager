@@ -208,9 +208,29 @@ def read_store():
     return data
 
 
+def keep_broken(path):
+    """Copy a project list that cannot be read to `<name>.broken`, with one plain line; nothing when it reads fine."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    try:
+        readable = isinstance(json.loads(text), dict)
+    except ValueError:
+        readable = False
+    if readable:
+        return
+    print(f"The project list at {path} could not be read; I kept a copy at {path}.broken and started a new one.")
+    try:
+        shutil.copyfile(path, Path(f"{path}.broken"))
+    except OSError:
+        pass
+
+
 def write_store(data):
     """Write the project list atomically: a temporary file next to it, then os.replace. False when that failed."""
     folder, temporary = store_dir(), None
+    keep_broken(store_path())  # before the file it copies is replaced
     try:
         folder.mkdir(parents=True, exist_ok=True)
         handle, temporary = tempfile.mkstemp(dir=str(folder), prefix="projects-", suffix=".json")

@@ -683,6 +683,22 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(self.record()["board"], {"port": 6420, "pid": 4321, "started": "start-of-4321"})
 
+    def test_a_broken_project_list_is_copied_before_it_is_rewritten(self):
+        self.store.parent.mkdir(parents=True, exist_ok=True)
+        self.store.write_text("{ this is not json", encoding="utf-8")
+        code, out = self.run_tool("opening", "always")
+        self.assertEqual(code, 0)
+        self.assertIn(str(self.store) + ".broken", out, "one plain line names the copy")
+        self.assertIn("could not be read", out)
+        self.assertEqual(
+            (self.store.parent / "projects.json.broken").read_text(encoding="utf-8"),
+            "{ this is not json",
+            "the old list is kept before the new one is written",
+        )
+        self.assertEqual(self.read_store()["opening"], "always")
+
+    # -- stop and list ------------------------------------------------------------------------------------------
+
     def test_stop_with_no_record_does_nothing(self):
         code, out = self.run_tool("stop", "board")
         self.assertEqual(code, 0)
