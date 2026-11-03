@@ -13,7 +13,7 @@ Bir proje birbirinden bağımsız birkaç katmandan oluşur. Commit, dal (branch
 
 ## 1. Kaynak sürümü seç
 
-Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.2.0-alpha.1` sürümünü kurar. Yükseltme yaparken aşağıdaki `<new-tag>` yerine gerçek ve daha yeni bir sürüm etiketi (tag) yaz.
+Bu komutlar senin projende değil, **project-manager kaynak klonunda** çalıştırılır. Başlangıç rehberi `v0.2.0-alpha.2` sürümünü kurar. Yükseltme yaparken aşağıdaki `<new-tag>` yerine gerçek ve daha yeni bir sürüm etiketi (tag) yaz.
 
 ```bash
 git status --short
