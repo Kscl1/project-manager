@@ -630,8 +630,10 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.run_pm()
         lines = (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(lines), 2, "LAUNCH and the start and done lines are routine")
-        self.assertRegex(lines[0], r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run CHECK-FAILED a ")
-        self.assertRegex(lines[1], r" run ARTIFACT b ")
+        for line in lines:
+            self.assertRegex(line, r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d run ")
+        # a's check runs in the background, so b's line may be written first
+        self.assertEqual(sorted(line.split()[3:5] for line in lines), [["ARTIFACT", "b"], ["CHECK-FAILED", "a"]])
 
     def test_status_tally_counts_shared_failures_in_order_and_ignores_other_words(self):
         failures = self.tmp / ".pm" / "local" / "failures.log"
