@@ -680,6 +680,23 @@ class StagedTest(RepoTestCase):
         self.assertIn("docs/other_bad.md", result.stdout)
         self.assertIn("docs/untracked_bad.md", result.stdout)
 
+    def test_staged_reads_the_staged_copy_not_the_working_tree(self):
+        # Issue #87: an unstaged edit in another doc blocked every commit that staged a decision.
+        long = "\n".join(f"line {i}" for i in range(301)) + "\n"
+        self.git_init()
+        self.write(".pm/decisions.md", "- **D-01** sandbox decision\n")
+        self.write("docs/design.md", "# Design\n")
+        self.write("docs/notes.md", long)
+        self.git("add", ".pm/decisions.md", "docs/design.md", "docs/notes.md")
+        self.write("docs/design.md", long)  # unstaged: not in the commit
+        self.write("docs/notes.md", "# Notes\n")  # unstaged: the commit still holds the long copy
+
+        result = self.run_check("--staged")
+
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("docs/notes.md: 301 lines", result.stdout)
+        self.assertNotIn("docs/design.md", result.stdout)
+
     def test_files_git_ignores_are_not_docs(self):
         # Issue #37: an ignored tool report over the line limit failed every check and blocked decision commits.
         self.git_init()
