@@ -750,6 +750,18 @@ def full_task_lines(tasks):
     return lines
 
 
+def window_line():
+    """One plain line about the project window, from the project list pm_open keeps; nothing when it says never."""
+    tools = Path(__file__).resolve().parent
+    if str(tools) not in sys.path:
+        sys.path.insert(0, str(tools))
+    try:
+        import pm_open  # a sibling script, which owns the project list and the words for it
+    except ImportError:
+        return ""
+    return pm_open.WINDOW_LINES[pm_open.opening()]
+
+
 def main(brief=False):
     """The agents' hand-over by default; with brief=True a short briefing the owner reads in a minute."""
     if hasattr(sys.stdout, "reconfigure"):
@@ -806,6 +818,9 @@ def main(brief=False):
 
     output = "# Briefing\n\n" if brief else "# Resume summary\n\n"
     output += "\n\n".join(render_section(name, body.rstrip("\n")) for name, body in sections) + "\n"
+    window = window_line()  # what the session start does about the optional project window; never says nothing
+    if window:
+        output += f"\n{window}\n"
     if brief:
         output += "\nAgent detail (evidence, workers, commits, drafts): python .pm/tools/pm_board.py --resume\n"
     print(output, end="")

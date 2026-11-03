@@ -6,6 +6,7 @@ testing each acceptance line from the task brief without inspecting implementati
 """
 
 import importlib.util
+import json
 import os
 import shutil
 import stat
@@ -966,6 +967,81 @@ class NextCommandTest(PmBoardTestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("--next", result.stdout)
+
+
+class ProjectWindowTest(unittest.TestCase):
+    """`--resume` says what a session start does about the optional project window, from the project list."""
+
+    def setUp(self):
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="pm_board_window_"))
+        self.addCleanup(shutil.rmtree, self.temp_dir, False, _remove_readonly)
+        self.root = self.temp_dir / "shop"
+        package_tools = PM_BOARD.parent
+        tools = self.root / ".pm" / "tools"
+        tools.mkdir(parents=True)
+        (self.root / "backlog.config.yml").write_text("# test fixture\n", encoding="utf-8")
+        for name in ("pm_board.py", "pm_resume.py", "pm_open.py"):
+            shutil.copy(package_tools / name, tools / name)
+        self.home = self.temp_dir / "home"
+
+    def resume(self):
+        """The resume summary as an installed project prints it, with its own project list folder."""
+        return subprocess.run(
+            [sys.executable, str(self.root / ".pm" / "tools" / "pm_board.py"), "--resume"],
+            cwd=self.root,
+            env=dict(os.environ, PM_HOME=str(self.home)),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def choose(self, opening):
+        """Write the project list as `pm_open.py opening` would."""
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "projects.json").write_text(json.dumps({"opening": opening, "projects": {}}), encoding="utf-8")
+
+    def test_without_a_project_list_the_window_is_asked_about_once(self):
+        result = self.resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "Project window: ask the user once whether to open the board (python .pm/tools/pm_open.py board).",
+            result.stdout,
+        )
+
+    def test_always_says_to_open_the_board_now(self):
+        self.choose("always")
+        result = self.resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "Project window: the user chose always; open the board now with python .pm/tools/pm_open.py board.",
+            result.stdout,
+        )
+
+    def test_never_says_nothing_about_the_window(self):
+        self.choose("never")
+        result = self.resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("Project window", result.stdout)
+
+    def test_a_broken_project_list_means_ask(self):
+        self.home.mkdir(parents=True, exist_ok=True)
+        (self.home / "projects.json").write_text("{ not json", encoding="utf-8")
+        result = self.resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Project window: ask the user once", result.stdout)
+
+    def test_the_line_comes_near_the_end(self):
+        self.choose("ask")
+        result = self.resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("## Warnings", result.stdout)
+        self.assertLess(result.stdout.index("## Warnings"), result.stdout.index("Project window"))
 
 
 if __name__ == "__main__":
