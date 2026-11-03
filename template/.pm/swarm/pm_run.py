@@ -57,9 +57,9 @@ says what that means, so a partial sum is never read as the whole.
 same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
-exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character, and
-every entry of `helpers` names a model, or model, harness and thinking. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting
-a worker.
+exists as a file, the folder that will hold the report exists, `verify` and `setup` hold no control character except a
+tab, and every entry of `helpers` names a model, or model, harness and thinking. The check never runs `verify`. A job
+that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
@@ -580,11 +580,11 @@ def missing_brief(job, repo):
 def control_mark(text):
     """The first control character in a jobs.json string, shown as a person would write it in JSON, or None.
 
-    A Windows path written with single backslashes in a JSON string turns "\\r", "\\n" and "\\v" into control
-    characters, so the shell line can no longer name its own file.
+    A tab is allowed: it separates words in a shell line. A Windows path written with single backslashes in a JSON
+    string turns "\\r", "\\n" and "\\v" into control characters, so the shell line can no longer name its own file.
     """
     for char in text if isinstance(text, str) else "":
-        if ord(char) < 32:
+        if ord(char) < 32 and char != "\t":
             return json.dumps(char)[1:-1]
     return None
 

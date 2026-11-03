@@ -822,6 +822,12 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertIn("write \\ or / in jobs.json", state["a"]["why"])
                 self.assertNotRegex(state["a"]["why"], r"[\x00-\x1f\x7f-\x9f]")
 
+    def test_preflight_lets_a_tab_through_in_setup(self):
+        # A tab separates words in a shell line, so it is not a broken Windows path; the job starts.
+        self.jobs(self.job("a", "ok", setup="echo\tready"))
+        self.run_pm()
+        self.assertEqual(self.receipts()["a"]["state"], "verified")
+
     def test_preflight_requires_the_folder_that_will_hold_the_report(self):
         run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok"), {}
         run.repo = self.tmp
