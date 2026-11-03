@@ -657,6 +657,39 @@ class LauncherTest(unittest.TestCase):
         self.assertFalse(self.lock.exists())
         self.assertEqual(self.read_store()["opening"], "always")
 
+    def test_a_lock_open_that_windows_refuses_is_waited_for_not_skipped(self):
+        real_open, refused = os.open, []
+
+        def open_while_deleted(path, flags, mode=0o777):
+            if len(refused) < 3:  # Windows says this while another run's lock file is being deleted
+                refused.append(path)
+                raise PermissionError(13, "the file is being deleted")
+            return real_open(path, flags, mode)
+
+        with mock.patch.object(pm_open.os, "open", open_while_deleted), pm_open.locked():
+            self.assertTrue(self.lock.exists(), "a refused open is a busy lock: it is waited for, not skipped")
+        self.assertEqual(len(refused), 3)
+        self.assertFalse(self.lock.exists(), "the lock is released at the end")
+
+    def test_a_lock_that_is_never_free_ends_after_the_wait_with_one_line(self):
+        waits, real_sleep = [], time.sleep
+
+        def wait(seconds):
+            waits.append(seconds)
+            if len(waits) > 2000:
+                raise AssertionError("the wait never ended: the deadline is not checked on every path")
+            real_sleep(0.001)  # the deadline still passes, only sooner
+
+        out = io.StringIO()
+        with mock.patch.object(pm_open, "LOCK_WAIT", 0.2), mock.patch.object(pm_open.time, "sleep", wait):
+            with mock.patch.object(pm_open.os, "open", side_effect=PermissionError(13, "busy")):
+                with redirect_stdout(out), pm_open.locked():
+                    self.assertFalse(self.lock.exists())
+        lines = out.getvalue().splitlines()
+        self.assertEqual(len(lines), 1, "one plain line says the lock was not held")
+        self.assertIn("went on without the lock", lines[0])
+        self.assertTrue(waits, "a busy lock is waited for")
+
     def test_the_project_list_is_written_to_a_temporary_file_and_moved(self):
         moves = []
         replace = os.replace

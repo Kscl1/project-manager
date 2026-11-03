@@ -255,7 +255,9 @@ def locked():
     """Hold the project list's lock while it is read, ports are chosen and the result is written back.
 
     The lock is a file next to the list, made with O_EXCL. A lock file older than LOCK_STALE was left behind by a run
-    that died, so it is removed; a run that still waits after LOCK_WAIT seconds goes on and says so. Always released.
+    that died, so it is removed; a run that still waits after LOCK_WAIT seconds goes on and says so. Windows refuses
+    the same open with PermissionError while another run's lock file is being deleted, which is a busy lock too, so
+    that answer is waited for like a lock file that is there. Always released.
     """
     folder, handle = store_dir(), None
     lock = folder / LOCK
@@ -265,11 +267,11 @@ def locked():
         while handle is None:
             try:
                 handle = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            except FileExistsError:
+            except (FileExistsError, PermissionError):
                 try:
                     age = time.time() - lock.stat().st_mtime
                 except OSError:
-                    continue  # released just now: try again
+                    age = 0  # released just now: try again, after the same wait and deadline check
                 if age > LOCK_STALE:
                     lock.unlink(missing_ok=True)  # a run that died left it behind: take it now
                 elif time.monotonic() > deadline:
