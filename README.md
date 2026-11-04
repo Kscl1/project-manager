@@ -115,7 +115,7 @@ Only the Core layer is needed to start. The other four are optional and can be a
 | Layer           | Default              | Contents                                                                                                            |
 | --------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | **Core**  | Always on            | Python, Git, Node.js, Claude Code, Backlog.md, conventions and checks, session hooks, Context7 MCP, `pm-` skills. |
-| **Map**   | On by default      | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` skill.                               |
+| **Map**   | On by default      | LikeC4 CLI (`npx likec4@1.60.0 start`), LikeC4 MCP server, `pm-likec4-dsl` and `pm-map` skills.                 |
 | **Swarm** | Off by default     | Pi, Herdr, and the swarm runner for visible worker panes and evidence checks.                                       |
 | **EVREN** | Off by default, only if you have an EVREN account | evren-bridge, a local bridge to your own EVREN models for Pi. EVREN is a model service some people already pay for ([details](docs/optional-layers.md#evren-layer-optional)). |
 | **Statechart** | Off by default | mise, which gets Java and TLC for the `pm-statechart` skill: it checks a flow with states and draws it, bug paths marked ([details](docs/optional-layers.md#statechart-layer-optional)). |
