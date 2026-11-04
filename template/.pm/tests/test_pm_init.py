@@ -894,6 +894,17 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual(skill.read_bytes(), (SKILLS / "pm-map" / "SKILL.md").read_bytes())
         self.assertTrue((self.root / ".claude" / "skills" / "pm-map" / "SKILL.md").is_file())
 
+    def test_deleting_both_map_skills_drops_the_map_layer(self):
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)
+        for name in ("pm-likec4-dsl", "pm-map"):
+            shutil.rmtree(self.root / ".agents" / "skills" / name)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("pm-likec4-dsl", "pm-map"):
+            self.assertFalse((self.root / ".agents" / "skills" / name).exists(), name)
+
     def test_core_only_project_gets_no_map_skill_on_upgrade(self):
         self.assertEqual(self.run_init().returncode, 0)
         self.assertEqual(self.run_init(self.root, "--upgrade").returncode, 0)

@@ -11,7 +11,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   that puts it back.
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
   --upgrade replaces them too. The map layer's skills (pm-likec4-dsl for the syntax, pm-map for how PM draws and
-  writes a map) come only with --map, then stay until deleted.
+  writes a map) come only with --map. They are one layer: while either is in the project, --upgrade brings and
+  updates both, so a map skill the package gains later reaches the project; to drop the layer, delete both.
   The project's own skills are never touched.
 - The swarm layer (.pm/swarm: pm_run, which runs workers as visible Herdr agents, and its tests) comes only with
   --swarm, then is upgraded like the other package files until deleted.
@@ -201,8 +202,8 @@ def read_manifest(target):
 
 
 def shipped_skills(target, map_layer=False):
-    """The pm-* skills next to the package; the map skills only with --map or once the project has the map layer,
-    so a map skill the package gains later reaches the projects that already have the layer."""
+    """The pm-* skills next to the package; the map skills only with --map or while the project has any of them
+    (the map layer is one piece: deleting one map skill alone does not keep it out)."""
     map_layer = map_layer or any((target / ".agents" / "skills" / name).is_dir() for name in MAP_SKILLS)
     return sorted(
         p for p in SKILLS.glob("pm-*") if (p / "SKILL.md").is_file() and (p.name not in MAP_SKILLS or map_layer)
