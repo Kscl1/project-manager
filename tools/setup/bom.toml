@@ -194,6 +194,14 @@ ref = "likec4/likec4@v1.60.0 (likec4-dsl)"
 # No watch of its own: the skill documents one LikeC4 release, so it is updated in the PR that moves the likec4 pin.
 similar = ["likec4-dsl"]
 
+[[item]]
+id = "pm-map"
+name = "Skill pm-map"
+kind = "project-file"
+layer = "map"
+path = ".agents/skills/pm-map"
+# PM's own map standard; its known-limits section names LikeC4 1.60.0, so it is reread in the PR that moves the pin.
+
 # Swarm: optional, unticked until the user chooses it. Workers run in visible Herdr panes, driven by pm_run.
 
 [[item]]

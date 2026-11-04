@@ -10,8 +10,8 @@ The package is the .pm/ folder this script lives in, so any installed project ca
   project's is ever removed on the way, and the run stops with one line saying where the old copy is and the command
   that puts it back.
 - Every pm-* skill next to the package goes to .agents/skills/, with a pointer in .claude/skills/ for Claude Code;
-  --upgrade replaces them too. The map layer's skill (pm-likec4-dsl) comes only with --map, then stays until
-  deleted.
+  --upgrade replaces them too. The map layer's skills (pm-likec4-dsl for the syntax, pm-map for how PM draws and
+  writes a map) come only with --map, then stay until deleted.
   The project's own skills are never touched.
 - The swarm layer (.pm/swarm: pm_run, which runs workers as visible Herdr agents, and its tests) comes only with
   --swarm, then is upgraded like the other package files until deleted.
@@ -136,7 +136,7 @@ LIKEC4_CONFIGS = (
     "likec4.config.mts",
 )
 LIKEC4_SCHEMA = "https://likec4.dev/schemas/config.json"
-MAP_SKILLS = {"pm-likec4-dsl"}  # the map layer's skills: copied with --map, then upgraded like the others
+MAP_SKILLS = {"pm-likec4-dsl", "pm-map"}  # the map layer's skills: copied with --map, then upgraded like the others
 SWARM = "swarm"  # the swarm layer's folder in .pm/: copied with --swarm, then upgraded like the others
 UPGRADE_GUIDE = "https://github.com/Kscl1/project-manager/blob/main/docs/upgrading.md"
 BOM_TIMEOUT_S = 180  # the program check after an upgrade; each program's own check has a shorter limit
@@ -201,12 +201,11 @@ def read_manifest(target):
 
 
 def shipped_skills(target, map_layer=False):
-    """The pm-* skills next to the package; a map skill only with --map or once the project has it."""
+    """The pm-* skills next to the package; the map skills only with --map or once the project has the map layer,
+    so a map skill the package gains later reaches the projects that already have the layer."""
+    map_layer = map_layer or any((target / ".agents" / "skills" / name).is_dir() for name in MAP_SKILLS)
     return sorted(
-        p
-        for p in SKILLS.glob("pm-*")
-        if (p / "SKILL.md").is_file()
-        and (p.name not in MAP_SKILLS or map_layer or (target / ".agents" / "skills" / p.name).exists())
+        p for p in SKILLS.glob("pm-*") if (p / "SKILL.md").is_file() and (p.name not in MAP_SKILLS or map_layer)
     )
 
 
