@@ -73,7 +73,7 @@ runner = tool 'pm_run' {
     The swarm layer's runner. It starts each job in a visible Herdr pane and counts a job
     as **verified** only when four pieces of evidence pass together.
   '''
-  metadata { file '.pm/swarm/pm_run.py'; decision 'D-12' }
+  metadata { file '.pm/swarm/pm_run.py'; decision 'D-01' }
   link ../../.pm/swarm/pm_run.py 'pm_run'
 }
 ```
