@@ -17,11 +17,15 @@ decisions the part depends on. A clean `likec4 validate` proves syntax, not trut
 
 ## 2. Start a map
 
-If the map folder has no `.c4` file yet, copy `references/starter-spec.c4` into it as `spec.c4`,
-then add `model.c4` and `views.c4`. From then on `spec.c4` is the project's own file: change its
-tags and kinds to fit the project, and nothing will overwrite it. The map folder is the folder after
-`start` in the `map` entry of `.claude/launch.json`, or the project root; it already holds
-`likec4.config.json`, whose `name` you never change (pm_open knows the running map by it).
+The map folder is the folder after `start` in the `map` (or `likec4`) entry of
+`.claude/launch.json`, or the project root. It holds a LikeC4 config (`likec4.config.json` or another
+form LikeC4 reads); never change its `name`, since pm_open knows the running map by it.
+
+If that folder has no `.c4` or `.likec4` file yet, copy `references/starter-spec.c4` into it as
+`spec.c4`, then add `model.c4` and `views.c4`. If a map is already there, keep its specification and
+add only the kinds, tags and arrows it lacks; two specifications that define the same name fail to
+validate. From then on `spec.c4` is the project's own file: change its tags and kinds to fit the
+project, and nothing will overwrite it.
 
 ## 3. Three levels
 
@@ -47,7 +51,7 @@ tags and kinds to fit the project, and nothing will overwrite it. The map folder
 | Field | Rule |
 |---|---|
 | `title` | 1-4 words, the thing's real name |
-| `summary` | at most 8 words (hard limit 10), a verb phrase; the only text on the box |
+| `summary` | at most 8 words (hard limit 10), a verb phrase; the only sentence on the box, under its title |
 | `description` | Markdown in triple quotes (`'''`), 2-4 sentences: what it does, what it does not do |
 | `technology` | short: `Python`, `GitHub Actions`; no versions or paths |
 | `metadata` | `file` (path from the repo root), `decision` (D-n), `task` (task ID); one set of keys per project |
@@ -123,6 +127,8 @@ settles, and commit the `.likec4/` folder with it.
 - The UI upper-cases group titles with English rules (Turkish `i` becomes `I`): write group titles in
   capitals yourself.
 - Markdown renders only in triple-quoted text.
+- `global style pm` styles element and dynamic views; deployment views ignore it, so a planned
+  instance there looks live unless the view styles it with its own `style` rule.
 - `navigateTo` is not an element property: put it on a view's `include … with { }` or on a flow step.
 - Double-click highlights neighbours; the box's drill-down button goes inside.
 - Add `"inferTechnologyFromIcon": false` to `likec4.config.json`, or bundled icons fill `technology`

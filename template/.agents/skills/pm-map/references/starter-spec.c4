@@ -67,7 +67,7 @@ specification {
     notation 'Directs, decides'
     color amber
     line solid
-    head normal
+    head diamond
   }
   relationship runs {
     notation 'Starts, runs'
@@ -102,7 +102,7 @@ specification {
 }
 
 global {
-  // Apply in every view with `global style pm`.
+  // Apply with `global style pm` in element and dynamic views; deployment views ignore it (LikeC4 1.60.0).
   styleGroup pm {
     style element.tag = #planned { border dashed; opacity 40% }
   }
