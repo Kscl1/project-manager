@@ -250,6 +250,8 @@ def load_tasks(directory=None):
             "updated": fields.get("updated_date", ""),
             "summary": final_summary(lines),
             "parent": fields.get("parent_task_id", "").strip(),
+            "priority": fields.get("priority", "").strip().lower(),
+            "milestone": fields.get("milestone", "").strip(),
             "live": parse_live_block(notes),
             **review_fields(notes),
         }

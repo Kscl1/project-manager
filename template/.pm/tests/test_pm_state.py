@@ -31,12 +31,14 @@ def run_git(repo, *args):
     return result.stdout
 
 
-def write_task(root, task_id, title, status, notes=None, updated=None):
+def write_task(root, task_id, title, status, notes=None, updated=None, priority=None):
     tasks = root / ".pm" / "backlog" / "tasks"
     tasks.mkdir(parents=True, exist_ok=True)
     lines = ["---", f"id: {task_id}", f"title: {title}", f"status: {status}", "created_date: '2026-06-01 09:00'"]
     if updated:
         lines.append(f"updated_date: '{updated}'")
+    if priority:
+        lines.append(f"priority: {priority}")
     lines += ["---", "", "## Description", "", f"Fixture task {task_id}.", ""]
     if notes is not None:
         lines += [
@@ -136,7 +138,7 @@ class StateTest(unittest.TestCase):
         write_task(self.root, "REQ-3", "Later", "Ready", "Next: nothing yet")
         self.commit("feat: start\n\nRefs: REQ-1")
         state = self.snapshot()
-        self.assertEqual(state["version"], 1)
+        self.assertEqual(state["version"], 2)
         self.assertEqual([task["id"] for task in state["tasks"]], ["REQ-1", "REQ-2"])
         first = state["tasks"][0]
         self.assertEqual((first["next"], first["blocker"], first["evidence"]), ("write it", "none", None))
@@ -161,6 +163,72 @@ class StateTest(unittest.TestCase):
         after = [tree_digest(self.root / ".pm" / name) for name in ("backlog", "decisions", "local")]
         self.assertEqual(before, after)
         self.assertEqual(run_git(self.root, "status", "--porcelain"), status)
+
+    def test_waiting_puts_stuck_work_first_then_the_oldest(self):
+        write_task(self.root, "REQ-1", "Decide later", "Active", "Needs owner: pick one", "2026-10-02 10:00")
+        write_task(self.root, "REQ-2", "Decide first", "Ready", "Needs owner: pick two", "2026-10-01 10:00")
+        write_task(self.root, "REQ-3", "Look at this", "Owner check", "Next: try it", "2026-10-03 10:00")
+        write_task(self.root, "REQ-4", "Just work", "Active", "Next: go on\nNeeds owner: none")
+        attempt = {"started": time.time() - 60, "ended": time.time() - 30, "why": "stuck on a plan screen"}
+        self.run_folder("r1", [{"id": "a", "task": "REQ-1"}], {"a": {"state": "handed-over", "attempts": [attempt]}})
+        self.fake_herdr(
+            [
+                {
+                    "pane_id": "p",
+                    "name": "x",
+                    "agent": "pi",
+                    "agent_status": "blocked",
+                    "title": "Allow?",
+                    "cwd": str(self.root),
+                }
+            ]
+        )
+        cards = self.snapshot()["waiting"]
+        self.assertEqual(
+            [(c["kind"], c["ref"]) for c in cards],
+            [("stuck", "REQ-1"), ("stuck", None), ("decision", "REQ-2"), ("decision", "REQ-1"), ("review", "REQ-3")],
+        )
+        self.assertEqual(cards[0]["text"], "stuck on a plan screen")
+        self.assertEqual(cards[0]["tool"], "agents")
+        self.assertEqual(cards[2]["text"], "pick two")
+        self.assertEqual(cards[4]["text"], "try it")
+        self.assertEqual(cards[4]["tool"], "board")
+
+    def test_a_job_that_ended_well_waits_for_nobody(self):
+        attempt = {"started": time.time() - 60, "ended": time.time() - 30}
+        self.run_folder("r1", [{"id": "a"}], {"a": {"state": "verified", "attempts": [attempt]}})
+        self.assertEqual(self.snapshot()["waiting"], [])
+
+    def test_the_board_is_every_open_task_by_priority_then_the_last_closed(self):
+        write_task(self.root, "REQ-1", "No priority", "Ready", "Blocker: none")
+        write_task(self.root, "REQ-2", "Low", "Ready", priority="low")
+        write_task(self.root, "REQ-3", "High", "Active", "Blocker: the tool is down\nNeeds owner: say", priority="high")
+        write_task(self.root, "REQ-4", "Medium", "Ready", priority="medium")
+        for number in range(5, 12):
+            write_task(self.root, f"REQ-{number}", f"Closed {number}", "Done", updated=f"2026-10-{number:02d} 10:00")
+        rows = self.snapshot()["board"]
+        self.assertEqual(
+            [r["id"] for r in rows],
+            ["REQ-3", "REQ-4", "REQ-2", "REQ-1", "REQ-11", "REQ-10", "REQ-9", "REQ-8", "REQ-7"],
+        )
+        self.assertTrue(rows[0]["waiting"])
+        self.assertFalse(rows[1]["waiting"])
+        self.assertEqual(rows[0]["blocker"], "the tool is down")
+        self.assertEqual(rows[0]["priority"], "high")
+        self.assertIsNone(rows[3]["priority"])
+        self.assertIsNone(rows[3]["blocker"], "`Blocker: none` blocks nothing")
+
+    def test_soon_is_the_nearest_review_dates_of_open_tasks(self):
+        write_task(self.root, "REQ-1", "Later", "Ready", "Review by: 2026-12-02 · the owner · a reason")
+        write_task(self.root, "REQ-2", "Sooner", "Active", "Review by: 2026-12-01 · the owner · a reason")
+        write_task(self.root, "REQ-3", "Closed", "Done", "Review by: 2026-11-01 · the owner · a reason")
+        self.assertEqual(
+            self.snapshot()["soon"],
+            [
+                {"date": "2026-12-01", "what": "Sooner", "ref": "REQ-2"},
+                {"date": "2026-12-02", "what": "Later", "ref": "REQ-1"},
+            ],
+        )
 
     def test_jobs_running_and_recently_ended_are_grouped_by_their_task(self):
         write_task(self.root, "REQ-1", "Build the thing", "Active", "Next: write it")

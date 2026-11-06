@@ -46,7 +46,7 @@ class Case(unittest.TestCase):
         (self.project / ".pm" / "decisions" / "D-1.md").write_text("decision", encoding="utf-8")
         (self.project / ".claude").mkdir()
         (self.project / ".claude" / "launch.json").write_text(json.dumps(LAUNCH), encoding="utf-8")
-        self.write_state(STATE % 1)
+        self.write_state(STATE % pm_bridge.STATE_VERSION)
         home = self.temp / "home"
         home.mkdir()
         self.key = pm_open.folder_key(self.project)

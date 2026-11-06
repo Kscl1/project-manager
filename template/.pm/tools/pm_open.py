@@ -4,6 +4,11 @@ Usage: python .pm/tools/pm_open.py board|map [--download]
        python .pm/tools/pm_open.py stop board|map
        python .pm/tools/pm_open.py list
        python .pm/tools/pm_open.py opening ask|always|never
+       python .pm/tools/pm_open.py window
+       python .pm/tools/pm_open.py stop window
+
+`window` opens the project window (pm_bridge.py), started once for the whole machine, with this project on its list;
+`stop window` ends it if this tool started it, and every server and agent keeps running.
 
 --root names another project's folder and --no-browser leaves the browser alone: the project window (pm_bridge.py)
 runs this tool that way, for any registered project.
@@ -49,6 +54,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+WINDOW_PORT = 7420  # pm_bridge.py's port; a bridge on another one is started by hand and not looked after here
 WAIT_SECONDS = 30  # how long a server may take to answer on its port
 POLL_SECONDS = 0.5
 STATUS_TIMEOUT = 2  # a board answers /api/status at once; a slower answer is not the board we can trust
@@ -90,8 +96,8 @@ OPENING_MEANINGS = {
 }
 # The one line `pm_board.py --resume` prints about the window; `never` prints nothing.
 WINDOW_LINES = {
-    "ask": "Project window: ask the user once whether to open the board (python .pm/tools/pm_open.py board).",
-    "always": "Project window: the user chose always; open the board now with python .pm/tools/pm_open.py board.",
+    "ask": "Project window: ask the user once whether to open the project window (python .pm/tools/pm_open.py window).",
+    "always": "Project window: the user chose always; open the project window now with python .pm/tools/pm_open.py window.",
     "never": "",
 }
 
@@ -942,6 +948,80 @@ def stop_server(name):
         return 0
 
 
+def window_address():
+    return ADDRESS.format(port=WINDOW_PORT)
+
+
+def window_running():
+    """True when the project window answers on its port, and not some other program that holds it."""
+    try:
+        request = urllib.request.Request(window_address() + "/api/health")
+        with urllib.request.urlopen(request, timeout=STATUS_TIMEOUT) as answer:
+            return json.loads(answer.read().decode("utf-8")).get("name") == "pm-bridge"
+    except (OSError, ValueError, AttributeError, http.client.HTTPException):
+        return False
+
+
+def open_window():
+    """Put this project on the list, start the project window if it is not running, and open it."""
+    with locked() as held:
+        if not held:
+            return 1
+        data = read_store()
+        record_of_project = record_of(data, ROOT)
+        if not record_of_project:
+            data.setdefault("projects", {})[folder_key(ROOT)] = {"name": ROOT.name}
+            if not write_store(data):
+                warn_store()
+        if window_running():
+            show(window_address())
+            print(f"The project window is at {window_address()}")
+            return 0
+        if answers(WINDOW_PORT):
+            print(f"Port {WINDOW_PORT} answers for another program, so the project window was not started.")
+            return 1
+        program = Path(__file__).resolve().parent / "pm_bridge.py"
+        log_path = ROOT / ".pm" / "local" / LOG.format(name="window")
+        process = start([sys.executable, str(program), "--port", str(WINDOW_PORT)], ROOT, log_path)
+        data["window"] = {"port": WINDOW_PORT, "pid": process.pid, "started": start_time(process.pid)}
+        if not write_store(data):
+            warn_store()
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not window_running():
+        if process.poll() is not None or time.monotonic() > deadline:
+            print(f"The project window did not answer at {window_address()}; its output is in {log_path}.")
+            return 1
+        time.sleep(POLL_SECONDS)
+    show(window_address())
+    print(f"The project window is at {window_address()}")
+    print("To stop it, run: python .pm/tools/pm_open.py stop window")
+    return 0
+
+
+def stop_window():
+    """End the project window this tool started, and nothing else."""
+    with locked() as held:
+        if not held:
+            return 1
+        data = read_store()
+        server = data.get("window")
+        pid = process_of(server) if isinstance(server, dict) else None
+        if not pid:
+            data.pop("window", None)
+            if not write_store(data):
+                warn_store()
+            print("No project window started by this tool is running, so I stopped nothing.")
+            return 0
+        if not terminate(pid):
+            print(f"I could not stop the project window (process id {pid}).")
+            return 1
+        data.pop("window", None)
+        if not write_store(data):
+            warn_store()
+        print(f"Stopped the project window (process id {pid}). Everything else keeps running.")
+        return 0
+
+
 def show_list():
     """One line per registered project: its folder, then the address of its board and map and whether each is ours."""
     projects = read_store().get("projects", {})
@@ -988,7 +1068,8 @@ def main(argv=None):
             "board: the task board of this project.\n"
             "map: the architecture map, an optional layer added with `python .pm/tools/pm_init.py --map`.\n"
             "  --download: map only; allows the first start to download LikeC4 from npm.\n"
-            "stop board|map: stop the server this tool started for this project.\n"
+            "window: the project window for every project on this machine.\n"
+            "stop board|map|window: stop what this tool started.\n"
             "list: every project opened this way, with its board and map and whether they run.\n"
             "opening ask|always|never: whether a session start offers the project window (the default is ask)."
         ),
@@ -996,11 +1077,11 @@ def main(argv=None):
     )
     parser.add_argument(
         "name",
-        choices=("board", "map", "stop", "list", "opening"),
-        metavar="board|map|stop|list|opening",
+        choices=("board", "map", "window", "stop", "list", "opening"),
+        metavar="board|map|window|stop|list|opening",
         help="what to do",
     )
-    parser.add_argument("value", nargs="?", help="stop: board or map; opening: ask, always or never")
+    parser.add_argument("value", nargs="?", help="stop: board, map or window; opening: ask, always or never")
     parser.add_argument("--download", action="store_true", help="map only: let the first start download LikeC4")
     parser.add_argument("--root", help="another project's folder instead of this one")
     parser.add_argument("--no-browser", action="store_true", help="start or find the server, open no browser")
@@ -1017,8 +1098,10 @@ def main(argv=None):
     if args.name == "list":
         return show_list()
     if args.name == "stop":
+        if args.value == "window":
+            return stop_window()
         if args.value not in ("board", "map"):
-            print("Say what to stop: `python .pm/tools/pm_open.py stop board` or `... stop map`.")
+            print("Say what to stop: `python .pm/tools/pm_open.py stop board`, `... stop map` or `... stop window`.")
             return 1
         return stop_server(args.value)
     if args.name == "opening":
@@ -1029,7 +1112,7 @@ def main(argv=None):
     if args.value:
         print(f"`{args.name}` takes no other word; run `python .pm/tools/pm_open.py --help` to see the commands.")
         return 1
-    return open_server(args.name, args.download)
+    return open_window() if args.name == "window" else open_server(args.name, args.download)
 
 
 if __name__ == "__main__":

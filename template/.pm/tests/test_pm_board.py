@@ -1006,7 +1006,7 @@ class ProjectWindowTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "Project window: ask the user once whether to open the board (python .pm/tools/pm_open.py board).",
+            "Project window: ask the user once whether to open the project window (python .pm/tools/pm_open.py window).",
             result.stdout,
         )
 
@@ -1016,7 +1016,7 @@ class ProjectWindowTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(
-            "Project window: the user chose always; open the board now with python .pm/tools/pm_open.py board.",
+            "Project window: the user chose always; open the project window now with python .pm/tools/pm_open.py window.",
             result.stdout,
         )
 
