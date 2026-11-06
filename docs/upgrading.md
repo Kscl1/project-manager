@@ -13,7 +13,7 @@ A project has several independent layers. Words such as commit, branch or layer 
 
 ## 1. Choose a source release
 
-These commands run **in the project-manager source clone**, not in your project. The getting-started guide installs `v0.2.0-alpha.2`. For an upgrade, replace `<new-tag>` below with a real, newer release tag.
+These commands run **in the project-manager source clone**, not in your project. The getting-started guide installs `v0.2.0-alpha.3`. For an upgrade, replace `<new-tag>` below with a real, newer release tag.
 
 ```bash
 git status --short
