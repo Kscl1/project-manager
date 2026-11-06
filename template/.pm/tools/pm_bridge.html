@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project window</title>
+<style>
+body{margin:2rem auto;max-width:56rem;padding:0 1rem;font:15px/1.5 system-ui,sans-serif;color:#1b2925;background:#fbfcf9}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:.5rem .75rem .5rem 0;border-bottom:1px solid #d5ddd6}
+code{font-size:13px}
+#note{min-height:1.5em;color:#4d5e58}
+</style>
+</head>
+<body>
+<h1>Project window</h1>
+<p id="note" role="status"></p>
+<table><thead><tr><th>Project</th><th>Folder</th><th>Map</th></tr></thead><tbody id="list"></tbody></table>
+<script>
+const list = document.getElementById("list"), note = document.getElementById("note");
+
+function mapCell(cell, project) {
+  const map = project.map;
+  if (map.state === "running") {
+    const link = cell.appendChild(document.createElement("a"));
+    link.href = map.url;
+    link.textContent = "running";
+    cell.append(" ");
+  } else {
+    cell.append({none: "no map", foreign: "port taken by another program", stopped: "stopped"}[map.state] + " ");
+  }
+  if (map.state === "none") return;
+  const action = map.state === "running" ? "stop" : "start";
+  const button = cell.appendChild(document.createElement("button"));
+  button.textContent = action === "stop" ? "Stop" : "Start";
+  button.onclick = () => change(action, project, button);
+}
+
+async function change(action, project, button) {
+  button.disabled = true;
+  note.textContent = `${project.name}: ${action}…`;
+  try {
+    const answer = await fetch(`/api/map/${action}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({project: project.id}),
+    });
+    note.textContent = (await answer.json()).message || `${project.name}: done`;
+  } catch (error) {
+    note.textContent = `The bridge did not answer: ${error}`;
+  }
+  load();
+}
+
+async function load() {
+  try {
+    const {projects} = await (await fetch("/api/projects")).json();
+    list.replaceChildren(...projects.map(project => {
+      const row = document.createElement("tr");
+      row.insertCell().textContent = project.name;
+      const folder = row.insertCell().appendChild(document.createElement("code"));
+      folder.textContent = project.found ? project.folder : `${project.folder} (not found)`;
+      mapCell(row.insertCell(), project);
+      return row;
+    }));
+    if (!projects.length) note.textContent = "No project yet: run python .pm/tools/pm_open.py board in one.";
+  } catch (error) {
+    note.textContent = `The bridge did not answer: ${error}`;
+  }
+}
+
+load();
+</script>
+</body>
+</html>

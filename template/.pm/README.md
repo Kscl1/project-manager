@@ -53,6 +53,7 @@ python .pm/tools/pm_open.py board       # the board in your browser, started onc
 python .pm/tools/pm_open.py list        # every project opened this way: its board and map, running or stopped
 python .pm/tools/pm_open.py stop board  # stops the board this tool started ('stop map' for the map)
 python .pm/tools/pm_open.py opening ask # ask, always or never: whether a session start offers the project window
+python .pm/tools/pm_bridge.py          # the project window on 127.0.0.1, for every project in that list
 backlog browser
 python .pm/tools/pm_check.py --stale
 python -m unittest discover -s .pm/tests   # the package's own tests, standard library only
