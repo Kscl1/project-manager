@@ -1,0 +1,109 @@
+// PM's map vocabulary (pm-map skill, LikeC4 1.60.0). Copy this file into the map folder as spec.c4 when the
+// project's first map is made; from then on it is the project's own file and nothing overwrites it.
+// Meaning is carried three ways, so the map reads without colour too:
+// boxes by shape + icon + colour, arrows by line + head + colour.
+
+specification {
+
+  // ---- Boxes: what a thing is ----------------------------------------------------------------
+  element person {
+    notation 'Person: decides'
+    style { shape person; color amber; icon bootstrap:person-circle; iconPosition top }
+  }
+  element agent {
+    notation 'AI agent'
+    style { shape rectangle; color indigo; icon bootstrap:robot }
+  }
+  element system {
+    notation 'System: open it to go inside'
+    style { shape rectangle; color primary; icon bootstrap:box-seam }
+  }
+  element tool {
+    notation 'Tool: runs as a command'
+    style { shape component; color sky; icon bootstrap:terminal }
+  }
+  element gate {
+    notation 'Gate: checks and stops'
+    style { shape component; color red; icon bootstrap:shield-check }
+  }
+  element record {
+    notation 'Record: files in git'
+    style { shape document; color slate; icon bootstrap:journal-text }
+  }
+  element viewer {
+    notation 'Screen: a person looks at it'
+    style { shape browser; color green; icon bootstrap:window-stack }
+  }
+  element external {
+    notation 'Outside tool or service'
+    style { shape rectangle; color gray; icon bootstrap:plug }
+  }
+
+  // ---- Places: where things run (deployment views) -------------------------------------------
+  deploymentNode computer {
+    notation 'Computer'
+    style { color slate; icon bootstrap:laptop }
+  }
+  deploymentNode cloud {
+    notation 'Cloud service'
+    style { color gray; icon bootstrap:cloud }
+  }
+  deploymentNode zone {
+    notation 'Zone: a cluster inside a place'
+    style { color slate; border dashed }
+  }
+
+  // ---- Tags: which layer brings it, whose it is ----------------------------------------------
+  // Every tag has an explicit colour: an uncoloured tag is coloured by alphabetical order,
+  // so adding one tag would recolour the others. Rename or add tags for your project the same way.
+  tag core { color #0284c7 }
+  tag optional { color #7c3aed }
+  tag personal { color #d97706 }
+  tag planned { color #64748b }
+
+  // ---- Arrows: what one thing does to another ------------------------------------------------
+  // An arrow goes from the one who acts to what it acts on.
+  relationship directs {
+    notation 'Directs, decides'
+    color amber
+    line solid
+    head diamond
+  }
+  relationship runs {
+    notation 'Starts, runs'
+    color indigo
+    line solid
+    head vee
+  }
+  relationship writes {
+    notation 'Writes, records'
+    color green
+    line solid
+    head normal
+  }
+  relationship reads {
+    notation 'Reads, shows'
+    color sky
+    line dashed
+    head onormal
+  }
+  relationship checks {
+    notation 'Checks, looks for proof'
+    color red
+    line dotted
+    head odiamond
+  }
+  relationship ships {
+    notation 'Publishes, upgrades'
+    color slate
+    line dashed
+    head vee
+  }
+}
+
+global {
+  // Apply with `global style pm` in element and dynamic views; deployment views ignore it (LikeC4 1.60.0).
+  styleGroup pm {
+    style element.tag = #planned { border dashed; opacity 40% }
+  }
+}

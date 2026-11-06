@@ -869,6 +869,10 @@ class PmInitTest(unittest.TestCase):
         self.assertTrue((skill / "references" / "model.md").is_file())
         pointer = (self.root / ".claude" / "skills" / "pm-likec4-dsl" / "SKILL.md").read_text(encoding="utf-8")
         self.assertTrue(pointer.startswith("---\nname: pm-likec4-dsl\n"))
+        standard = self.root / ".agents" / "skills" / "pm-map"
+        self.assertTrue((standard / "references" / "starter-spec.c4").is_file(), "the map standard comes with --map")
+        pointer = (self.root / ".claude" / "skills" / "pm-map" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertTrue(pointer.startswith("---\nname: pm-map\n"))
 
         (skill / "SKILL.md").write_text("old\n", encoding="utf-8")
         result = self.run_init(self.root, "--upgrade")  # an upgrade without --map keeps the map skill current
@@ -877,6 +881,34 @@ class PmInitTest(unittest.TestCase):
         self.assertEqual((skill / "SKILL.md").read_bytes(), (SKILLS / "pm-likec4-dsl" / "SKILL.md").read_bytes())
         manifest = (self.root / ".pm" / "package-files.sha256").read_text(encoding="utf-8")
         self.assertIn("  .agents/skills/pm-likec4-dsl/SKILL.md", manifest)
+
+    def test_a_map_skill_new_in_the_package_reaches_a_project_that_has_the_map_layer(self):
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)
+        shutil.rmtree(self.root / ".agents" / "skills" / "pm-map")  # installed before the package had pm-map
+        shutil.rmtree(self.root / ".claude" / "skills" / "pm-map")
+
+        result = self.run_init(self.root, "--upgrade")  # no --map: the layer is known from pm-likec4-dsl
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        skill = self.root / ".agents" / "skills" / "pm-map" / "SKILL.md"
+        self.assertEqual(skill.read_bytes(), (SKILLS / "pm-map" / "SKILL.md").read_bytes())
+        self.assertTrue((self.root / ".claude" / "skills" / "pm-map" / "SKILL.md").is_file())
+
+    def test_deleting_both_map_skills_drops_the_map_layer(self):
+        self.assertEqual(self.run_init(self.root, "--map").returncode, 0)
+        for name in ("pm-likec4-dsl", "pm-map"):
+            shutil.rmtree(self.root / ".agents" / "skills" / name)
+
+        result = self.run_init(self.root, "--upgrade")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for name in ("pm-likec4-dsl", "pm-map"):
+            self.assertFalse((self.root / ".agents" / "skills" / name).exists(), name)
+
+    def test_core_only_project_gets_no_map_skill_on_upgrade(self):
+        self.assertEqual(self.run_init().returncode, 0)
+        self.assertEqual(self.run_init(self.root, "--upgrade").returncode, 0)
+        self.assertFalse((self.root / ".agents" / "skills" / "pm-map").exists())
 
     def test_swarm_comes_with_swarm_and_then_stays(self):
         swarm, source = self.root / ".pm" / "swarm", PM_INIT.parent.parent / "swarm"
