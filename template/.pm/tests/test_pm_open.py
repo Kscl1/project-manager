@@ -1203,7 +1203,8 @@ class ServedMapsTest(unittest.TestCase):
             return Answer(text)
 
         with mock.patch.object(pm_open.urllib.request, "urlopen", urlopen):
-            return pm_open.served_maps(base), asked
+            with mock.patch.object(pm_open, "answers_on", return_value=True):
+                return pm_open.served_maps(base), asked
 
     def test_the_names_come_from_likec4s_projects_module(self):
         names, asked = self.served(self.MODULE)
@@ -1218,6 +1219,12 @@ class ServedMapsTest(unittest.TestCase):
         page = '<html><pre>export const projects = [{\n\tid: "ours"\n}];</pre></html>'
         self.assertEqual(self.served(page)[0], [])
         self.assertEqual(self.served("<html>" + self.MODULE)[0], [], "the module's mark must be its first line")
+
+    def test_a_silent_loopback_is_not_asked(self):
+        with mock.patch.object(pm_open.urllib.request, "urlopen") as asked:
+            with mock.patch.object(pm_open, "answers_on", return_value=False):
+                self.assertEqual(pm_open.served_maps("http://127.0.0.1:5173"), [])
+        asked.assert_not_called()
 
     def test_no_answer_names_nothing(self):
         def refused(url, timeout):
@@ -1494,6 +1501,45 @@ class StartTest(unittest.TestCase):
         self.start()
         options = self.popen.call_args[1]
         self.assertEqual(options["creationflags"], subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP)
+
+
+class RootAndBrowserOptions(unittest.TestCase):
+    """What the project window asks of this tool: another folder, and no browser."""
+
+    def setUp(self):
+        for name in ("ROOT", "BROWSER"):
+            patch = mock.patch.object(pm_open, name, getattr(pm_open, name))
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_root_points_the_tool_at_that_project(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder) / ".pm").mkdir()
+            with mock.patch.object(pm_open, "stop_server", return_value=0) as stop:
+                self.assertEqual(pm_open.main(["stop", "map", "--root", folder]), 0)
+            stop.assert_called_once_with("map")
+            self.assertEqual(pm_open.ROOT, Path(folder).resolve())
+
+    def test_a_folder_without_pm_is_refused(self):
+        with tempfile.TemporaryDirectory() as folder, redirect_stdout(io.StringIO()) as out:
+            with mock.patch.object(pm_open, "open_server") as started:
+                self.assertEqual(pm_open.main(["map", "--root", folder]), 1)
+        started.assert_not_called()
+        self.assertIn("no .pm folder", out.getvalue())
+
+    def test_no_browser_opens_nothing(self):
+        with mock.patch.object(pm_open, "open_server", return_value=0):
+            pm_open.main(["map", "--no-browser"])
+        with mock.patch.object(pm_open.webbrowser, "open") as opened:
+            pm_open.show("http://127.0.0.1:1")
+        opened.assert_not_called()
+
+    def test_the_browser_opens_by_default(self):
+        with mock.patch.object(pm_open, "open_server", return_value=0):
+            pm_open.main(["map"])
+        with mock.patch.object(pm_open.webbrowser, "open") as opened:
+            pm_open.show("http://127.0.0.1:1")
+        opened.assert_called_once()
 
 
 if __name__ == "__main__":

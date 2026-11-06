@@ -5,6 +5,9 @@ Usage: python .pm/tools/pm_open.py board|map [--download]
        python .pm/tools/pm_open.py list
        python .pm/tools/pm_open.py opening ask|always|never
 
+--root names another project's folder and --no-browser leaves the browser alone: the project window (pm_bridge.py)
+runs this tool that way, for any registered project.
+
 The project root is the folder that holds .pm/, and the tool lives in .pm/tools/. The command, its arguments and the
 port come from the project's .claude/launch.json, which the installer writes; that file is only ever read. Without it
 the board runs `backlog browser --no-open --port 6420`, and the map has no default: it is an optional layer.
@@ -41,6 +44,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -101,6 +105,7 @@ def find_root(start):
 
 
 ROOT = find_root(Path(__file__).resolve().parent)
+BROWSER = True  # --no-browser turns it off: the project window shows the map itself
 
 
 def configurations(root):
@@ -150,16 +155,18 @@ def answers(port):
     """
     if not isinstance(port, int) or port <= 0:
         return False
-    for address in LOOPBACKS:
-        family = socket.AF_INET6 if ":" in address else socket.AF_INET
-        try:
-            with socket.socket(family) as probe:
-                probe.settimeout(0.5)
-                if probe.connect_ex((address, port)) == 0:
-                    return True
-        except OSError:
-            continue  # no IPv6 on this machine, or no right to open a socket: no answer there
-    return False
+    return any(answers_on(address, port) for address in LOOPBACKS)
+
+
+def answers_on(address, port):
+    """True when something answers at that port on that one loopback; a refusal takes two seconds on Windows."""
+    family = socket.AF_INET6 if ":" in address else socket.AF_INET
+    try:
+        with socket.socket(family) as probe:
+            probe.settimeout(0.5)
+            return probe.connect_ex((address, port)) == 0
+    except OSError:
+        return False  # no IPv6 on this machine, or no right to open a socket: no answer there
 
 
 def project_of(port):
@@ -227,6 +234,9 @@ def made_here(folder, name):
 
 def served_maps(base):
     """The LikeC4 project names the server at that address serves; empty for anything that is not LikeC4's list."""
+    place = urllib.parse.urlsplit(base)
+    if not answers_on(place.hostname, place.port):
+        return []  # asked first: the request alone would wait through a refusal
     try:
         with urllib.request.urlopen(base + PROJECTS_PATH, timeout=STATUS_TIMEOUT) as answer:
             text = answer.read().decode("utf-8", "replace")
@@ -800,11 +810,17 @@ def wait_until_open(name, process, port, root, command, log_path):
         print(f"Something answers at {address}, but it is not this project's board; it serves {served or 'nothing'}.")
         print(f"The board I started writes to {log}; read that file, then run this command again.")
         return 1
-    webbrowser.open(address)
+    show(address)
     print(f"The {name} is open at {address}")
     print(f"Command: {ran}")
     print(f"To stop it, run: python .pm/tools/pm_open.py stop {name}")
     return 0
+
+
+def show(address):
+    """Open the address in the browser, unless the caller shows it itself."""
+    if BROWSER:
+        webbrowser.open(address)
 
 
 def open_server(name, download=False, root=None):
@@ -835,7 +851,7 @@ def open_server(name, download=False, root=None):
                 port, (state, served, address) = wanted, found
         if state == OURS:
             print(f"The {name} is already running at {address}; I opened it in your browser.")
-            webbrowser.open(address)
+            show(address)
             keep(data, root, name, port)
             return 0
         if state == STOPPED and recorded.get("port") == port and process_of(recorded):
@@ -986,7 +1002,17 @@ def main(argv=None):
     )
     parser.add_argument("value", nargs="?", help="stop: board or map; opening: ask, always or never")
     parser.add_argument("--download", action="store_true", help="map only: let the first start download LikeC4")
+    parser.add_argument("--root", help="another project's folder instead of this one")
+    parser.add_argument("--no-browser", action="store_true", help="start or find the server, open no browser")
     args = parser.parse_args(argv)
+
+    global ROOT, BROWSER
+    BROWSER = not args.no_browser
+    if args.root:
+        ROOT = Path(args.root).resolve()
+        if not (ROOT / ".pm").is_dir():
+            print(f"{ROOT} has no .pm folder, so it is not a project.")
+            return 1
 
     if args.name == "list":
         return show_list()
