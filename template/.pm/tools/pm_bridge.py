@@ -43,7 +43,7 @@ NAME = "pm-bridge"
 PORT = 7420
 HOST = "127.0.0.1"  # the only address it listens on; there is deliberately no option for another
 PAGE = HERE / "pm_bridge.html"
-STATE_VERSION = 1  # the pm_state output this program can read
+STATE_VERSION = 2  # the pm_state output this program can read; an older project is told to upgrade
 STATE_SECONDS = 20
 START_SECONDS = 160  # pm_open may check the npx cache (up to 120 s), then waits for the map to answer
 STOP_SECONDS = 20
@@ -53,7 +53,8 @@ NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # no console flashes up on Win
 # The page is one file with its style and script inside; a frame may only ever show a map on this machine (the API
 # gives no other address), and no other page may frame this one.
 PAGE_POLICY = (
-    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src http:; "
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+    "frame-src http:; "
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 
@@ -164,7 +165,10 @@ def project_state(folder):
     except ValueError:
         return {"state": None, "why": "pm_state did not print JSON"}
     if not isinstance(state, dict) or state.get("version") != STATE_VERSION:
-        return {"state": None, "why": f"pm_state prints a shape this bridge does not read (it reads {STATE_VERSION})"}
+        return {
+            "state": None,
+            "why": f"pm_state prints a shape this bridge does not read (it reads {STATE_VERSION}); upgrade this project",
+        }
     return {"state": state}
 
 

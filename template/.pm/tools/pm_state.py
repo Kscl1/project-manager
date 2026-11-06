@@ -10,6 +10,10 @@ The state is computed on each call from what is already there, and the call writ
   every run folder of a long-lived project takes most of a second;
 - Herdr's live snapshot (`herdr api snapshot`): the agents working in this project's folder or below it;
 - git: branch, changed files, last commits.
+`waiting` is what waits on a person, stuck work first and then the oldest: a job that ended without its result, a
+worker Herdr shows as blocked, a task's `Needs owner:` line, a task in Owner check. `board` is every open task, most
+important first, then the last closed ones; a task's `waiting` says it is in that list. `soon` is the `Review by:`
+dates of the open tasks, nearest first.
 `events` lists today's commits (by commit time), closed tasks and ended jobs, newest first, all in local time. A job's
 optional `task` field in jobs.json names the task it works for; `workers_by_task` groups the jobs by it. A job's `lease`
 is how fresh its run's pm_run.lease is: `fresh` when the loop rewrote it in the last LEASE_FRESH_S, else `stale`. It is
@@ -37,7 +41,7 @@ import pm_resume  # noqa: E402  (a sibling script, which already reads the tasks
 
 ROOT = pm_resume.ROOT
 RUNS_DIR = ROOT / ".pm" / "local" / "runs"
-VERSION = 1  # the shape of the JSON; a reader checks it before it trusts the keys
+VERSION = 2  # the shape of the JSON; a reader checks it before it trusts the keys
 RECENT_S = 24 * 3600
 # pm_run's ended states (pm_run.ENDED; a test keeps the two in step). Any other state is not ended yet.
 ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
@@ -45,6 +49,10 @@ ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed"
 # tick that starts a worker may also wait up to 60 s for it to be ready.
 LEASE_FRESH_S = 3 * float(os.environ.get("PM_RUN_TICK", 15)) + 60
 NO_TASK = "(none)"
+STUCK = ("handed-over", "blocked", "failed", "check-failed")  # pm_run's ended states that need someone to look
+PRIORITIES = {"high": 0, "medium": 1, "low": 2}  # a task without one comes after these
+BOARD_CLOSED = 5  # how many closed tasks the board shows
+SOON = 5  # how many review dates
 # Herdr as pm_run finds it: PM_RUN_HERDR (tests pass a JSON command list), else `herdr` on PATH.
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]
@@ -259,6 +267,84 @@ def events(today, tasks, jobs, todays_commits):
     return sorted(found, key=lambda event: moment(event["time"]), reverse=True)
 
 
+def waiting_cards(tasks, waits, jobs, agents):
+    """What waits on a person: stuck jobs and workers first, then decisions and reviews, oldest first in each."""
+    cards = [
+        {
+            "kind": "stuck",
+            "title": f"{job['run']}/{job['job']}",
+            "text": job["why"] or job["state"],
+            "since": job["ended"],
+            "tool": "agents",
+            "ref": job["task"],
+        }
+        for job in jobs
+        if job["state"] in STUCK
+    ]
+    for agent in agents or []:
+        if agent["status"] == "blocked":
+            title = agent["job"] or agent["name"] or agent["agent"]
+            cards.append(
+                {"kind": "stuck", "title": title, "text": agent["title"], "since": None, "tool": "agents", "ref": None}
+            )
+    by_id = {task["id"]: task for task in tasks}
+    for wait in waits:
+        task = by_id.get(wait["task"])
+        if task:
+            cards.append(card_of(task, "decision", wait["needs"]))
+    asked = {wait["task"] for wait in waits}
+    for task in tasks:
+        if task["status"] == "Owner check" and task["id"] not in asked:
+            cards.append(card_of(task, "review", live_value(task["live"]["Next"])))
+    return sorted(cards, key=lambda card: (card["kind"] != "stuck", moment(card["since"]) or float("inf")))
+
+
+def card_of(task, kind, text):
+    return {
+        "kind": kind,
+        "title": task["title"],
+        "text": text,
+        "since": local_time(task["updated"] or task["created"]),
+        "tool": "board",
+        "ref": task["id"],
+    }
+
+
+def board_entry(task, waiting):
+    blocker = live_value(task["live"]["Blocker"])
+    return {
+        "id": task["id"],
+        "title": task["title"],
+        "status": task["status"],
+        "priority": task["priority"] or None,
+        "milestone": task["milestone"] or None,
+        "parent": task["parent"] or None,
+        "blocker": blocker if pm_resume.asks_something(blocker) else None,  # `Blocker: none` blocks nothing
+        "updated": local_time(task["updated"]),
+        "waiting": task["id"] in waiting,
+    }
+
+
+def board(tasks, closed, cards):
+    """Every open task, most important first, then the newest closed ones."""
+    waiting = {card["ref"] for card in cards}
+    live = [task for task in tasks if task["status"] != "Done"]
+    live.sort(key=lambda task: PRIORITIES.get(task["priority"], len(PRIORITIES)))  # stable: task order within each
+    ended = [task for task in tasks + closed if task["status"] == "Done"]
+    ended.sort(key=lambda task: moment(local_time(task["updated"])), reverse=True)
+    return [board_entry(task, waiting) for task in live + ended[:BOARD_CLOSED]]
+
+
+def soon(tasks):
+    """The nearest `Review by:` dates of the open tasks."""
+    found = []
+    for task in tasks:
+        day = pm_resume.as_date(task["review_by"])
+        if day and task["status"] != "Done":
+            found.append({"date": day.isoformat(), "what": task["title"], "ref": task["id"]})
+    return sorted(found, key=lambda item: item["date"])[:SOON]
+
+
 def moment(text):
     try:
         return datetime.fromisoformat(text).timestamp()
@@ -281,17 +367,23 @@ def snapshot(now=None):
         for task in open_tasks + drafts
         if task["status"] != "Done" and pm_resume.asks_something(task["live"]["Needs owner"])
     ]
+    agents = herdr_agents(jobs)
+    closed = pm_resume.load_closed()
+    cards = waiting_cards(open_tasks + drafts, waits, jobs, agents)
     return {
         "version": VERSION,
         "project": {"name": ROOT.name, "root": str(ROOT)},
         "generated": stamp(now),
         "tasks": [task_entry(t, by_task) for t in open_tasks if t["status"] in pm_resume.ACTIVE_STATUSES],
         "owner_waits": waits,
+        "waiting": cards,
+        "board": board(open_tasks, closed, cards),
+        "soon": soon(open_tasks),
         "jobs": jobs,
         "workers_by_task": by_task,
-        "agents": herdr_agents(jobs),
+        "agents": agents,
         "git": git,
-        "events": events(today, open_tasks + pm_resume.load_closed(), jobs, todays or []),
+        "events": events(today, open_tasks + closed, jobs, todays or []),
     }
 
 

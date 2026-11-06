@@ -4,72 +4,512 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Project window</title>
+<link rel="icon" href="data:,">
 <style>
-body{margin:2rem auto;max-width:56rem;padding:0 1rem;font:15px/1.5 system-ui,sans-serif;color:#1b2925;background:#fbfcf9}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:.5rem .75rem .5rem 0;border-bottom:1px solid #d5ddd6}
-code{font-size:13px}
-#note{min-height:1.5em;color:#4d5e58}
+/* The theme: every colour of the window, in one place. */
+:root{
+  --rail:#17433f; --rail-up:#205a53; --rail-line:#2f645c; --rail-text:#e8f1ec; --rail-soft:#b4cfc6; --rail-on:#7dd3ae;
+  --ground:#dde5dc; --ground-deep:#c6d2c8; --drawer:#a9b9ad; --card:#f7f2e4; --card-edge:#d9cfb6; --sheet:#fbfcf9;
+  --ink:#1b2925; --soft:#4d5e58; --line:#bcc9bf; --row:#e3e9e3;
+  --trouble:#ac3324; --ask:#20635a; --ask-deep:#174c45; --good:#22694c; --off:#66736d; --lift:rgba(40,50,40,.12);
+  --ease:cubic-bezier(.16,1,.3,1);
+  --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif;
+  --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%}
+body{display:grid;grid-template-columns:clamp(236px,19vw,272px) minmax(0,1fr);height:100vh;overflow:hidden;background:var(--ground);color:var(--ink);font:15px/1.45 var(--sans);font-variant-numeric:tabular-nums}
+::selection{background:var(--ask);color:#fff}
+*{scrollbar-width:thin;scrollbar-color:#9fb1a6 transparent}
+:focus-visible{outline:2px solid var(--trouble);outline-offset:2px;border-radius:3px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button[disabled]{cursor:default}
+svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+h1,h2,h3{font-weight:600}
+
+/* The project rail */
+.rail{background:var(--rail);color:var(--rail-text);display:flex;flex-direction:column;padding:22px 0 18px 16px;min-height:0}
+.brand{font-size:16px;font-weight:600;padding:0 16px 18px 8px}
+.rail h2{font-size:13px;color:var(--rail-soft);padding:0 16px 8px 8px}
+.projects{list-style:none;padding:0;display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0}
+.proj{width:100%;text-align:left;padding:11px 16px 12px 12px;border-radius:7px 0 0 7px;transition:background .25s var(--ease)}
+.proj:hover{background:var(--rail-up)}
+.proj[aria-current="true"]{background:var(--ground);color:var(--ink)}
+.proj b{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.proj b span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.count{font-size:13px;line-height:20px;min-width:24px;text-align:center;border-radius:3px;padding:0 5px;background:var(--trouble);color:#fff;flex:none}
+.proj .line{display:block;font-size:13px;color:var(--rail-soft);margin-top:1px}
+.proj[aria-current="true"] .line{color:var(--soft)}
+.tools{display:flex;gap:12px;margin-top:6px;font-size:12.5px;color:var(--rail-soft)}
+.proj[aria-current="true"] .tools{color:var(--soft)}
+.tools i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;background:var(--rail-on);vertical-align:1px}
+.proj[aria-current="true"] .tools i{background:var(--good)}
+.tools i.off,.proj[aria-current="true"] .tools i.off{background:none;box-shadow:inset 0 0 0 1.5px currentColor}
+.soon{margin-top:auto;padding:14px 16px 0 8px}
+.soon h2{padding:0 0 6px}
+.soon ul{list-style:none;padding:0}
+.soon li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--rail-line);font-size:13.5px}
+.soon li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.soon time{color:var(--rail-soft);white-space:nowrap}
+.railfoot{padding:12px 16px 0 8px;font-size:12.5px;color:var(--rail-soft);line-height:1.5}
+
+/* The main column */
+main{display:flex;flex-direction:column;min-width:0;min-height:0;padding:20px 28px 16px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) minmax(236px,27%);gap:26px;flex:none}
+.head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{font-size:25px;letter-spacing:-.01em}
+.head p{color:var(--soft)}
+.link{font-weight:600;color:var(--ask);text-decoration:underline;text-underline-offset:3px;padding:0 2px}
+.link:hover{color:var(--trouble)}
+.link.bad{color:var(--trouble)}
+.link[disabled]{color:var(--off);text-decoration:none}
+.head .link{margin-left:auto;font-size:13.5px}
+
+/* The drawer: cards stand on its bar, stuck work first, each step back a little shorter */
+.drawer{display:flex;align-items:flex-end;gap:10px;height:252px;padding:24px 14px 0;overflow-x:auto;overflow-y:hidden;background:linear-gradient(transparent 58%,var(--ground-deep));border-bottom:9px solid var(--drawer);border-radius:0 0 6px 6px}
+.c{position:relative;flex:1 0 190px;min-width:0;max-width:340px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--card-edge);border-bottom:0;border-radius:5px 5px 0 0;padding:12px 14px 10px;text-align:left;box-shadow:0 2px 7px var(--lift);transition:box-shadow .35s var(--ease),border-color .2s}
+.drawer.first .c{animation:rise .5s var(--ease) both}
+.c:hover,.c:focus-visible{border-color:var(--soft);box-shadow:0 5px 14px var(--lift)}
+.c.a0{height:206px}.c.a1{height:192px}.c.a2{height:178px}.c.a3{height:164px}
+.drawer.empty{height:auto;padding:10px 14px;background:none}
+.tab{position:absolute;top:-22px;left:12px;height:22px;display:flex;align-items:center;padding:0 10px;border-radius:5px 5px 0 0;color:#fff;font-size:12.5px;font-weight:600;background:var(--ask)}
+.tab.bad{background:var(--trouble)}
+.c h3{font-size:16px;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;text-wrap:balance}
+.c p{font-size:13.5px;color:var(--soft);margin-top:4px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.c .go{margin-top:auto;display:flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--ask);padding-top:5px}
+.c .go svg{width:13px;height:13px;transition:transform .3s var(--ease)}
+.c:hover .go svg,.c:focus-visible .go svg{transform:translateX(3px)}
+.c .meta{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--soft);padding-top:3px;white-space:nowrap}
+.c .meta span:first-child{overflow:hidden;text-overflow:ellipsis;min-width:0}
+.c .age{font-weight:600;color:var(--ink);flex:none}
+.c .age.hot{color:var(--trouble)}
+.none{color:var(--soft)}
+@keyframes rise{from{transform:translateY(10px)}to{transform:none}}
+
+/* Now */
+.now h2{font-size:15px;padding-bottom:7px}
+.now ul{list-style:none;padding:0}
+.now li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:14px;align-items:baseline}
+.now li div{min-width:0}
+.now li b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.now li span{display:block;font-size:12.5px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.now time{font-size:13px;color:var(--soft)}
+.pip{width:8px;height:8px;border-radius:50%;background:var(--good);align-self:center}
+.pip.done{background:none;box-shadow:inset 0 0 0 1.5px var(--off)}
+.pip.bad{background:var(--trouble)}
+
+/* One tool at a time */
+.tabs{display:flex;align-items:flex-end;gap:24px;flex:none;margin-top:14px;border-bottom:1px solid var(--line)}
+.tablist{display:flex;gap:24px}
+.tablist button{padding:6px 1px 7px;font-weight:600;color:var(--soft);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tablist button:hover{color:var(--ink)}
+.tablist button[aria-selected="true"]{color:var(--ink);border-color:var(--trouble)}
+#wide{padding-bottom:7px;font-size:13.5px}
+.owner{margin-left:auto;display:flex;align-items:center;gap:7px;padding-bottom:7px;font-size:13px;color:var(--soft)}
+.owner svg{color:var(--good)}
+body.wide .top{display:none}
+body.wide .tabs{margin-top:0}
+.frame{position:relative;flex:1;min-height:0;margin-top:10px;background:var(--sheet);border:1px solid var(--line);border-radius:6px;overflow:auto}
+#pane{min-height:100%}
+#pane[hidden]{display:none}
+.mapview{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+.mapview[hidden]{display:none}
+
+/* The board */
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:22px;padding:14px 20px}
+.board h3{font-size:13px;color:var(--soft);padding-bottom:6px}
+.row{padding:8px 0;border-top:1px solid var(--row);font-size:14.5px}
+.row small{display:flex;gap:10px;font:12px var(--mono);color:var(--soft)}
+.row.high{font-weight:600}
+.row.high small{font-weight:400}
+.row.wait{background:var(--card);box-shadow:-8px 0 0 var(--card),8px 0 0 var(--card);border-top-color:var(--card-edge)}
+.flag{font:600 12px var(--sans);color:var(--ask)}
+.flag.bad{color:var(--trouble)}
+
+/* Tables and stopped states */
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+caption{text-align:left;font-size:13px;font-weight:600;color:var(--soft);padding:12px 20px 0}
+th{text-align:left;font-size:13px;font-weight:600;color:var(--soft);padding:8px 20px 6px}
+td{padding:8px 20px;border-top:1px solid var(--row);vertical-align:top}
+td.why{color:var(--soft);font-size:13.5px;max-width:44ch}
+td b{color:var(--trouble);font-weight:600}
+.off-state{display:grid;place-content:center;justify-items:start;gap:8px;min-height:240px;padding:20px;max-width:620px;margin:auto}
+.off-state h3{font-size:18px}
+.off-state p{color:var(--soft)}
+.off-state pre{font:12.5px/1.5 var(--mono);white-space:pre-wrap;color:var(--trouble);max-width:100%}
+.btn{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:5px;background:var(--ask);color:#fff;font-weight:600;font-size:14px;transition:background .2s}
+.btn:hover{background:var(--ask-deep)}
+.btn[disabled]{background:var(--off)}
+.note{flex:none;display:flex;justify-content:space-between;gap:12px;padding-top:8px;font-size:12.5px;color:var(--soft)}
+#status.bad{color:var(--trouble);font-weight:600}
+
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (max-width:1180px){.top{grid-template-columns:minmax(0,1fr)}.now{display:none}}
+@media (max-width:1360px){.c{padding-left:11px;padding-right:11px}.c .meta{gap:6px}}
+@media (max-width:860px){
+  body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:auto;height:auto;min-height:100vh}
+  .rail{padding:12px}.brand,.rail h2,.soon,.railfoot,.tools,.proj .line{display:none}
+  .projects{flex-direction:row;overflow-x:auto}.proj{border-radius:6px;white-space:nowrap;padding:7px 10px}
+  main{padding:14px}
+  .drawer{height:auto;flex-direction:column;align-items:stretch;padding:26px 10px 0;gap:26px;overflow:visible}
+  .c,.c.a0,.c.a1,.c.a2,.c.a3{height:auto;flex:none;max-width:none;min-height:96px}
+  .frame{min-height:320px}.owner,#wide{display:none}
+}
+@media (max-height:760px) and (min-width:861px){
+  .drawer{height:212px}.c.a0{height:168px}.c.a1{height:158px}.c.a2{height:148px}.c.a3{height:138px}
+  .c .go{display:none}.c .meta{margin-top:auto}.c{padding-top:9px;padding-bottom:7px}.c h3{font-size:15px}
+}
 </style>
 </head>
 <body>
-<h1>Project window</h1>
-<p id="note" role="status"></p>
-<table><thead><tr><th>Project</th><th>Folder</th><th>Map</th></tr></thead><tbody id="list"></tbody></table>
+<aside class="rail" aria-label="Projects">
+  <div class="brand" id="brand"></div>
+  <h2 id="railTitle"></h2>
+  <ul class="projects" id="projects"></ul>
+  <section class="soon" id="soonBox" hidden><h2 id="soonTitle"></h2><ul id="soon"></ul></section>
+  <div class="railfoot" id="foot"></div>
+</aside>
+<main>
+  <section class="top" aria-labelledby="waitTitle">
+    <div>
+      <div class="head">
+        <h1 id="waitTitle"></h1><p id="waitNote"></p>
+        <button class="link" id="filter" type="button"></button>
+      </div>
+      <div class="drawer" id="drawer"></div>
+    </div>
+    <aside class="now" aria-labelledby="nowTitle"><h2 id="nowTitle"></h2><ul id="now"></ul></aside>
+  </section>
+  <div class="tabs">
+    <nav class="tablist" role="tablist" id="tabs">
+      <button role="tab" aria-controls="frame" data-tool="board" type="button"></button>
+      <button role="tab" aria-controls="frame" data-tool="map" type="button"></button>
+      <button role="tab" aria-controls="frame" data-tool="agents" type="button"></button>
+    </nav>
+    <button class="link" id="wide" type="button"></button>
+    <div class="owner" id="owner"></div>
+  </div>
+  <section class="frame" id="frame" role="tabpanel" tabindex="0"><div id="pane"></div></section>
+  <div class="note"><span id="status" role="status"></span><span id="keys"></span></div>
+</main>
 <script>
-const list = document.getElementById("list"), note = document.getElementById("note");
+const TEXT = {
+  en: {
+    brand: "project window", projects: "Projects", soon: "Coming up", foot: "It writes no task and starts no agent. Close it and the work carries on.",
+    waiting: n => n === 1 ? "1 card waiting for you" : `${n} cards waiting for you`, empty: "The drawer is empty", order: "Stuck first, then the oldest.",
+    unknown: "Not every project could be read", unknownText: "This list may be missing cards; the projects on the left say which ones.",
+    none: "Nothing waits for you here. Running agents show on the right.", only: "This project only", all: "All projects",
+    now: "Now", idle: "No agent is running", noHerdr: "Herdr did not answer", finished: "Finished",
+    board: "Board", map: "Map", agents: "Agents", close: "Close the drawer", open: n => `Open the drawer · ${n}`,
+    stuck: "Stuck", decision: "Decision", review: "Review", openBoard: "Open on the board", openAgents: "Open in agents",
+    keys: "Keys: 1 2 3 tools, [ ] projects. Inside the map, click outside it first.",
+    Active: "Active", Ready: "Ready", "Owner check": "Owner check", "In review": "In review", Done: "Recently done",
+    waitsYou: "waits for you", blocked: "blocked", noTasks: "No tasks yet.",
+    mapNone: "This project has no map", mapNoneText: "Add one with pm_init --map.", mapOff: name => `${name}: the map is stopped`,
+    mapOffText: "It starts only when you ask, so the wrong project is never shown.", mapForeign: name => `${name}: another program holds the map's port`,
+    mapForeignText: "Start looks for a free port above it.", start: "Start", starting: "Starting…", stop: "Stop", from: name => `from ${name}`,
+    agent: "Agent", job: "Job", state: "State", time: "Time", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
+    gone: "The folder is gone", stateless: "State could not be read", agentsRunning: n => `${n} running`, last: at => `last work ${at}`,
+    updated: at => `Updated ${at}`, down: "The bridge does not answer; what you see may be old.", noProject: "No project yet. Run python .pm/tools/pm_open.py window in one.",
+    min: "min", hour: "h", day: "d", today: "today", tomorrow: "tomorrow", opened: (what, tool) => `${what}: ${tool} opened.`,
+  },
+  tr: {
+    brand: "proje penceresi", projects: "Projeler", soon: "Yaklaşan", foot: "Görevlere yazmaz, ajan başlatmaz. Kapatınca iş olduğu gibi sürer.",
+    waiting: n => `Seni bekleyen ${n} kart`, empty: "Çekmece boş", order: "Takılan en önde, sonra en eski.",
+    unknown: "Her proje okunamadı", unknownText: "Bu listede eksik kart olabilir; hangi projeler olduğu solda yazıyor.",
+    none: "Burada seni bekleyen bir şey yok. Çalışan ajanlar sağda görünür.", only: "Yalnız bu proje", all: "Tüm projeler",
+    now: "Şu an", idle: "Çalışan ajan yok", noHerdr: "Herdr cevap vermedi", finished: "Biten",
+    board: "Pano", map: "Harita", agents: "Ajanlar", close: "Çekmeceyi kapat", open: n => `Çekmeceyi aç · ${n} kart`,
+    stuck: "Takıldı", decision: "Karar", review: "İnceleme", openBoard: "Panoda aç", openAgents: "Ajanlarda aç",
+    keys: "Kısayol: 1 2 3 araç, [ ] proje. Harita içindeyken önce dışına tıkla.",
+    Active: "Devam eden", Ready: "Hazır", "Owner check": "Sende", "In review": "İncelemede", Done: "Son biten",
+    waitsYou: "seni bekliyor", blocked: "engelli", noTasks: "Henüz görev yok.",
+    mapNone: "Bu projede harita yok", mapNoneText: "pm_init --map ile eklenir.", mapOff: name => `${name}: harita kapalı`,
+    mapOffText: "Yalnız sen isteyince başlar; yanlış proje gösterilmez.", mapForeign: name => `${name}: haritanın portunda başka bir program var`,
+    mapForeignText: "Başlat, üstündeki boş bir portu bulur.", start: "Başlat", starting: "Başlıyor…", stop: "Durdur", from: name => `${name} klasöründen`,
+    agent: "Ajan", job: "İş", state: "Durum", time: "Zaman", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
+    gone: "Klasör bulunamadı", stateless: "Durum okunamadı", agentsRunning: n => `${n} ajan çalışıyor`, last: at => `son iş ${at}`,
+    updated: at => `Güncellendi ${at}`, down: "Köprü cevap vermiyor; gördüklerin eski olabilir.", noProject: "Henüz proje yok. Bir projede python .pm/tools/pm_open.py window çalıştır.",
+    min: "dk", hour: "sa", day: "gün", today: "bugün", tomorrow: "yarın", opened: (what, tool) => `${what}: ${tool} açıldı.`,
+  },
+};
+const lang = (navigator.language || "en").toLowerCase().startsWith("tr") ? "tr" : "en";
+const T = TEXT[lang];
+document.documentElement.lang = lang;
+const ICON = {
+  go: '<svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5L12 8l-3.5 3.5"/></svg>',
+  ok: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>',
+  play: '<svg viewBox="0 0 16 16"><path d="M5 3.5l8 4.5-8 4.5z"/></svg>',
+};
+const REFRESH_MS = 15000;
+const COLUMNS = ["Active", "In review", "Owner check", "Ready", "Done"];
+const WORKING = ["working", "running", "busy"];
+let projects = [], states = {}, cur = null, tool = "board", only = false, failed = false, mapNote = "";
+const frames = {};  // one map frame per project, kept while the page lives, so a map stays where it was left
+const $ = id => document.getElementById(id);
+const esc = text => String(text ?? "").replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
+const P = () => projects.find(p => p.id === cur);
+const S = id => (states[id] && states[id].state) || null;
 
-function mapCell(cell, project) {
-  const map = project.map;
-  if (map.state === "running") {
-    const link = cell.appendChild(document.createElement("a"));
-    link.href = map.url;
-    link.textContent = "running";
-    cell.append(" ");
+function ago(iso) {
+  const then = Date.parse(iso || "");
+  if (!then) return "";
+  const minutes = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (minutes < 60) return `${minutes} ${T.min}`;
+  if (minutes < 2880) return `${Math.round(minutes / 60)} ${T.hour}`;
+  return `${Math.round(minutes / 1440)} ${T.day}`;
+}
+
+function dayWord(iso) {
+  const days = Math.round((Date.parse(iso + "T00:00:00") - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  if (days === 0) return T.today;
+  if (days === 1) return T.tomorrow;
+  return new Date(iso + "T00:00:00").toLocaleDateString(lang, {day: "numeric", month: "short"});
+}
+
+function allCards() {
+  const cards = [];
+  for (const p of projects) for (const card of (S(p.id) || {}).waiting || []) cards.push({...card, project: p});
+  const stamp = card => Date.parse(card.since || "") || Infinity;
+  return cards.sort((a, b) => (a.kind !== "stuck") - (b.kind !== "stuck") || stamp(a) - stamp(b));
+}
+
+function renderProjects() {
+  $("projects").innerHTML = projects.map(p => {
+    const state = S(p.id), count = state ? state.waiting.length : 0;
+    const working = state && state.agents ? state.agents.filter(a => WORKING.includes(a.status)).length : 0;
+    const lastAt = state && state.events[0] ? state.events[0].time : null;
+    const words = [];
+    if (!p.found) words.push(T.gone);
+    else if (!state) words.push(T.stateless);
+    if (working) words.push(T.agentsRunning(working));
+    if (lastAt) words.push(T.last(ago(lastAt)));
+    return `<li><button class="proj" type="button" data-p="${esc(p.id)}" aria-current="${p.id === cur}">
+      <b><span>${esc(p.name)}</span>${count ? `<span class="count">${count}</span>` : ""}</b>
+      <span class="line">${esc(words.join(" · ")) || "&nbsp;"}</span>
+      <span class="tools"><span><i class="${state ? "" : "off"}"></i>${T.board}</span><span><i class="${p.map.state === "running" ? "" : "off"}"></i>${T.map}</span><span><i class="${working ? "" : "off"}"></i>${T.agents}</span></span></button></li>`;
+  }).join("");
+}
+
+function renderSoon() {
+  const soon = [];
+  for (const p of projects) soon.push(...((S(p.id) || {}).soon || []));
+  soon.sort((a, b) => a.date.localeCompare(b.date));
+  $("soonBox").hidden = !soon.length;
+  $("soon").innerHTML = soon.slice(0, 3).map(item => `<li title="${esc(item.what)}"><span>${esc(item.what)}</span><time>${esc(dayWord(item.date))}</time></li>`).join("");
+}
+
+function renderDrawer() {
+  const cards = allCards(), list = only ? cards.filter(c => c.project.id === cur) : cards;
+  const unread = (only ? projects.filter(p => p.id === cur) : projects).some(p => !S(p.id));
+  $("waitTitle").textContent = list.length ? T.waiting(list.length) : unread ? T.unknown : T.empty;
+  $("waitNote").textContent = !list.length ? "" : unread ? T.unknownText : T.order;
+  $("filter").textContent = only ? T.all : T.only;
+  $("wide").textContent = document.body.classList.contains("wide") ? T.open(cards.length) : T.close;
+  $("wide").classList.toggle("bad", document.body.classList.contains("wide") && cards.some(c => c.kind === "stuck"));
+  $("drawer").classList.toggle("empty", !list.length);
+  $("drawer").innerHTML = list.length ? list.map((c, i) => `<button class="c a${Math.min(i, 3)}" type="button" data-card="${i}" data-key="${esc(`${c.project.id}|${c.kind}|${c.title}|${c.ref}`)}">
+      <span class="tab ${c.kind === "stuck" ? "bad" : ""}">${T[c.kind]}</span><h3>${esc(c.title)}</h3><p>${esc(c.text)}</p>
+      <span class="go">${c.tool === "board" ? T.openBoard : T.openAgents}${ICON.go}</span>
+      <span class="meta"><span>${esc(c.project.name)}${c.ref ? ` · ${esc(c.ref)}` : ""}</span><span class="age ${c.kind === "stuck" ? "hot" : ""}">${esc(ago(c.since))}</span></span></button>`).join("")
+    : `<p class="none">${unread ? T.unknownText : T.none}</p>`;
+  renderDrawer.list = list;
+}
+
+function renderNow() {
+  const rows = [];
+  let herdr = false;
+  for (const p of projects) {
+    const state = S(p.id);
+    if (!state) continue;
+    if (state.agents === null) herdr = true;
+    for (const a of state.agents || []) {
+      const bad = a.status === "blocked";
+      if (bad || WORKING.includes(a.status)) rows.push(`<li><i class="pip ${bad ? "bad" : ""}"></i><div><b>${esc(a.agent || a.name)}</b><span>${esc(a.job || a.title || p.name)}</span></div><time>${esc(p.name)}</time></li>`);
+    }
+  }
+  if (!rows.length) rows.push(`<li><i class="pip done"></i><div><b>${herdr ? T.noHerdr : T.idle}</b></div><time></time></li>`);
+  const finished = projects.flatMap(p => ((S(p.id) || {}).events || []).filter(e => e.kind !== "commit")).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))[0];
+  if (finished) rows.push(`<li><i class="pip done"></i><div><b>${T.finished}</b><span title="${esc(finished.what)}">${esc(finished.what)}</span></div><time>${esc(ago(finished.time))}</time></li>`);
+  $("now").innerHTML = rows.slice(0, 4).join("");
+}
+
+function boardHtml(p) {
+  const state = S(p.id);
+  if (!state) return offState(p.found ? T.stateless : T.gone, (states[p.id] && states[p.id].why) || "");
+  if (!state.board.length) return offState(p.name, T.noTasks);
+  const others = [...new Set(state.board.map(t => t.status))].filter(name => !COLUMNS.includes(name));
+  const columns = [...COLUMNS.slice(0, -1), ...others, "Done"].map(name => [name, state.board.filter(t => t.status === name)]).filter(([, tasks]) => tasks.length);
+  const row = t => `<div class="row ${t.priority === "high" ? "high" : ""} ${t.waiting ? "wait" : ""}">${esc(t.title)}
+    <small><span>${esc(t.id)}</span>${t.waiting ? `<span class="flag">${T.waitsYou}</span>` : ""}${t.blocker ? `<span class="flag bad" title="${esc(t.blocker)}">${T.blocked}</span>` : ""}</small></div>`;
+  return `<div class="board">${columns.map(([name, tasks]) => `<div><h3>${esc(T[name] || name)} · ${tasks.length}</h3>${tasks.map(row).join("")}</div>`).join("")}</div>`;
+}
+
+function offState(title, text, button = "") {
+  return `<div class="off-state"><h3>${esc(title)}</h3><p>${esc(text)}</p>${mapNote ? `<pre>${esc(mapNote)}</pre>` : ""}${button}</div>`;
+}
+
+function agentsHtml(p) {
+  const state = S(p.id);
+  if (!state) return offState(p.found ? T.stateless : T.gone, (states[p.id] && states[p.id].why) || "");
+  const agents = state.agents || [], jobs = state.jobs || [];
+  if (!agents.length && !jobs.length) return offState(p.name, state.agents === null ? T.noHerdr : T.noAgents);
+  const rowA = a => `<tr><td>${esc(a.agent || a.name)}</td><td>${esc(a.job || a.title)}</td><td>${a.status === "blocked" ? `<b>${esc(a.status)}</b>` : esc(a.status)}</td></tr>`;
+  const stuck = job => ["handed-over", "blocked", "failed", "check-failed"].includes(job.state);
+  const rowJ = j => `<tr><td>${esc(j.run)}/${esc(j.job)}</td><td>${stuck(j) ? `<b>${esc(j.state)}</b>` : esc(j.state)}</td><td>${esc(ago(j.ended || j.started))}</td><td class="why">${esc(j.why)}</td></tr>`;
+  return (agents.length ? `<table><caption>${T.running}</caption><thead><tr><th>${T.agent}</th><th>${T.job}</th><th>${T.state}</th></tr></thead><tbody>${agents.map(rowA).join("")}</tbody></table>` : "")
+    + (jobs.length ? `<table><caption>${T.jobs}</caption><thead><tr><th>${T.job}</th><th>${T.state}</th><th>${T.time}</th><th></th></tr></thead><tbody>${jobs.map(rowJ).join("")}</tbody></table>` : "");
+}
+
+function mapFrame(p) {
+  let frame = frames[p.id];
+  if (!frame) {
+    frame = frames[p.id] = document.createElement("iframe");
+    frame.className = "mapview";
+    frame.title = `${T.map}: ${p.name}`;
+    $("frame").append(frame);
+  }
+  if (frame.getAttribute("src") !== p.map.url) frame.src = p.map.url;
+  return frame;
+}
+
+function renderTool() {
+  const p = P();
+  document.querySelectorAll("[role=tab]").forEach(tab => {
+    const on = tab.dataset.tool === tool;
+    tab.textContent = T[tab.dataset.tool];
+    tab.setAttribute("aria-selected", on);
+    tab.tabIndex = on ? 0 : -1;
+  });
+  Object.values(frames).forEach(frame => { frame.hidden = true; });
+  $("pane").hidden = false;
+  $("owner").innerHTML = "";
+  if (!p) {
+    $("pane").innerHTML = offState(T.noProject, "");
+    return;
+  }
+  if (tool === "board") $("pane").innerHTML = boardHtml(p);
+  if (tool === "agents") $("pane").innerHTML = agentsHtml(p);
+  if (tool !== "map") return;
+  const button = `<button class="btn" id="start" type="button">${ICON.play}${T.start}</button>`;
+  if (p.map.state === "running") {
+    mapFrame(p).hidden = false;
+    $("pane").hidden = true;
+    $("owner").innerHTML = `${ICON.ok}<span>${esc(T.from(p.name))}</span><button class="link" id="stop" type="button">${T.stop}</button>`;
+    $("stop").onclick = () => change("stop", p);
+  } else if (p.map.state === "none") {
+    $("pane").innerHTML = offState(T.mapNone, T.mapNoneText);
   } else {
-    cell.append({none: "no map", foreign: "port taken by another program", stopped: "stopped"}[map.state] + " ");
+    const foreign = p.map.state === "foreign";
+    $("pane").innerHTML = offState(foreign ? T.mapForeign(p.name) : T.mapOff(p.name), foreign ? T.mapForeignText : T.mapOffText, button);
+    $("start").onclick = () => change("start", p);
   }
-  if (map.state === "none") return;
-  const action = map.state === "running" ? "stop" : "start";
-  const button = cell.appendChild(document.createElement("button"));
-  button.textContent = action === "stop" ? "Stop" : "Start";
-  button.onclick = () => change(action, project, button);
 }
 
-async function change(action, project, button) {
-  button.disabled = true;
-  note.textContent = `${project.name}: ${action}…`;
+async function change(action, p) {
+  const button = $(action);
+  if (button) {
+    button.disabled = true;
+    if (action === "start") button.textContent = T.starting;
+  }
+  mapNote = "";
   try {
-    const answer = await fetch(`/api/map/${action}`, {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({project: project.id}),
-    });
-    note.textContent = (await answer.json()).message || `${project.name}: done`;
+    const answer = await (await fetch(`/api/map/${action}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({project: p.id})})).json();
+    if (answer.map) p.map = answer.map;
+    if (!answer.ok) mapNote = answer.message || "";
+    if (action === "stop" && frames[p.id] && answer.ok) {
+      frames[p.id].remove();
+      delete frames[p.id];
+    }
   } catch (error) {
-    note.textContent = `The bridge did not answer: ${error}`;
+    mapNote = String(error);
   }
-  load();
+  renderAll();
 }
 
-async function load() {
+function renderAll() {
+  renderProjects();
+  renderSoon();
+  renderDrawer();
+  renderNow();
+  renderTool();
+}
+
+async function get(path) {
+  const answer = await fetch(path);
+  if (!answer.ok) throw new Error(answer.status);
+  return answer.json();
+}
+
+async function refresh() {
   try {
-    const {projects} = await (await fetch("/api/projects")).json();
-    list.replaceChildren(...projects.map(project => {
-      const row = document.createElement("tr");
-      row.insertCell().textContent = project.name;
-      const folder = row.insertCell().appendChild(document.createElement("code"));
-      folder.textContent = project.found ? project.folder : `${project.folder} (not found)`;
-      mapCell(row.insertCell(), project);
-      return row;
-    }));
-    if (!projects.length) note.textContent = "No project yet: run python .pm/tools/pm_open.py board in one.";
-  } catch (error) {
-    note.textContent = `The bridge did not answer: ${error}`;
+    projects = (await get("/api/projects")).projects;
+    const found = projects.filter(p => p.found).map(p => p.id);
+    for (const id of Object.keys(states)) if (!found.includes(id)) delete states[id];
+    await Promise.all(found.map(async id => { states[id] = await get(`/api/state?project=${id}`); }));
+    failed = false;
+    if (!P() && projects.length) cur = (projects.find(p => (S(p.id) || {waiting: []}).waiting.length) || projects[0]).id;
+    $("status").textContent = T.updated(new Date().toLocaleTimeString(lang, {hour: "2-digit", minute: "2-digit"}));
+  } catch {
+    failed = true;
+    $("status").textContent = T.down;
   }
+  $("status").classList.toggle("bad", failed);
+  // A refresh must not move what is being read, or take away the keyboard's place.
+  const reading = tool !== "map" && $("frame").scrollTop, sideways = $("drawer").scrollLeft;
+  const place = document.activeElement && document.activeElement.dataset;
+  const held = place && (place.key ? `[data-key="${CSS.escape(place.key)}"]` : place.p ? `[data-p="${CSS.escape(place.p)}"]` : "");
+  renderAll();
+  if (reading) $("frame").scrollTop = reading;
+  $("drawer").scrollLeft = sideways;
+  if (held && document.querySelector(held)) document.querySelector(held).focus({preventScroll: true});
 }
 
-load();
+function pick(id) { cur = id; mapNote = ""; renderAll(); }
+
+document.addEventListener("click", event => {
+  const project = event.target.closest("[data-p]");
+  if (project) return pick(project.dataset.p);
+  const tab = event.target.closest("[data-tool]");
+  if (tab) { tool = tab.dataset.tool; return renderTool(); }
+  const card = event.target.closest("[data-card]");
+  if (card) {
+    const c = renderDrawer.list[+card.dataset.card];
+    cur = c.project.id;
+    tool = c.tool;
+    renderAll();
+    $("status").textContent = T.opened(c.title, T[c.tool]);
+  }
+});
+$("filter").onclick = () => { only = !only; renderDrawer(); };
+$("wide").onclick = () => { document.body.classList.toggle("wide"); renderDrawer(); };
+document.addEventListener("keydown", event => {
+  if (event.ctrlKey || event.metaKey || event.altKey) return;
+  const index = ["1", "2", "3"].indexOf(event.key);
+  if (index >= 0) { tool = ["board", "map", "agents"][index]; renderTool(); }
+  if ((event.key === "[" || event.key === "]") && projects.length) {
+    const step = projects.findIndex(p => p.id === cur) + (event.key === "]" ? 1 : -1);
+    pick(projects[(step + projects.length) % projects.length].id);
+  }
+});
+$("tabs").addEventListener("keydown", event => {
+  if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+  const order = ["board", "map", "agents"];
+  tool = order[(order.indexOf(tool) + (event.key === "ArrowRight" ? 1 : 2)) % 3];
+  renderTool();
+  document.querySelector(`[data-tool=${tool}]`).focus();
+});
+
+$("brand").textContent = T.brand;
+$("railTitle").textContent = T.projects;
+$("soonTitle").textContent = T.soon;
+$("foot").textContent = T.foot;
+$("nowTitle").textContent = T.now;
+$("keys").textContent = T.keys;
+$("drawer").classList.add("first");
+setTimeout(() => $("drawer").classList.remove("first"), 2000);
+refresh();
+setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
 </script>
 </body>
 </html>

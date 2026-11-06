@@ -1124,11 +1124,11 @@ class LauncherTest(unittest.TestCase):
     def test_the_window_lines_read_as_plain_words(self):
         self.assertEqual(
             pm_open.WINDOW_LINES["ask"],
-            "Project window: ask the user once whether to open the board (python .pm/tools/pm_open.py board).",
+            "Project window: ask the user once whether to open the project window (python .pm/tools/pm_open.py window).",
         )
         self.assertEqual(
             pm_open.WINDOW_LINES["always"],
-            "Project window: the user chose always; open the board now with python .pm/tools/pm_open.py board.",
+            "Project window: the user chose always; open the project window now with python .pm/tools/pm_open.py window.",
         )
         self.assertEqual(pm_open.WINDOW_LINES["never"], "")
 
@@ -1140,6 +1140,78 @@ class LauncherTest(unittest.TestCase):
         text = out.getvalue()
         for word in ("board", "map", "--download", "stop", "list", "opening"):
             self.assertIn(word, text)
+
+    def window_ready(self, health):
+        """`pm_open.py window` for self.root; health is what the window check answers, the last one repeating."""
+        for patch in (
+            mock.patch.object(pm_open, "window_running", lambda: health.pop(0) if len(health) > 1 else health[0]),
+            mock.patch.object(pm_open, "ROOT", self.root),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def said(self, function):
+        with redirect_stdout(io.StringIO()) as out:
+            code = function()
+        return code, out.getvalue()
+
+    def test_it_starts_once_registers_this_project_and_opens_the_page(self):
+        self.window_ready([False, True])
+        code, _ = self.said(pm_open.open_window)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.runs), 1)
+        self.assertEqual(Path(self.runs[0][0][1]).name, "pm_bridge.py")
+        self.assertEqual(self.opened, [pm_open.window_address()])
+        self.assertIn(pm_open.folder_key(self.root), pm_open.read_store()["projects"])
+
+    def test_a_running_window_is_opened_not_started(self):
+        self.window_ready([True])
+        code, _ = self.said(pm_open.open_window)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.runs, [])
+        self.assertEqual(self.opened, [pm_open.window_address()])
+
+    def test_a_window_still_coming_up_is_waited_for_not_started_again(self):
+        self.window_ready([False, True])
+        self.said(pm_open.open_window)
+        pid = self.pids[-1]
+        self.live.add(pid)
+        record = pm_open.read_store()["window"]
+        self.opened.clear()
+        self.window_ready([False, False, True])
+        code, _ = self.said(pm_open.open_window)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.runs), 1, "no second bridge")
+        self.assertEqual(pm_open.read_store()["window"], record, "the first one stays the one to stop")
+        self.assertEqual(self.opened, [pm_open.window_address()])
+
+    def test_a_window_that_died_is_started_again(self):
+        self.window_ready([False, True])
+        self.said(pm_open.open_window)
+        self.window_ready([False, True])  # its process is not in self.live: it is gone
+        self.assertEqual(self.said(pm_open.open_window)[0], 0)
+        self.assertEqual(len(self.runs), 2)
+
+    def test_another_program_on_the_port_starts_nothing(self):
+        self.window_ready([False])
+        self.answers[pm_open.WINDOW_PORT] = [True]
+        code, out = self.said(pm_open.open_window)
+        self.assertEqual(code, 1)
+        self.assertEqual(self.runs, [])
+        self.assertIn("another program", out)
+
+    def test_stop_ends_only_the_window_this_tool_started(self):
+        self.window_ready([False, True])
+        self.assertEqual(self.said(pm_open.stop_window)[0], 0)
+        self.assertEqual(self.ended, [])
+        self.said(pm_open.open_window)
+        pid = self.pids[-1]
+        self.live.add(pid)
+        code, out = self.said(pm_open.stop_window)
+        self.assertEqual(code, 0)
+        self.assertEqual(self.ended, [pid])
+        self.assertIn("keeps running", out)
+        self.assertNotIn("window", pm_open.read_store())
 
 
 class CommandTest(unittest.TestCase):
