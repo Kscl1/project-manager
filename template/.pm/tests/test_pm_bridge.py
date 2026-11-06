@@ -27,7 +27,11 @@ spec.loader.exec_module(pm_bridge)
 pm_open = pm_bridge.pm_open
 
 STATE = 'import json\nprint(json.dumps({"version": %d, "project": {"name": "ç"}}, ensure_ascii=False))\n'
-LAUNCH = {"configurations": [{"name": "map", "runtimeExecutable": "npx", "runtimeArgs": ["likec4"], "port": 5173}]}
+LAUNCH = {
+    "configurations": [
+        {"name": "map", "runtimeExecutable": "npx", "runtimeArgs": ["-y", "likec4@1.60.0", "start"], "port": 5173}
+    ]
+}
 
 
 class Case(unittest.TestCase):
@@ -122,6 +126,11 @@ class Refusals(Case):
             self.assertEqual(answer.status, 403)
             ran.assert_not_called()
 
+    def test_a_get_with_a_foreign_origin_is_refused_and_one_without_is_not(self):
+        self.assertEqual(self.ask("GET", "/api/projects", Origin="http://evil.example")[0].status, 403)
+        self.assertEqual(self.ask("GET", "/api/projects", Origin=self.origin)[0].status, 200)
+        self.assertEqual(self.ask("GET", "/api/projects")[0].status, 200)
+
     def test_a_post_needs_this_page_as_its_origin(self):
         for origin in ("", "http://evil.example", "http://127.0.0.1:1", "null"):
             with mock.patch.object(pm_bridge, "run") as ran:
@@ -182,7 +191,7 @@ class Maps(Case):
 
     def test_a_url_is_given_only_for_this_projects_own_map(self):
         ours = self.listed(lambda f, n, s, port: (pm_open.OURS, None, f"http://127.0.0.1:{port}"))
-        self.assertEqual(ours["map"], {"state": "running", "url": "http://localhost:5200/"})
+        self.assertEqual(ours["map"], {"state": "running", "url": "http://127.0.0.1:5200/"})
         self.assertEqual(ours["name"], "demo")
         foreign = self.listed(lambda f, n, s, port: (pm_open.ANSWERS, None, f"http://127.0.0.1:{port}"))
         self.assertEqual(foreign["map"], {"state": "foreign"})
@@ -194,6 +203,46 @@ class Maps(Case):
             return (pm_open.OURS, None, "http://[::1]:5173") if port == 5173 else (pm_open.STOPPED, None, "")
 
         self.assertEqual(self.listed(only_5173)["map"], {"state": "running", "url": "http://[::1]:5173/"})
+
+    def test_a_recorded_process_proves_only_its_own_port(self):
+        """The real check: the record's port is silent, its process lives, another program answers on the entry's."""
+        with mock.patch.object(pm_open, "answers", lambda port: port == 5173):
+            with mock.patch.object(pm_open, "process_of", lambda server: 1234 if server else None):
+                with mock.patch.object(pm_open, "served_maps", lambda base: []):
+                    listed = json.loads(self.ask("GET", "/api/projects")[1])["projects"][0]
+        self.assertEqual(listed["map"], {"state": "foreign"})
+
+    def test_a_map_entry_that_is_not_likec4_is_never_run(self):
+        for args in (["-c", "import this"], ["likec4", "start"], ["evil.py"]):
+            for program in ("python", "npx"):
+                entry = {"name": "map", "runtimeExecutable": program, "runtimeArgs": args, "port": 5173}
+                if program == "npx" and args[0] == "likec4":
+                    continue  # the one good pair here
+                launch = json.dumps({"configurations": [entry]})
+                (self.project / ".claude" / "launch.json").write_text(launch, encoding="utf-8")
+                with mock.patch.object(pm_bridge, "run") as ran:
+                    _, body = self.post("/api/map/start", {"project": self.id})
+                ran.assert_not_called()
+                self.assertFalse(json.loads(body)["ok"])
+
+    def test_likec4_commands_are_told_from_others(self):
+        for good in (
+            ["npx", "-y", "likec4@1.60.0", "start", "docs"],
+            ["npx", "likec4", "dev"],
+            ["likec4", "start"],
+            ["C:/nodejs/npx.cmd", "--yes", "likec4@1.60.0", "start"],
+        ):
+            self.assertTrue(pm_bridge.is_likec4(good), good)
+        for bad in (
+            ["npx", "-c", "likec4 start"],
+            ["npx", "-p", "evil", "likec4", "start"],
+            ["npx", "likec4-evil", "start"],
+            ["npx", "likec4"],
+            ["npx"],
+            ["likec4", "build"],
+            ["python", "likec4", "start"],
+        ):
+            self.assertFalse(pm_bridge.is_likec4(bad), bad)
 
     def test_a_project_without_a_map_layer_says_none(self):
         (self.project / ".claude" / "launch.json").unlink()
@@ -234,7 +283,7 @@ class State(Case):
 
 
 class RedLines(Case):
-    """D-134 clause 6: tested on what the program does, and on what its source could do."""
+    """The promises in the module docstring: tested on what the program does, and on what its source could do."""
 
     def tree(self):
         return ast.parse(SCRIPT.read_text(encoding="utf-8"))
@@ -284,6 +333,7 @@ class RedLines(Case):
             "http",
             "json",
             "os",
+            "re",
             "socketserver",
             "subprocess",
             "sys",

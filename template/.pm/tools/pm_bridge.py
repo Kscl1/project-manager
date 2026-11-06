@@ -12,13 +12,14 @@ started keep working. The projects are the ones in pm_open's project list (`pyth
   POST /api/map/start  {"project": "<id>"}: pm_open starts the map, or finds the one already running
   POST /api/map/stop   {"project": "<id>"}: pm_open stops the map, only if pm_open started it
 
-A map's `url` is given only after pm_open's ownership check says it is this project's own map (D-134): a port that
+A map's `url` is given only after pm_open's ownership check says it is this project's own map: a port that
 answers proves nothing.
 
 What this program never does, under test in test_pm_bridge.py: write a file, touch .pm/backlog or .pm/decisions, call
-a model, start an agent, or run anything but the two commands in map_command and state_command. A request with a
-foreign Host is refused, so a web page cannot reach it through a name of its own; a POST must also carry this page's
-Origin and a JSON body, so another site cannot start or stop anything.
+a model, start an agent, or run anything but the two commands in map_command and state_command. A map entry in a
+project's launch.json runs only when it is a LikeC4 start command (is_likec4); anything else in that file is refused.
+A request with a foreign Host or Origin is refused, so a web page cannot reach it through a name of its own; a POST
+must carry this page's Origin and a JSON body, so another site cannot start or stop anything.
 """
 
 import argparse
@@ -27,6 +28,7 @@ import http.client
 import http.server
 import json
 import os
+import re
 import socketserver
 import subprocess
 import sys
@@ -54,6 +56,20 @@ PAGE_POLICY = (
     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src http:; "
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
+
+
+def is_likec4(command):
+    """True for `npx [-y] likec4[@version] start|dev ...` or `likec4 start|dev ...`: all a map entry may run from here."""
+    program, *words = command
+    stem = Path(program).stem.lower()
+    if stem == "npx":
+        while words and words[0] in ("-y", "--yes"):
+            words = words[1:]
+    elif stem == "likec4":
+        words = ["likec4", *words]
+    else:
+        return False
+    return len(words) > 1 and bool(re.fullmatch(r"likec4(@[\w.-]+)?", words[0])) and words[1] in ("start", "dev")
 
 
 def map_command(folder, action):
@@ -107,9 +123,10 @@ def map_state(folder, server):
     state = pm_open.STOPPED
     # The recorded port first; a map the Claude preview or a terminal started sits on the entry's own port.
     for port in dict.fromkeys((server.get("port"), found[1])):
-        seen, _, address = pm_open.ownership(folder, "map", server, port)
+        # The record's process proves its own port only; the address is the loopback the check found the map on.
+        seen, _, address = pm_open.ownership(folder, "map", server if port == server.get("port") else {}, port)
         if seen == pm_open.OURS:
-            return {"state": "running", "url": address.replace("127.0.0.1", "localhost") + "/"}
+            return {"state": "running", "url": address + "/"}
         if seen == pm_open.ANSWERS:
             state = seen
     return {"state": "foreign" if state == pm_open.ANSWERS else "stopped"}
@@ -153,6 +170,11 @@ def project_state(folder):
 
 def change_map(folder, action):
     """Start or stop a map through pm_open; its own words come back, and the map's state after it."""
+    record = pm_open.record_of(pm_open.read_store(), folder)
+    found = pm_open.entry(Path(folder), "map")
+    if action == "start" and (found is None or not is_likec4(found[0])):
+        why = "This project's map entry in .claude/launch.json is not a LikeC4 start command, so nothing was started."
+        return {"ok": False, "message": why, "map": map_state(folder, record.get("map"))}
     seconds = START_SECONDS if action == "start" else STOP_SECONDS
     code, out, err = run(map_command(folder, action), folder, seconds)
     record = pm_open.record_of(pm_open.read_store(), folder)
@@ -196,8 +218,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         )
 
     def do_GET(self):
-        if not self.our_host():
-            return self.refuse(403, "foreign Host")
+        if not self.our_host() or ("Origin" in self.headers and not self.our_origin()):
+            return self.refuse(403, "foreign Host or Origin")
         url = urlsplit(self.path)
         if url.path == "/":
             return self.send(200, PAGE.read_bytes(), "text/html; charset=utf-8", PAGE_POLICY)
