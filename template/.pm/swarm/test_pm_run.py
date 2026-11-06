@@ -1957,6 +1957,58 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(state["a"]["state"], "started")
                 self.assertNotIn("login", attempt)
 
+    def blocked_worker(self, screen, worked=False):
+        """A worker Herdr shows as blocked since t=1000, on this screen."""
+        run, log, attempt, state = self.settled_worker(None, screen)
+        attempt.update(asking=True, asked=1000, ask_kind="blocked", asks=1, seq0=None, worked=worked)
+        return run, attempt, state
+
+    def tick_blocked(self, run, state, now):
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "time", return_value=now), patch.object(run, "status_of", return_value="blocked"):
+            run.tick([self.job("a", "nothing")], state, {})
+
+    def test_a_paid_wall_before_the_first_turn_ends_the_job_at_once(self):
+        # The screen of 6 Nov: Claude Code stopped Fable below a rule line and pm_run waited for 36 minutes.
+        rule = "─" * 60
+        for text in (
+            "Fable 5.1 now uses usage credits",
+            "Your payment is past due",
+            "Your subscription does not include this model",
+        ):
+            with self.subTest(text=text):
+                screen = f"> Read the brief\n{rule}\n  {text}\n  > Switch model and continue\n  Enter to confirm\n"
+                run, attempt, state = self.blocked_worker(screen)
+                self.tick_blocked(run, state, 1001)
+                self.assertEqual(state["a"]["state"], "handed-over")
+                self.assertIn(text, attempt["why"], "the reason quotes the screen")
+                self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
+
+    def test_an_unknown_screen_before_the_first_turn_ends_after_the_short_limit(self):
+        run, attempt, state = self.blocked_worker("Pick a theme\n> dark\n")
+        self.tick_blocked(run, state, 1100)
+        self.assertEqual(state["a"]["state"], "started", "a start-up screen gets its short time")
+        self.tick_blocked(run, state, 1121)
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertIn("Pick a theme", attempt["why"])
+
+    def test_a_question_after_real_work_waits_for_the_long_limit(self):
+        run, attempt, state = self.blocked_worker("I wrote about the billing page.\nAllow this edit?\n", worked=True)
+        self.tick_blocked(run, state, 2000)
+        self.assertEqual(state["a"]["state"], "started", "worker prose naming billing is no wall")
+        self.tick_blocked(run, state, 2801)
+        self.assertEqual(state["a"]["state"], "handed-over")
+
+    def test_a_herdr_that_stops_answering_cannot_hold_a_run_for_ever(self):
+        run, log, attempt, state = self.settled_worker()
+        for now, ended in ((1000, "started"), (2000, "started"), (2801, "handed-over")):
+            with patch.dict(os.environ, self.env), patch.object(pm_run.time, "time", return_value=now), patch.object(
+                run, "status_of", return_value="unknown"
+            ):
+                run.tick([self.job("a", "nothing")], state, {})
+            self.assertEqual(state["a"]["state"], ended)
+
     def test_every_question_in_one_session_is_reported(self):
         run, log, attempt, state = self.settled_worker()
         job = self.job("a", "nothing")

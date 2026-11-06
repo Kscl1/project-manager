@@ -62,7 +62,12 @@ control character except a tab, and every entry of `helpers` names a model, or m
 never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
-A worker that asks a question (Herdr state `blocked`) is never killed for it; it waits until someone answers.
+A worker that asks a question (Herdr state `blocked`) is never killed for it, and it never waits without a signal:
+pm_run stops watching it (HANDED-OVER, the session stays open, the screen's last lines in the reason), so the loop can
+end and whoever waits on it hears. A worker that has not run a turn yet and shows a plan, credit or payment screen is
+handed over at once; one that has not run a turn yet is handed over after PM_RUN_BLOCKED_START_S (120 s) on any screen;
+any other question after PM_RUN_BLOCKED_S (1800 s) without an answer. The same limit ends the wait on an agy trust
+question and on a Herdr that stops answering about a worker. After the answer, --retry starts or checks the job again.
 An agy permission question in the last pane lines also waits, even when Herdr reports the turn done. Each question
 pm_run sees is logged as WAITING with the pane id, a later one in the same session too, even when the answer to the one
 before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
@@ -118,7 +123,7 @@ Herdr binary: PM_RUN_HERDR, else `herdr` on PATH (where Herdr's installer puts i
 Timeouts: PM_RUN_HERDR_TIMEOUT (30 seconds per CLI call), PM_RUN_VERIFY_S (600 seconds per check),
 PM_RUN_START_S (10 seconds for agy to draw its screen after Herdr reports it ready).
 Other env vars: PM_RUN_HARD_S (4500), PM_RUN_OVERTIME_S (900), PM_RUN_QUIET_S (90), PM_RUN_MAX_NUDGES (3),
-PM_RUN_QUOTA_WAIT_S (1800),
+PM_RUN_QUOTA_WAIT_S (1800), PM_RUN_BLOCKED_START_S (120), PM_RUN_BLOCKED_S (1800),
 PM_RUN_TICK (15), PM_RUN_SETTLE_S (20), PM_RUN_SETUP_S (2), PM_RUN_READY_S (60, capped at 60), PM_RUN_MAX_TRIES (5),
 PM_RUN_REPO (the repo root; default the current folder).
 Failure log: every event a person should look at later (a retry, a nudge, a hand-over, a check that failed, a job
@@ -168,6 +173,7 @@ READY_S = min(60, max(0, _env("READY_S", 60)))  # never wait more than a minute 
 HERDR_TIMEOUT, VERIFY_S = _env("HERDR_TIMEOUT", 30), _env("VERIFY_S", 600)
 MAX_TRIES = int(_env("MAX_TRIES", 5))
 QUOTA_WAIT_S = _env("QUOTA_WAIT_S", 30 * 60)
+BLOCKED_START_S, BLOCKED_S = _env("BLOCKED_START_S", 120), _env("BLOCKED_S", 30 * 60)
 QUIET_S, MAX_NUDGES, OVERTIME_S = _env("QUIET_S", 90), int(_env("MAX_NUDGES", 3)), _env("OVERTIME_S", 15 * 60)
 # The pm_run.log words that also go to the shared failure log; LAUNCH, VERIFIED, HOLD and KEPT are routine.
 FAILURES = {"FAILED", "RETRY", "HANDED-OVER", "CHECK-FAILED", "BLOCKED", "ARTIFACT", "RESUME", "PROMPT", "WAITING"}
@@ -185,6 +191,9 @@ QUOTA = re.compile(
     r"usage limit|quota|limit reached|(?:hit|reached) your (?:usage )?limit|out of (?:extra )?usage", re.I
 )
 ERROR_LINE = re.compile(r"\berror\b|\b429\b|\bresets?\b", re.I)
+# A screen no answer from the run can pass: only a person with the account can. Read only before the first turn, when
+# the pane holds the harness's own screens and no worker prose.
+WALL = re.compile(r"usage credits?|credit balance|past due|billing|payment|subscription|upgrade (?:your|to)\b", re.I)
 # A sign-in that ran out. Pi's own error message is trusted as it is (LOGIN). On the pane only a line that starts
 # with the harness's answer counts (LOGIN_LINE): Claude Code answers "Not logged in · Please run /login" or
 # "API Error: 401 ...", and its run still ends as a success. A worker's prose that names these words does not start
@@ -1132,8 +1141,12 @@ class Run:
             status = self.status_of(a)
             a["herdr"] = status
             if status == "unknown":
+                if now - a.setdefault("unknown_since", now) >= BLOCKED_S:
+                    self.hand_over(job, s, f"Herdr gave no state for {BLOCKED_S / 60:g} min; look at the worker's pane")
+                    continue
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue  # no kill, nudge or retry on a failed query, even after the hard limit
+            a.pop("unknown_since", None)
             question = None
             if status in SETTLED and job.get("harness") == "agy":
                 screen = herdr("agent", "read", a["name"], "--source", "visible", plain=True)
@@ -1167,6 +1180,8 @@ class Run:
                         f"WAITING {job['id']}: answer the worker in Herdr pane {a.get('pane')} "
                         f"(question {a['asks']} in this session)"
                     )
+                if self.stuck_on_screen(job, s, a, now):
+                    continue
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
                 continue
             a.pop("asking", None)
@@ -1237,6 +1252,15 @@ class Run:
                 continue
             if s.get("trust_wait"):
                 a = s["trust_wait"]
+                if time.time() - a.setdefault("trust_since", time.time()) >= BLOCKED_S:
+                    s["attempts"].append(s.pop("trust_wait"))
+                    self.hand_over(
+                        job,
+                        s,
+                        f"no answer to agy's trust question for {BLOCKED_S / 60:g} min; open agy in {self.repo} once, "
+                        "answer Yes, then --retry the job",
+                    )
+                    continue
                 trust = self.trust_screen(a)
                 if trust is None:
                     continue  # a failed read is not an answer
@@ -1549,6 +1573,25 @@ class Run:
             self.log(f"PROMPT {job['id']}: no turn ran after the brief was sent; brief resent{note}")
         else:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
+        return True
+
+    def stuck_on_screen(self, job, s, a, now):
+        """Hand over a worker that sits on a screen too long, or on one only a person can pass; True when it did."""
+        waited, fresh = now - a["asked"], no_turn_yet(a)
+        limit = BLOCKED_START_S if fresh else BLOCKED_S
+        if not fresh and waited < limit:
+            return False
+        screen = herdr("agent", "read", a["name"], "--source", "visible", plain=True)
+        # The raw screen, not pane_content(): that cuts at the last rule line, and a harness draws its dialog below one.
+        lines = screen.splitlines() if isinstance(screen, str) else []
+        lines = [" ".join(line.split()) for line in lines if line.strip()][-12:]
+        wall = fresh and any(WALL.search(line) for line in lines)
+        if not wall and waited < limit:
+            return False
+        a["stuck"] = " / ".join(lines[-8:])[:400]
+        what = "a plan or payment screen" if wall else f"a screen for {waited / 60:.0f} min"
+        when = "before its first turn" if fresh else "with no answer"
+        self.hand_over(job, s, f'stuck on {what} {when}: "{a["stuck"]}"; answer it in the pane, then --retry the job')
         return True
 
     def stop_hand_over(self, job, s, a, why, now):
