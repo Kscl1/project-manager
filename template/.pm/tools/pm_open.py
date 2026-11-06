@@ -980,15 +980,18 @@ def open_window():
         if answers(WINDOW_PORT):
             print(f"Port {WINDOW_PORT} answers for another program, so the project window was not started.")
             return 1
-        program = Path(__file__).resolve().parent / "pm_bridge.py"
         log_path = ROOT / ".pm" / "local" / LOG.format(name="window")
-        process = start([sys.executable, str(program), "--port", str(WINDOW_PORT)], ROOT, log_path)
-        data["window"] = {"port": WINDOW_PORT, "pid": process.pid, "started": start_time(process.pid)}
-        if not write_store(data):
-            warn_store()
+        process = None
+        server = data.get("window")
+        if not (isinstance(server, dict) and process_of(server)):  # one started by another run is still coming up
+            program = Path(__file__).resolve().parent / "pm_bridge.py"
+            process = start([sys.executable, str(program), "--port", str(WINDOW_PORT)], ROOT, log_path)
+            data["window"] = {"port": WINDOW_PORT, "pid": process.pid, "started": start_time(process.pid)}
+            if not write_store(data):
+                warn_store()
     deadline = time.monotonic() + WAIT_SECONDS
     while not window_running():
-        if process.poll() is not None or time.monotonic() > deadline:
+        if (process and process.poll() is not None) or time.monotonic() > deadline:
             print(f"The project window did not answer at {window_address()}; its output is in {log_path}.")
             return 1
         time.sleep(POLL_SECONDS)

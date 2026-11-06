@@ -67,7 +67,8 @@ h1{font-size:25px;letter-spacing:-.01em}
 
 /* The drawer: cards stand on its bar, stuck work first, each step back a little shorter */
 .drawer{display:flex;align-items:flex-end;gap:10px;height:252px;padding:24px 14px 0;overflow-x:auto;overflow-y:hidden;background:linear-gradient(transparent 58%,var(--ground-deep));border-bottom:9px solid var(--drawer);border-radius:0 0 6px 6px}
-.c{position:relative;flex:1 0 190px;min-width:0;max-width:340px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--card-edge);border-bottom:0;border-radius:5px 5px 0 0;padding:12px 14px 10px;text-align:left;box-shadow:0 2px 7px var(--lift);transition:box-shadow .35s var(--ease),border-color .2s;animation:rise .5s var(--ease) both}
+.c{position:relative;flex:1 0 190px;min-width:0;max-width:340px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--card-edge);border-bottom:0;border-radius:5px 5px 0 0;padding:12px 14px 10px;text-align:left;box-shadow:0 2px 7px var(--lift);transition:box-shadow .35s var(--ease),border-color .2s}
+.drawer.first .c{animation:rise .5s var(--ease) both}
 .c:hover,.c:focus-visible{border-color:var(--soft);box-shadow:0 5px 14px var(--lift)}
 .c.a0{height:206px}.c.a1{height:192px}.c.a2{height:178px}.c.a3{height:164px}
 .drawer.empty{height:auto;padding:10px 14px;background:none}
@@ -196,6 +197,7 @@ const TEXT = {
   en: {
     brand: "project window", projects: "Projects", soon: "Coming up", foot: "It writes no task and starts no agent. Close it and the work carries on.",
     waiting: n => n === 1 ? "1 card waiting for you" : `${n} cards waiting for you`, empty: "The drawer is empty", order: "Stuck first, then the oldest.",
+    unknown: "Not every project could be read", unknownText: "This list may be missing cards; the projects on the left say which ones.",
     none: "Nothing waits for you here. Running agents show on the right.", only: "This project only", all: "All projects",
     now: "Now", idle: "No agent is running", noHerdr: "Herdr did not answer", finished: "Finished",
     board: "Board", map: "Map", agents: "Agents", close: "Close the drawer", open: n => `Open the drawer · ${n}`,
@@ -214,6 +216,7 @@ const TEXT = {
   tr: {
     brand: "proje penceresi", projects: "Projeler", soon: "Yaklaşan", foot: "Görevlere yazmaz, ajan başlatmaz. Kapatınca iş olduğu gibi sürer.",
     waiting: n => `Seni bekleyen ${n} kart`, empty: "Çekmece boş", order: "Takılan en önde, sonra en eski.",
+    unknown: "Her proje okunamadı", unknownText: "Bu listede eksik kart olabilir; hangi projeler olduğu solda yazıyor.",
     none: "Burada seni bekleyen bir şey yok. Çalışan ajanlar sağda görünür.", only: "Yalnız bu proje", all: "Tüm projeler",
     now: "Şu an", idle: "Çalışan ajan yok", noHerdr: "Herdr cevap vermedi", finished: "Biten",
     board: "Pano", map: "Harita", agents: "Ajanlar", close: "Çekmeceyi kapat", open: n => `Çekmeceyi aç · ${n} kart`,
@@ -298,17 +301,18 @@ function renderSoon() {
 
 function renderDrawer() {
   const cards = allCards(), list = only ? cards.filter(c => c.project.id === cur) : cards;
-  $("waitTitle").textContent = list.length ? T.waiting(list.length) : T.empty;
-  $("waitNote").textContent = list.length ? T.order : "";
+  const unread = (only ? projects.filter(p => p.id === cur) : projects).some(p => !S(p.id));
+  $("waitTitle").textContent = list.length ? T.waiting(list.length) : unread ? T.unknown : T.empty;
+  $("waitNote").textContent = !list.length ? "" : unread ? T.unknownText : T.order;
   $("filter").textContent = only ? T.all : T.only;
   $("wide").textContent = document.body.classList.contains("wide") ? T.open(cards.length) : T.close;
   $("wide").classList.toggle("bad", document.body.classList.contains("wide") && cards.some(c => c.kind === "stuck"));
   $("drawer").classList.toggle("empty", !list.length);
-  $("drawer").innerHTML = list.length ? list.map((c, i) => `<button class="c a${Math.min(i, 3)}" type="button" data-card="${i}">
+  $("drawer").innerHTML = list.length ? list.map((c, i) => `<button class="c a${Math.min(i, 3)}" type="button" data-card="${i}" data-key="${esc(`${c.project.id}|${c.kind}|${c.title}|${c.ref}`)}">
       <span class="tab ${c.kind === "stuck" ? "bad" : ""}">${T[c.kind]}</span><h3>${esc(c.title)}</h3><p>${esc(c.text)}</p>
       <span class="go">${c.tool === "board" ? T.openBoard : T.openAgents}${ICON.go}</span>
       <span class="meta"><span>${esc(c.project.name)}${c.ref ? ` · ${esc(c.ref)}` : ""}</span><span class="age ${c.kind === "stuck" ? "hot" : ""}">${esc(ago(c.since))}</span></span></button>`).join("")
-    : `<p class="none">${T.none}</p>`;
+    : `<p class="none">${unread ? T.unknownText : T.none}</p>`;
   renderDrawer.list = list;
 }
 
@@ -334,7 +338,8 @@ function boardHtml(p) {
   const state = S(p.id);
   if (!state) return offState(p.found ? T.stateless : T.gone, (states[p.id] && states[p.id].why) || "");
   if (!state.board.length) return offState(p.name, T.noTasks);
-  const columns = COLUMNS.map(name => [name, state.board.filter(t => t.status === name)]).filter(([, tasks]) => tasks.length);
+  const others = [...new Set(state.board.map(t => t.status))].filter(name => !COLUMNS.includes(name));
+  const columns = [...COLUMNS.slice(0, -1), ...others, "Done"].map(name => [name, state.board.filter(t => t.status === name)]).filter(([, tasks]) => tasks.length);
   const row = t => `<div class="row ${t.priority === "high" ? "high" : ""} ${t.waiting ? "wait" : ""}">${esc(t.title)}
     <small><span>${esc(t.id)}</span>${t.waiting ? `<span class="flag">${T.waitsYou}</span>` : ""}${t.blocker ? `<span class="flag bad" title="${esc(t.blocker)}">${T.blocked}</span>` : ""}</small></div>`;
   return `<div class="board">${columns.map(([name, tasks]) => `<div><h3>${esc(T[name] || name)} · ${tasks.length}</h3>${tasks.map(row).join("")}</div>`).join("")}</div>`;
@@ -439,7 +444,9 @@ async function get(path) {
 async function refresh() {
   try {
     projects = (await get("/api/projects")).projects;
-    await Promise.all(projects.filter(p => p.found).map(async p => { states[p.id] = await get(`/api/state?project=${p.id}`); }));
+    const found = projects.filter(p => p.found).map(p => p.id);
+    for (const id of Object.keys(states)) if (!found.includes(id)) delete states[id];
+    await Promise.all(found.map(async id => { states[id] = await get(`/api/state?project=${id}`); }));
     failed = false;
     if (!P() && projects.length) cur = (projects.find(p => (S(p.id) || {waiting: []}).waiting.length) || projects[0]).id;
     $("status").textContent = T.updated(new Date().toLocaleTimeString(lang, {hour: "2-digit", minute: "2-digit"}));
@@ -448,9 +455,14 @@ async function refresh() {
     $("status").textContent = T.down;
   }
   $("status").classList.toggle("bad", failed);
-  const reading = tool !== "map" && $("frame").scrollTop;  // a refresh must not move what is being read
+  // A refresh must not move what is being read, or take away the keyboard's place.
+  const reading = tool !== "map" && $("frame").scrollTop, sideways = $("drawer").scrollLeft;
+  const place = document.activeElement && document.activeElement.dataset;
+  const held = place && (place.key ? `[data-key="${CSS.escape(place.key)}"]` : place.p ? `[data-p="${CSS.escape(place.p)}"]` : "");
   renderAll();
   if (reading) $("frame").scrollTop = reading;
+  $("drawer").scrollLeft = sideways;
+  if (held && document.querySelector(held)) document.querySelector(held).focus({preventScroll: true});
 }
 
 function pick(id) { cur = id; mapNote = ""; renderAll(); }
@@ -494,6 +506,8 @@ $("soonTitle").textContent = T.soon;
 $("foot").textContent = T.foot;
 $("nowTitle").textContent = T.now;
 $("keys").textContent = T.keys;
+$("drawer").classList.add("first");
+setTimeout(() => $("drawer").classList.remove("first"), 2000);
 refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
 </script>

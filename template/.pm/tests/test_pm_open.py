@@ -1171,6 +1171,27 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(self.runs, [])
         self.assertEqual(self.opened, [pm_open.window_address()])
 
+    def test_a_window_still_coming_up_is_waited_for_not_started_again(self):
+        self.window_ready([False, True])
+        self.said(pm_open.open_window)
+        pid = self.pids[-1]
+        self.live.add(pid)
+        record = pm_open.read_store()["window"]
+        self.opened.clear()
+        self.window_ready([False, False, True])
+        code, _ = self.said(pm_open.open_window)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.runs), 1, "no second bridge")
+        self.assertEqual(pm_open.read_store()["window"], record, "the first one stays the one to stop")
+        self.assertEqual(self.opened, [pm_open.window_address()])
+
+    def test_a_window_that_died_is_started_again(self):
+        self.window_ready([False, True])
+        self.said(pm_open.open_window)
+        self.window_ready([False, True])  # its process is not in self.live: it is gone
+        self.assertEqual(self.said(pm_open.open_window)[0], 0)
+        self.assertEqual(len(self.runs), 2)
+
     def test_another_program_on_the_port_starts_nothing(self):
         self.window_ready([False])
         self.answers[pm_open.WINDOW_PORT] = [True]
