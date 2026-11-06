@@ -68,6 +68,7 @@ end and whoever waits on it hears. A worker that has not run a turn yet and show
 handed over at once; one that has not run a turn yet is handed over after PM_RUN_BLOCKED_START_S (120 s) on any screen;
 any other question after PM_RUN_BLOCKED_S (1800 s) without an answer. The same limit ends the wait on an agy trust
 question and on a Herdr that stops answering about a worker. After the answer, --retry starts or checks the job again.
+A pane that keeps changing holds a settled worker that ran no turn for PM_RUN_BLOCKED_START_S, then the nudges take over.
 An agy permission question in the last pane lines also waits, even when Herdr reports the turn done. Each question
 pm_run sees is logged as WAITING with the pane id, a later one in the same session too, even when the answer to the one
 before fell between two ticks (Herdr's state counter shows it); questions asked and answered between two ticks are not.
@@ -1223,7 +1224,7 @@ class Run:
                 source, watched = "Pi wrote its log", "Pi's log"
                 if quiet is None:
                     quiet, source, watched = self.pane_quiet(a, now), "its pane last changed", "the pane"
-                if quiet is not None and quiet < QUIET_S:
+                if quiet is not None and quiet < QUIET_S and not self.hold_over(a, now):
                     if not a.get("held"):
                         a["held"] = True
                         then = (
@@ -1568,12 +1569,23 @@ class Run:
         )
         herdr("agent", "prompt", a["name"], prompt + note)
         a.update(prompted=now, nudge_size=size, nudge_stamp=stamp, held=False)
+        a.pop("held_since", None)
         self.reset_observation(a)
         if lost:
             self.log(f"PROMPT {job['id']}: no turn ran after the brief was sent; brief resent{note}")
         else:
             self.log(f"RESUME {job['id']}: turn settled but {why}; same session, nudge {a['nudges']}{note}")
         return True
+
+    def hold_over(self, a, now):
+        """True when a pane that keeps changing may hold a settled worker no longer, so the nudges (bounded) take over.
+
+        A sign-in screen with a countdown looks like this: Herdr says idle and the pane never goes quiet. A worker that
+        ran no turn gets BLOCKED_START_S of it; one that did keeps it up to the hard limit.
+        """
+        if no_turn_yet(a):
+            return now - a.setdefault("held_since", now) >= BLOCKED_START_S
+        return now - a["started"] > HARD_S + a.get("overtime", 0)
 
     def stuck_on_screen(self, job, s, a, now):
         """Hand over a worker that sits on a screen too long, or on one only a person can pass; True when it did."""
@@ -1585,7 +1597,8 @@ class Run:
         # The raw screen, not pane_content(): that cuts at the last rule line, and a harness draws its dialog below one.
         lines = screen.splitlines() if isinstance(screen, str) else []
         lines = [" ".join(line.split()) for line in lines if line.strip()][-12:]
-        wall = fresh and any(WALL.search(line) for line in lines)
+        sent = " ".join(launch_prompt(job).split())  # the pane echoes the prompt, and a brief may be called billing.md
+        wall = fresh and any(WALL.search(line) and line.strip("> ❯│ ") not in sent for line in lines)
         if not wall and waited < limit:
             return False
         a["stuck"] = " / ".join(lines[-8:])[:400]

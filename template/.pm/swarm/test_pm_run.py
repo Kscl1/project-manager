@@ -534,6 +534,24 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual((out.parent / "a.kept.md").read_text(encoding="utf-8"), "earlier report")
         self.assertFalse((out.parent / "a.kept-2.md").exists())
 
+    def test_a_trust_question_nobody_answers_ends_the_job_and_leaves_the_pane_open(self):
+        run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
+        env = {**self.env, "FAKE_TRUST": "1"}
+        with patch.dict(os.environ, env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "sleep"):
+            run.tick([job], state, {})
+            pane = state["a"]["trust_wait"]["pane"]
+            herdr = self.herdr_state()
+            herdr["pane_screens"][pane] = {"error": "read failed"}  # an unreadable pane must not stretch the limit
+            self.fake_state.write_text(json.dumps(herdr), encoding="utf-8")
+            state["a"]["trust_wait"]["trust_since"] = time.time() - pm_run.BLOCKED_S - 1
+            run.tick([job], state, {})
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertEqual(len(state["a"]["attempts"]), 1)
+        self.assertIn("trust question", state["a"]["attempts"][0]["why"])
+        self.assertEqual(len([c for c in self.herdr_state()["calls"] if c[:2] == ["agent", "start"]]), 1)
+
     def test_agy_folder_trust_waits_without_tries_then_starts_after_answer(self):
         run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", harness="agy"), {}
         env = {**self.env, "FAKE_TRUST": "1"}
@@ -1963,11 +1981,59 @@ class PromptRecoveryTest(PmRunFixture, unittest.TestCase):
         attempt.update(asking=True, asked=1000, ask_kind="blocked", asks=1, seq0=None, worked=worked)
         return run, attempt, state
 
-    def tick_blocked(self, run, state, now):
+    def tick_blocked(self, run, state, now, job=None):
         with patch.dict(os.environ, self.env), patch.object(
             pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
         ), patch.object(pm_run.time, "time", return_value=now), patch.object(run, "status_of", return_value="blocked"):
+            run.tick([job or self.job("a", "nothing")], state, {})
+
+    def tick_idle_changing(self, run, state, now):
+        """A tick on a worker Herdr calls idle while its pane keeps changing, as a countdown does."""
+        with patch.dict(os.environ, self.env), patch.object(
+            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
+        ), patch.object(pm_run.time, "time", return_value=now), patch.object(
+            run, "status_of", return_value="idle"
+        ), patch.object(run, "pane_quiet", return_value=0):
             run.tick([self.job("a", "nothing")], state, {})
+
+    def test_a_changing_idle_screen_before_the_first_turn_cannot_hold_a_job_for_ever(self):
+        run, log, attempt, state = self.settled_worker(None, "Sign in: this code expires in 59 s\n")
+        attempt.update(seq0=None, worked=False)
+        attempt.pop("session_log")
+        self.tick_idle_changing(run, state, 1000)
+        self.assertEqual(attempt.get("nudges", 0), 0, "a changing pane first gets its short time")
+        for now in range(1130, 4000, 130):
+            self.tick_idle_changing(run, state, now)
+            if state["a"]["state"] != "started":
+                break
+        self.assertEqual(state["a"]["state"], "handed-over")
+        self.assertLess(now, 2000, "the limit and the nudges end it, ticks here being far apart")
+        self.assertIn("worker", self.herdr_state()["agents"], "the session is left open")
+
+    def test_a_changing_idle_pane_after_real_work_holds_until_the_hard_limit(self):
+        run, log, attempt, state = self.settled_worker(None, "Thinking it over\n")
+        attempt.pop("session_log")
+        self.tick_idle_changing(run, state, 2000)
+        self.tick_idle_changing(run, state, 4000)
+        self.assertEqual(attempt.get("nudges", 0), 0)
+        self.tick_idle_changing(run, state, pm_run.HARD_S + 2)
+        self.assertEqual(attempt.get("nudges", 0), 1, "past the hard limit the nudges take over")
+
+    def test_an_echoed_prompt_that_names_billing_is_no_wall(self):
+        job = self.job("a", "nothing")
+        job["briefs"] = ["billing.md"]
+        echoed = pm_run.launch_prompt(job)
+        for screen in (
+            f"> {echoed}\nAllow access to this file?\n",
+            f"> {echoed[:30]}\n  {echoed[30:60]}\nAllow access to this file?\n",
+        ):
+            with self.subTest(screen=screen):
+                run, attempt, state = self.blocked_worker(screen)
+                self.tick_blocked(run, state, 1001, job)
+                self.assertEqual(state["a"]["state"], "started")
+                self.tick_blocked(run, state, 1121, job)
+                self.assertEqual(state["a"]["state"], "handed-over", "it still ends after the short limit")
+                self.assertIn("for 2 min", attempt["why"])
 
     def test_a_paid_wall_before_the_first_turn_ends_the_job_at_once(self):
         # The screen of 6 Nov: Claude Code stopped Fable below a rule line and pm_run waited for 36 minutes.
