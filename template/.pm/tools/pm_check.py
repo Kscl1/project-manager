@@ -79,6 +79,11 @@ SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", 
 # A decision is a list item that starts with its bold ID, optionally struck through. Examples in prose do not count.
 DECISION = re.compile(r"^\s*-\s+(?:~~)?\*\*(D-\d+)\*\*")
 REPLACED_BY = re.compile(r"→\s*(D-\d+)")
+# A decision ID in running text; an ID that ends or starts a range ("D-01…D-23", "D-01 to D-23") is a span, not a cite.
+CITED = re.compile(r"(?<![\w-])D-\d+(?![\w-])")
+RANGE_MARK = re.compile(r"^\s*(?:…|\.\.\.?|–|—|-|to|ile)\s*$")
+# The same line says it is history: a dated update marker or a struck-through span.
+HISTORY_MARK = re.compile(r"\((?:Güncelleme|Update)\b|~~", re.IGNORECASE)
 DECISION_FILE = re.compile(r"^D-\d+$")
 # A file path in backticks, alone or inside a command: `docs/x.md`, `python ../repo/tool.py`, `pm_check.py`.
 # A bare file name (no folder) counts only with one of these extensions; a commit is 7 to 40 hex digits.
@@ -492,6 +497,41 @@ def check_record_type(name, front):
     return []
 
 
+def check_text_cites(name, lines, decisions):
+    """A living doc that cites a replaced decision in its text, as if it were in force (depends_on only covers a list)."""
+    problems, start, in_fence = [], 0, False
+    if lines and lines[0].strip("﻿").strip() == "---":
+        start = next((n for n, line in enumerate(lines[1:], start=1) if line.strip() == "---"), 0) + 1
+    for number, line in enumerate(lines[start:], start=start + 1):
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+        if in_fence or HISTORY_MARK.search(line):
+            continue
+        line = INLINE_CODE.sub(lambda code: " " * len(code.group(0)), line)  # `D-11` in code is an example
+        matches = list(CITED.finditer(line))
+        for index, match in enumerate(matches):
+            ref, replacement = match.group(0), decisions.get(match.group(0))
+            if replacement is None:  # in force, or not a decision of this project
+                continue
+            before = line[matches[index - 1].end() : match.start()] if index else None
+            after = line[match.end() : matches[index + 1].start()] if index + 1 < len(matches) else None
+            if any(gap is not None and RANGE_MARK.match(gap) for gap in (before, after)):
+                continue
+            if replacement == ARCHIVED:
+                problems.append(
+                    f"{name}:{number}: cites {ref}, which is archived and no longer in force here\n"
+                    f"    → if the line states a rule in force, rewrite it without {ref}; if it is history, mark it"
+                    f" with a dated (Update: ...) note"
+                )
+            elif not re.search(rf"(?<![\w-]){re.escape(replacement)}(?![\w-])", line):
+                problems.append(
+                    f"{name}:{number}: cites {ref}, which was superseded by {replacement}\n"
+                    f"    → if the line states a rule in force, reread it against {replacement} and cite that;"
+                    f" if it is history, name {replacement} on the same line"
+                )
+    return problems
+
+
 def vendored(name):
     """A file of a skill copied from another project (a LICENSE sits beside its SKILL.md): its text is upstream's."""
     parts = name.split("/")
@@ -553,6 +593,8 @@ def check_file(path, decisions):
         problems += check_repo_paths(name, path, lines, siblings_only=True)
     elif [value for _, value in read_frontmatter(lines).get("type", [])] == ["living_doc"]:
         problems += check_repo_paths(name, path, lines)
+        if decisions:
+            problems += check_text_cites(name, lines, decisions)
     if name.startswith(TASK_DIRS + DRAFT_DIRS):
         problems += check_done_task(name, lines)
     if name.startswith(TASK_DIRS):
