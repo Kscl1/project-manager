@@ -140,7 +140,7 @@ class StateTest(unittest.TestCase):
         tasks.mkdir(parents=True)
         (tasks / "req-7 - x.md").write_text(
             "---\nid: REQ-7\ntitle: Seven\nstatus: Active\nordinal: 9\npriority: high\nparent_task_id: REQ-1\n"
-            "labels:\n  - a\n  - 'b'\ndependencies: []\nrisk: low\n---\n\n"
+            "labels:\n  - a\n  - 'b'\ndependencies: []\nrisk: low\nnote: |\n  first\n  - not a list\n---\n\n"
             "## Our own part\n\nCustom words\n\n"
             "## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nWhy it exists\n<!-- SECTION:DESCRIPTION:END -->\n\n"
             "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [x] #1 Done one\n- [ ] #2 Open one\n<!-- AC:END -->\n\n"
@@ -154,7 +154,16 @@ class StateTest(unittest.TestCase):
         task = self.detail("--task", "req-7")
         self.assertEqual(task["id"], "REQ-7")
         fields = {field["name"]: field["value"] for field in task["fields"]}
-        self.assertEqual(fields, {"priority": "high", "parent_task_id": "REQ-1", "labels": ["a", "b"], "risk": "low"})
+        self.assertEqual(
+            fields,
+            {
+                "priority": "high",
+                "parent_task_id": "REQ-1",
+                "labels": ["a", "b"],
+                "risk": "low",
+                "note": "first\n- not a list",
+            },
+        )
         sections = {item["name"]: item for item in task["sections"]}
         self.assertEqual(task["sections"][0]["name"], "Final Summary")
         self.assertEqual(sections["Description"]["text"], "Why it exists")

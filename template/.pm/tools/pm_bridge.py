@@ -49,6 +49,7 @@ PORT = 7420
 HOST = "127.0.0.1"  # the only address it listens on; there is deliberately no option for another
 PAGE = HERE / "pm_bridge.html"
 STATE_VERSION = 2  # the pm_state output this program can read; an older project is told to upgrade
+DETAIL_VERSION = 1  # what pm_state's --task, --job and --pane print
 STATE_SECONDS = 20
 START_SECONDS = 160  # pm_open may check the npx cache (up to 120 s), then waits for the map to answer
 STOP_SECONDS = 20
@@ -186,8 +187,12 @@ def project_detail(folder, kind, name):
         return {"found": None, "why": "that is not a task or job name"}
     _, out, _ = run(state_command(folder, f"--{kind}", name), folder, STATE_SECONDS)
     try:
-        found = json.loads(out)["found"]
+        answer = json.loads(out)
+        known = answer["detail"] == DETAIL_VERSION
+        found = answer["found"]
     except (ValueError, KeyError, TypeError):
+        known = False
+    if not known:
         return {"found": None, "why": "this project's .pm cannot show details yet; upgrade it"}
     return {"found": found} if found else {"found": None, "why": f"{name} was not found"}
 

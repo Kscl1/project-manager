@@ -290,17 +290,19 @@ class Details(Case):
         return json.loads(body)
 
     def test_a_task_and_a_job_come_from_the_projects_own_tool(self):
-        self.write_state("import json, sys\nprint(json.dumps({'version': 2, 'found': {'asked': sys.argv[1:]}}))\n")
+        self.write_state("import json, sys\nprint(json.dumps({'detail': 1, 'found': {'asked': sys.argv[1:]}}))\n")
         self.assertEqual(self.detail("task", "REQ-1.2")["found"]["asked"], ["--task", "REQ-1.2"])
         self.assertEqual(self.detail("job", "run-1/a.b")["found"]["asked"], ["--job", "run-1/a.b"])
 
     def test_nothing_found_is_said(self):
-        self.write_state("import json\nprint(json.dumps({'version': 2, 'found': None}))\n")
+        self.write_state("import json\nprint(json.dumps({'detail': 1, 'found': None}))\n")
         answer = self.detail("task", "REQ-1")
         self.assertIsNone(answer["found"])
         self.assertIn("REQ-1", answer["why"])
 
     def test_an_older_project_is_told_to_upgrade(self):
+        self.assertIn("upgrade", self.detail("task", "REQ-1")["why"])
+        self.write_state("import json\nprint(json.dumps({'version': 2, 'found': {'old': 'shape'}}))\n")
         self.assertIn("upgrade", self.detail("task", "REQ-1")["why"])
 
     def test_a_name_that_is_no_name_never_reaches_the_tool(self):

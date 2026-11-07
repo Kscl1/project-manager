@@ -50,6 +50,7 @@ import pm_resume  # noqa: E402  (a sibling script, which already reads the tasks
 ROOT = pm_resume.ROOT
 RUNS_DIR = ROOT / ".pm" / "local" / "runs"
 VERSION = 2  # the shape of the JSON; a reader checks it before it trusts the keys
+DETAIL_VERSION = 1  # the same for what --task, --job and --pane print
 RECENT_S = 24 * 3600
 # pm_run's ended states (pm_run.ENDED; a test keeps the two in step). Any other state is not ended yet.
 ENDED = ("verified", "artifact-present", "check-failed", "handed-over", "failed", "blocked", "stopped")
@@ -466,21 +467,25 @@ def front_fields(text):
     fields = []
     if not lines or lines[0].strip() != "---":
         return fields
+    joiner = None  # inside a folded (>) or literal (|) value: its lines are text, even one that looks like a list
     for line in lines[1:]:
         if line.strip() == "---":
             break
         item = re.match(r"\s*-\s+(.*)$", line)
-        if fields and item:
+        if fields and joiner and line[:1] in (" ", "\t"):
+            fields[-1]["value"] = f"{fields[-1]['value']}{joiner}{line.strip()}".strip()
+        elif fields and item:
             value = fields[-1]["value"]
             fields[-1]["value"] = [*(value if isinstance(value, list) else []), pm_resume.scalar(item.group(1))]
-        elif fields and line[:1] in (" ", "\t"):  # the next line of a folded value
-            fields[-1]["value"] = f"{fields[-1]['value']} {line.strip()}".strip()
         else:
             name, separator, value = line.partition(":")
             value = value.strip()
             if separator:
-                empty = value in ("[]", ">", ">-", ">+", "|", "|-", "|+")
-                fields.append({"name": name.strip(), "value": "" if empty else pm_resume.scalar(value)})
+                block = value in (">", ">-", ">+", "|", "|-", "|+")
+                joiner = (" " if value[0] == ">" else "\n") if block else None
+                fields.append(
+                    {"name": name.strip(), "value": "" if block or value == "[]" else pm_resume.scalar(value)}
+                )
     return [field for field in fields if field["value"] and field["name"] not in HIDDEN_FIELDS]
 
 
@@ -560,7 +565,7 @@ def pane_screen(pane):
 def pane_detail(pane):
     """One Herdr agent of this project with what it shows now, or None."""
     agent = next((a for a in herdr_agents([]) or [] if a["pane"] == pane), None)
-    return {**agent, "screen": pane_screen(pane)} if agent else None
+    return {**agent, "running": True, "screen": pane_screen(pane)} if agent else None
 
 
 def job_log(run, job_id):
@@ -626,6 +631,7 @@ def job_detail(name):
         "briefs": briefs,
         "result": clipped(out) if out else None,
         "log": job_log(run, job_id),
+        "running": bool(attempts) and receipt.get("state") not in ENDED,
         "screen": pane_screen(attempts[-1].get("pane")) if attempts and receipt.get("state") not in ENDED else None,
     }
 
@@ -640,7 +646,7 @@ def main():
     details = {"--task": task_detail, "--job": job_detail, "--pane": pane_detail}
     if len(words) == 2 and words[0] in details:
         found = details[words[0]](words[1])
-        print(json.dumps({"version": VERSION, "found": found}, indent=2, ensure_ascii=False))
+        print(json.dumps({"detail": DETAIL_VERSION, "found": found}, indent=2, ensure_ascii=False))
         return 0
     print(json.dumps(snapshot(), indent=2, ensure_ascii=False))
     return 0
