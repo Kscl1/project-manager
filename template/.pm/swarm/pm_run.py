@@ -95,6 +95,8 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
                        "task": "REQ-1",        (optional: the task this job works for; pm_state groups workers by it)
+                       "lead": "Claude Opus 5.5",  (optional: who gave this job; the project window shows it, since
+                                                no tool tells a program which model is driving it)
                        "harness": "pi" | "claude" | "agy", "setup": "shell line run in the pane first", "args": [...],
                        "probe": "http://127.0.0.1:8080/v1/models",  (optional HTTP health probe; never include a secret)
                        "writes": ["site/"],    (paths the worker may write besides `out`, e.g. code it builds)
@@ -599,6 +601,16 @@ def control_mark(text):
         if ord(char) < 32 and char != "\t":
             return json.dumps(char)[1:-1]
     return None
+
+
+def caller():
+    """Who is starting this run: the tool, and the Herdr pane it sits in. pm_state turns the pane into a job's name."""
+    pane = os.environ.get("HERDR_PANE_ID")
+    tool = "Claude Code" if os.environ.get("CLAUDECODE") else None
+    if pane and not tool:
+        listed = herdr("api", "snapshot").get("result", {}).get("snapshot", {}).get("agents") or []
+        tool = next((agent.get("agent") for agent in listed if agent.get("pane_id") == pane), None)
+    return {"tool": tool, "pane": pane}
 
 
 def complete_helper(helper):
@@ -1843,6 +1855,7 @@ def main():
     caps = run.load("caps.json", {})
     run.take_lease()
     run.log(f"pm_run start: {len(jobs)} jobs")
+    state.setdefault("_started_by", caller())  # the first start says who began the run; a resume changes nothing
     saved = True
     while True:
         run.refresh_lease()

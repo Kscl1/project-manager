@@ -54,6 +54,8 @@ python .pm/tools/pm_open.py list        # every project opened this way: its boa
 python .pm/tools/pm_open.py stop board  # stops the board this tool started ('stop map' for the map)
 python .pm/tools/pm_open.py opening ask # ask, always or never: whether a session start offers the project window
 python .pm/tools/pm_open.py window     # the project window: every project in that list on one page
+python .pm/tools/pm_open.py shortcut   # one icon that opens the window from anywhere on this machine
+python .pm/tools/pm_open.py add        # put this project on the list ('forget' takes it off); pm_init and a session do it for you
 backlog browser
 python .pm/tools/pm_check.py --stale
 python -m unittest discover -s .pm/tests   # the package's own tests, standard library only

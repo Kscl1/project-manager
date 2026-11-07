@@ -16,12 +16,24 @@
   --sans:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Noto Sans",sans-serif;
   --mono:"Cascadia Mono",Consolas,ui-monospace,monospace;
 }
+@property --thumb{syntax:"<color>";inherits:true;initial-value:rgba(77,94,88,.16)}
 *{box-sizing:border-box;margin:0}
 html,body{height:100%}
 body{display:grid;grid-template-columns:clamp(236px,19vw,272px) minmax(0,1fr);height:100vh;overflow:hidden;background:var(--ground);color:var(--ink);font:15px/1.45 var(--sans);font-variant-numeric:tabular-nums}
 ::selection{background:var(--ask);color:#fff}
-*{scrollbar-width:thin;scrollbar-color:#9fb1a6 transparent}
-:focus-visible{outline:2px solid var(--trouble);outline-offset:2px;border-radius:3px}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}
+::-webkit-scrollbar-button{display:none}
+::-webkit-scrollbar-thumb{background:var(--thumb) padding-box;border:3px solid transparent;border-radius:6px}
+::-webkit-scrollbar-thumb:hover{border-width:2px}
+.frame,.sheetbody,.projects,.drawer,.screen,.md pre{--thumb:rgba(77,94,88,.16);transition:--thumb .3s}
+.frame:hover,.sheetbody:hover,.projects:hover,.drawer:hover,.screen:hover,.md pre:hover,.frame:focus-within{--thumb:rgba(77,94,88,.52)}
+.projects{--thumb:rgba(232,241,236,.14)}
+.projects:hover{--thumb:rgba(232,241,236,.42)}
+.screen{--thumb:rgba(232,241,236,.18)}
+.screen:hover{--thumb:rgba(232,241,236,.46)}
+@supports not selector(::-webkit-scrollbar){*{scrollbar-width:thin;scrollbar-color:var(--thumb) transparent}}
+:focus-visible{outline:2px solid var(--ask);outline-offset:2px;border-radius:3px}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button[disabled]{cursor:default}
 svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
@@ -31,12 +43,18 @@ h1,h2,h3{font-weight:600}
 .rail{background:var(--rail);color:var(--rail-text);display:flex;flex-direction:column;padding:22px 0 18px 16px;min-height:0}
 .brand{font-size:16px;font-weight:600;padding:0 16px 18px 8px}
 .rail h2{font-size:13px;color:var(--rail-soft);padding:0 16px 8px 8px}
-.projects{list-style:none;padding:0;display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0}
-.proj{width:100%;text-align:left;padding:11px 16px 12px 12px;border-radius:7px 0 0 7px;transition:background .25s var(--ease)}
+.projects{position:relative;list-style:none;padding:0;display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0}
+.projects li{position:relative;z-index:1}
+.projects li.mark{position:absolute;z-index:0;left:0;right:0;top:0;background:var(--ground);border-radius:7px 0 0 7px;transition:transform .38s var(--ease),height .38s var(--ease)}
+.proj{width:100%;text-align:left;padding:11px 16px 12px 12px;border-radius:7px 0 0 7px;transition:background .25s var(--ease),color .25s var(--ease)}
 .proj:hover{background:var(--rail-up)}
-.proj[aria-current="true"]{background:var(--ground);color:var(--ink)}
+.proj[aria-current="true"],.proj[aria-current="true"]:hover{background:none;color:var(--ink)}
 .proj b{display:flex;justify-content:space-between;gap:8px;font-weight:600}
 .proj b span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.count.pop{animation:pop .36s var(--ease)}
+.tools i.live{position:relative}
+.tools i.live::after,.pip.live::after{content:"";position:absolute;inset:0;border-radius:50%;background:inherit;animation:breathe 2.6s var(--ease) infinite}
+body.away .tools i.live::after,body.away .pip.live::after{animation-play-state:paused}
 .count{font-size:13px;line-height:20px;min-width:24px;text-align:center;border-radius:3px;padding:0 5px;background:var(--trouble);color:#fff;flex:none}
 .proj .line{display:block;font-size:13px;color:var(--rail-soft);margin-top:1px}
 .proj[aria-current="true"] .line{color:var(--soft)}
@@ -51,7 +69,6 @@ h1,h2,h3{font-weight:600}
 .soon li{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--rail-line);font-size:13.5px}
 .soon li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .soon time{color:var(--rail-soft);white-space:nowrap}
-.railfoot{padding:12px 16px 0 8px;font-size:12.5px;color:var(--rail-soft);line-height:1.5}
 
 /* The main column */
 main{display:flex;flex-direction:column;min-width:0;min-height:0;padding:20px 28px 16px}
@@ -60,16 +77,17 @@ main{display:flex;flex-direction:column;min-width:0;min-height:0;padding:20px 28
 h1{font-size:25px;letter-spacing:-.01em}
 .head p{color:var(--soft)}
 .link{font-weight:600;color:var(--ask);text-decoration:underline;text-underline-offset:3px;padding:0 2px}
-.link:hover{color:var(--trouble)}
+.link:hover{color:var(--ask-deep)}
 .link.bad{color:var(--trouble)}
 .link[disabled]{color:var(--off);text-decoration:none}
 .head .link{margin-left:auto;font-size:13.5px}
 
 /* The drawer: cards stand on its bar, stuck work first, each step back a little shorter */
 .drawer{display:flex;align-items:flex-end;gap:10px;height:252px;padding:24px 14px 0;overflow-x:auto;overflow-y:hidden;background:linear-gradient(transparent 58%,var(--ground-deep));border-bottom:9px solid var(--drawer);border-radius:0 0 6px 6px}
-.c{position:relative;flex:1 0 190px;min-width:0;max-width:340px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--card-edge);border-bottom:0;border-radius:5px 5px 0 0;padding:12px 14px 10px;text-align:left;box-shadow:0 2px 7px var(--lift);transition:box-shadow .35s var(--ease),border-color .2s}
-.drawer.first .c{animation:rise .5s var(--ease) both}
-.c:hover,.c:focus-visible{border-color:var(--soft);box-shadow:0 5px 14px var(--lift)}
+.c{position:relative;flex:1 0 190px;min-width:0;max-width:340px;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--card-edge);border-bottom:0;border-radius:5px 5px 0 0;padding:12px 14px 10px;text-align:left;box-shadow:0 2px 7px var(--lift);transition:transform .32s var(--ease),box-shadow .32s var(--ease),border-color .2s}
+.drawer.first .c{animation:rise .62s var(--ease) both;animation-delay:calc(var(--i)*45ms)}
+.c:hover,.c:focus-visible{transform:translateY(-8px);border-color:var(--soft);box-shadow:0 10px 20px var(--lift)}
+.c:active{transform:translateY(-4px);transition-duration:.1s}
 .c.a0{height:206px}.c.a1{height:192px}.c.a2{height:178px}.c.a3{height:164px}
 .drawer.empty{height:auto;padding:10px 14px;background:none}
 .tab{position:absolute;top:-22px;left:12px;height:22px;display:flex;align-items:center;padding:0 10px;border-radius:5px 5px 0 0;color:#fff;font-size:12.5px;font-weight:600;background:var(--ask)}
@@ -84,7 +102,10 @@ h1{font-size:25px;letter-spacing:-.01em}
 .c .age{font-weight:600;color:var(--ink);flex:none}
 .c .age.hot{color:var(--trouble)}
 .none{color:var(--soft)}
-@keyframes rise{from{transform:translateY(10px)}to{transform:none}}
+@keyframes rise{from{transform:translateY(36px)}to{transform:none}}
+@keyframes pop{40%{transform:scale(1.22)}}
+@keyframes breathe{0%{transform:scale(1);opacity:.5}70%,100%{transform:scale(2.5);opacity:0}}
+@keyframes draw{from{stroke-dashoffset:15}to{stroke-dashoffset:0}}
 
 /* Now */
 .now h2{font-size:15px;padding-bottom:7px}
@@ -94,35 +115,54 @@ h1{font-size:25px;letter-spacing:-.01em}
 .now li b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .now li span{display:block;font-size:12.5px;color:var(--soft);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .now time{font-size:13px;color:var(--soft)}
-.pip{width:8px;height:8px;border-radius:50%;background:var(--good);align-self:center}
+.pip{position:relative;display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);align-self:center}
 .pip.done{background:none;box-shadow:inset 0 0 0 1.5px var(--off)}
 .pip.bad{background:var(--trouble)}
 
 /* One tool at a time */
 .tabs{display:flex;align-items:flex-end;gap:24px;flex:none;margin-top:14px;border-bottom:1px solid var(--line)}
-.tablist{display:flex;gap:24px}
-.tablist button{padding:6px 1px 7px;font-weight:600;color:var(--soft);border-bottom:3px solid transparent;margin-bottom:-1px}
+.tablist{position:relative;display:flex;gap:24px}
+.tablist button{padding:6px 1px 7px;font-weight:600;color:var(--soft);border-bottom:3px solid transparent;margin-bottom:-1px;transition:color .2s}
 .tablist button:hover{color:var(--ink)}
-.tablist button[aria-selected="true"]{color:var(--ink);border-color:var(--trouble)}
-#wide{padding-bottom:7px;font-size:13.5px}
-.owner{margin-left:auto;display:flex;align-items:center;gap:7px;padding-bottom:7px;font-size:13px;color:var(--soft)}
-.owner svg{color:var(--good)}
-body.wide .top{display:none}
-body.wide .tabs{margin-top:0}
-.frame{position:relative;flex:1;min-height:0;margin-top:10px;background:var(--sheet);border:1px solid var(--line);border-radius:6px;overflow:auto}
+.tablist button[aria-selected="true"]{color:var(--ink)}
+#tabmark{position:absolute;left:0;bottom:-1px;width:100px;height:3px;background:var(--ask);transform-origin:0 0;transition:transform .34s var(--ease)}
+.actions{margin-left:auto;display:flex;align-items:center;gap:4px;padding-bottom:5px}
+.act{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 9px;border-radius:5px;font-size:13.5px;font-weight:600;color:var(--soft);text-decoration:none;transition:background .2s,color .2s}
+.act:hover{background:var(--ground-deep);color:var(--ink)}
+.act svg{transition:transform .28s var(--ease)}
+.act:hover svg{transform:scale(1.14)}
+.act:active{transform:scale(.97)}
+.act.bad{color:var(--trouble)}
+.act.proof{color:var(--good);padding:0 4px}
+.act.proof:hover{background:none;color:var(--good)}
+.fold{flex:none;display:grid;grid-template-rows:1fr;transition:grid-template-rows .4s var(--ease)}
+.fold>.top{min-height:0;overflow:hidden;transition:opacity .24s,visibility .4s}
+body.wide .fold{grid-template-rows:0fr}
+body.wide .fold>.top{opacity:0;visibility:hidden}
+main:fullscreen .fold{display:none}
+.tabs{transition:margin-top .4s var(--ease)}
+body.wide .tabs,main:fullscreen .tabs{margin-top:0}
+main:fullscreen{background:var(--ground)}
+#trouble{color:var(--trouble);font-weight:600;font-size:13.5px}
+.stage{position:relative;flex:1;min-height:0;margin-top:10px;display:flex;overflow:hidden;border:1px solid var(--line);border-radius:6px;background:var(--sheet)}
+.frame{position:relative;flex:1;min-width:0;overflow:auto;scrollbar-gutter:stable}
 #pane{min-height:100%}
 #pane[hidden]{display:none}
 .mapview{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
 .mapview[hidden]{display:none}
 
 /* The board */
-.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:22px;padding:14px 20px}
-.board h3{font-size:13px;color:var(--soft);padding-bottom:6px}
-.row{padding:8px 0;border-top:1px solid var(--row);font-size:14.5px}
-.row small{display:flex;gap:10px;font:12px var(--mono);color:var(--soft)}
+.board{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 18px;padding:0 14px 14px;align-items:start}
+.board h3{position:sticky;top:0;z-index:1;font-size:13px;color:var(--soft);padding:12px 6px 7px;background:var(--sheet);border-bottom:1px solid var(--line)}
+.board h3 b{color:var(--ink);font-weight:600}
+.row{display:block;width:100%;text-align:left;padding:8px 6px;border-bottom:1px solid var(--row);border-radius:4px;font-size:14.5px;line-height:1.35;transition:background .18s}
+.row:hover,.row[aria-current="true"]{background:var(--row)}
+.row small{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:3px;font:12px var(--mono);color:var(--soft)}
+.row small time{font-family:var(--sans)}
 .row.high{font-weight:600}
 .row.high small{font-weight:400}
-.row.wait{background:var(--card);box-shadow:-8px 0 0 var(--card),8px 0 0 var(--card);border-top-color:var(--card-edge)}
+.row.wait{background:var(--card);border-bottom-color:var(--card-edge)}
+.row.wait:hover,.row.wait[aria-current="true"]{background:#f1ead6}
 .flag{font:600 12px var(--sans);color:var(--ask)}
 .flag.bad{color:var(--trouble)}
 
@@ -130,9 +170,82 @@ body.wide .tabs{margin-top:0}
 table{width:100%;border-collapse:collapse;font-size:14.5px}
 caption{text-align:left;font-size:13px;font-weight:600;color:var(--soft);padding:12px 20px 0}
 th{text-align:left;font-size:13px;font-weight:600;color:var(--soft);padding:8px 20px 6px}
-td{padding:8px 20px;border-top:1px solid var(--row);vertical-align:top}
-td.why{color:var(--soft);font-size:13.5px;max-width:44ch}
-td b{color:var(--trouble);font-weight:600}
+td{padding:9px 20px 9px 0;border-top:1px solid var(--row);vertical-align:top}
+th{padding-left:0;padding-right:20px;white-space:nowrap}
+th:first-child,td:first-child{padding-left:20px}
+td small{display:block;font-size:12.5px;color:var(--soft);margin-top:1px}
+td.num{white-space:nowrap;text-align:right}
+th.num{text-align:right}
+td.bad{color:var(--trouble);font-weight:600}
+tbody tr[data-job],tbody tr[data-pane]{cursor:pointer;transition:background .18s}
+tbody tr[data-job]:hover,tbody tr[data-pane]:hover,tbody tr[aria-current="true"]{background:var(--row)}
+table.runs{table-layout:fixed}
+.runs .a{width:19%}.runs .st{width:13%}.runs .side{width:15%}.runs .num{width:92px}.runs .cost{width:112px}
+.stage:has(.sheetwrap:not([hidden])) .side{display:none}
+.stage:has(.sheetwrap:not([hidden])) .runs .a{width:30%}
+.door{padding:0;font-weight:600;text-align:left;line-height:1.35}
+.door:hover{text-decoration:underline;text-underline-offset:3px}
+.model{font-weight:600;white-space:nowrap}
+.stuckline{color:var(--trouble)}
+
+/* The detail sheet: a card pulled out of the drawer, the tool stays readable beside it */
+.sheetwrap{flex:none;width:min(600px,56%);min-width:0;display:flex;padding:30px 0 0;border-left:1px solid var(--line);background:var(--ground-deep);animation:slide .32s var(--ease) both}
+.sheetwrap[hidden]{display:none}
+.sheetcard{position:relative;flex:1;min-width:0;display:flex;flex-direction:column;margin:0 0 0 12px;background:var(--card);border:1px solid var(--card-edge);border-right:0;border-bottom:0;border-radius:5px 0 0 0}
+.sheetcard .tab{top:-23px;left:14px;height:23px}
+.sheethead .ends{display:flex;align-items:center;gap:2px}
+.sheethead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;padding:14px 12px 11px 20px;border-bottom:1px solid var(--card-edge)}
+.sheethead h2{font-size:19px;line-height:1.28;text-wrap:balance}
+.shut{width:32px;height:32px;display:grid;place-items:center;border-radius:5px;color:var(--soft);transition:background .18s,color .18s}
+.shut:hover{background:var(--card-edge);color:var(--ink)}
+.facts{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px 16px;margin-top:6px}
+.facts div{min-width:0}
+.facts dt{font-size:12px;color:var(--soft)}
+.facts dd{margin:0;font-size:13.5px;font-weight:600;overflow-wrap:anywhere}
+.sheetbody{flex:1;min-height:0;overflow:auto;padding:4px 20px 28px;font-size:14.5px;line-height:1.55}
+.sheetbody>h3{font-size:14px;color:var(--ink);margin:18px 0 6px}
+.sheetbody{interpolate-size:allow-keywords}
+.sheetbody details{border-bottom:1px solid var(--card-edge);padding:9px 0}
+.sheetbody details:last-child{border-bottom:0}
+.sheetbody summary{display:flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;font-size:14px;border-radius:3px;list-style:none;transition:color .18s}
+.sheetbody summary::-webkit-details-marker{display:none}
+.sheetbody summary:hover{color:var(--ask)}
+.sheetbody summary svg{width:13px;height:13px;color:var(--soft);transition:transform .28s var(--ease)}
+.sheetbody details[open]>summary svg{transform:rotate(90deg)}
+.sheetbody summary small{font-weight:400;color:var(--soft)}
+.sheetbody details::details-content{block-size:0;overflow:clip;opacity:0;transition:block-size .3s var(--ease),opacity .22s,content-visibility .3s allow-discrete}
+.sheetbody details[open]::details-content{block-size:auto;opacity:1}
+.sheetbody .inner{padding-top:7px}
+.screen{font:12.5px/1.45 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere;max-height:46vh;overflow:auto;background:var(--rail);color:var(--rail-text);border-radius:5px;padding:10px 12px}
+.kid{display:block;width:100%;text-align:left;padding:5px 0;border-bottom:1px solid var(--card-edge);transition:color .18s}
+.kid:hover{color:var(--ask)}
+.kid small{display:block;font:12px var(--mono);color:var(--soft)}
+.facts button{padding:0;font-weight:600;color:var(--ask);text-decoration:underline;text-underline-offset:2px;margin-right:6px}
+.facts .labels{display:flex;flex-wrap:wrap;gap:3px 6px}
+.md{overflow-wrap:anywhere}
+.md p{white-space:pre-line;margin:0 0 9px}
+.md h4,.md h5{font-size:14.5px;font-weight:600;margin:13px 0 4px}
+.md ul,.md ol{margin:0 0 9px;padding-left:20px}
+.md li{margin-bottom:3px}
+.md code{font:12.5px var(--mono);background:var(--ground);border-radius:3px;padding:1px 4px}
+.md pre{font:12.5px/1.5 var(--mono);background:var(--ground);border-radius:4px;padding:8px 10px;margin:0 0 9px;overflow-x:auto;white-space:pre}
+.md a{color:var(--ask);text-underline-offset:3px}
+.md table{font-size:13px;margin-bottom:9px}
+.md th,.md td{padding:4px 12px 4px 0}
+.criteria{list-style:none;padding:0;margin:0}
+.criteria li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:7px;padding:5px 0;border-bottom:1px solid var(--card-edge)}
+.criteria svg{margin-top:3px;color:var(--good)}
+.criteria .did path{stroke-dasharray:15;animation:draw .42s var(--ease) both;animation-delay:calc(160ms + var(--i)*38ms)}
+.criteria .open svg{color:var(--off)}
+.criteria .open{font-weight:600}
+.dim{color:var(--soft)}
+@keyframes slide{from{transform:translateX(26px)}to{transform:none}}
+::view-transition-old(root),::view-transition-new(root){animation:none}
+::view-transition-group(pulled){animation-duration:.38s;animation-timing-function:var(--ease);z-index:5}
+::view-transition-old(pulled){animation:fadeout .2s both}
+::view-transition-new(pulled){animation:fadein .24s .06s both}
+@keyframes fadeout{to{opacity:0}}
+@keyframes fadein{from{opacity:0}}
 .off-state{display:grid;place-content:center;justify-items:start;gap:8px;min-height:240px;padding:20px;max-width:620px;margin:auto}
 .off-state h3{font-size:18px}
 .off-state p{color:var(--soft)}
@@ -140,20 +253,24 @@ td b{color:var(--trouble);font-weight:600}
 .btn{display:inline-flex;align-items:center;gap:7px;padding:6px 13px;border-radius:5px;background:var(--ask);color:#fff;font-weight:600;font-size:14px;transition:background .2s}
 .btn:hover{background:var(--ask-deep)}
 .btn[disabled]{background:var(--off)}
-.note{flex:none;display:flex;justify-content:space-between;gap:12px;padding-top:8px;font-size:12.5px;color:var(--soft)}
-#status.bad{color:var(--trouble);font-weight:600}
 
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (prefers-reduced-motion:reduce){
+  .c:hover,.c:focus-visible,.c:active,.act:hover svg,.act:active{transform:none}
+  .drawer.first .c,.count.pop,.sheetwrap,.criteria .did path{animation:none}
+  .tools i.live::after,.pip.live::after{display:none}
+  #tabmark,.projects li.mark,.fold,.tabs,.sheetbody summary svg,.sheetbody details::details-content{transition:none}
+}
 @media (max-width:1180px){.top{grid-template-columns:minmax(0,1fr)}.now{display:none}}
 @media (max-width:1360px){.c{padding-left:11px;padding-right:11px}.c .meta{gap:6px}}
 @media (max-width:860px){
   body{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);overflow:auto;height:auto;min-height:100vh}
-  .rail{padding:12px}.brand,.rail h2,.soon,.railfoot,.tools,.proj .line{display:none}
+  .rail{padding:12px}.brand,.rail h2,.soon,.tools,.proj .line{display:none}
   .projects{flex-direction:row;overflow-x:auto}.proj{border-radius:6px;white-space:nowrap;padding:7px 10px}
   main{padding:14px}
   .drawer{height:auto;flex-direction:column;align-items:stretch;padding:26px 10px 0;gap:26px;overflow:visible}
   .c,.c.a0,.c.a1,.c.a2,.c.a3{height:auto;flex:none;max-width:none;min-height:96px}
-  .frame{min-height:320px}.owner,#wide{display:none}
+  .stage{min-height:320px}.actions{display:none}
+  .sheetwrap{position:absolute;inset:0;width:auto;z-index:2}
 }
 @media (max-height:760px) and (min-width:861px){
   .drawer{height:212px}.c.a0{height:168px}.c.a1{height:158px}.c.a2{height:148px}.c.a3{height:138px}
@@ -167,70 +284,87 @@ td b{color:var(--trouble);font-weight:600}
   <h2 id="railTitle"></h2>
   <ul class="projects" id="projects"></ul>
   <section class="soon" id="soonBox" hidden><h2 id="soonTitle"></h2><ul id="soon"></ul></section>
-  <div class="railfoot" id="foot"></div>
 </aside>
 <main>
-  <section class="top" aria-labelledby="waitTitle">
+  <div class="fold"><section class="top" aria-labelledby="waitTitle">
     <div>
       <div class="head">
-        <h1 id="waitTitle"></h1><p id="waitNote"></p>
+        <h1 id="waitTitle"></h1><span id="trouble" role="status"></span>
         <button class="link" id="filter" type="button"></button>
       </div>
       <div class="drawer" id="drawer"></div>
     </div>
     <aside class="now" aria-labelledby="nowTitle"><h2 id="nowTitle"></h2><ul id="now"></ul></aside>
-  </section>
+  </section></div>
   <div class="tabs">
     <nav class="tablist" role="tablist" id="tabs">
       <button role="tab" aria-controls="frame" data-tool="board" type="button"></button>
       <button role="tab" aria-controls="frame" data-tool="map" type="button"></button>
       <button role="tab" aria-controls="frame" data-tool="agents" type="button"></button>
+      <i id="tabmark" aria-hidden="true"></i>
     </nav>
-    <button class="link" id="wide" type="button"></button>
-    <div class="owner" id="owner"></div>
+    <div class="actions" id="actions"></div>
   </div>
-  <section class="frame" id="frame" role="tabpanel" tabindex="0"><div id="pane"></div></section>
-  <div class="note"><span id="status" role="status"></span><span id="keys"></span></div>
+  <div class="stage">
+    <section class="frame" id="frame" role="tabpanel" tabindex="0"><div id="pane"></div></section>
+    <aside class="sheetwrap" id="sheet" hidden></aside>
+  </div>
 </main>
 <script>
 const TEXT = {
   en: {
-    brand: "project window", projects: "Projects", soon: "Coming up", foot: "It writes no task and starts no agent. Close it and the work carries on.",
-    waiting: n => n === 1 ? "1 card waiting for you" : `${n} cards waiting for you`, empty: "The drawer is empty", order: "Stuck first, then the oldest.",
-    unknown: "Not every project could be read", unknownText: "This list may be missing cards; the projects on the left say which ones.",
-    none: "Nothing waits for you here. Running agents show on the right.", only: "This project only", all: "All projects",
+    brand: "project window", projects: "Projects", soon: "Coming up",
+    waiting: n => n === 1 ? "1 card waiting for you" : `${n} cards waiting for you`, empty: "The drawer is empty",
+    unknown: "Not every project could be read",
+    none: "Nothing waits for you here.", only: "This project only", all: "All projects",
     now: "Now", idle: "No agent is running", noHerdr: "Herdr did not answer", finished: "Finished",
     board: "Board", map: "Map", agents: "Agents", close: "Close the drawer", open: n => `Open the drawer · ${n}`,
-    stuck: "Stuck", decision: "Decision", review: "Review", openBoard: "Open on the board", openAgents: "Open in agents",
-    keys: "Keys: 1 2 3 tools, [ ] projects. Inside the map, click outside it first.",
+    stuck: "Stuck", decision: "Decision", review: "Review", openBoard: "Open the task", openAgents: "Open the job",
     Active: "Active", Ready: "Ready", "Owner check": "Owner check", "In review": "In review", Done: "Recently done",
     waitsYou: "waits for you", blocked: "blocked", noTasks: "No tasks yet.",
     mapNone: "This project has no map", mapNoneText: "Add one with pm_init --map.", mapOff: name => `${name}: the map is stopped`,
-    mapOffText: "It starts only when you ask, so the wrong project is never shown.", mapForeign: name => `${name}: another program holds the map's port`,
-    mapForeignText: "Start looks for a free port above it.", start: "Start", starting: "Starting…", stop: "Stop", from: name => `from ${name}`,
-    agent: "Agent", job: "Job", state: "State", time: "Time", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
-    gone: "The folder is gone", stateless: "State could not be read", agentsRunning: n => `${n} running`, last: at => `last work ${at}`,
-    updated: at => `Updated ${at}`, down: "The bridge does not answer; what you see may be old.", noProject: "No project yet. Run python .pm/tools/pm_open.py window in one.",
-    min: "min", hour: "h", day: "d", today: "today", tomorrow: "tomorrow", opened: (what, tool) => `${what}: ${tool} opened.`,
+    mapForeign: name => `${name}: another program holds the map's port`,
+    start: "Start", starting: "Starting…", stop: "Stop", from: name => `from ${name}`,
+    newTab: "New tab", full: "Full screen", small: "Exit full screen", shut: "Close",
+    agent: "Agent", job: "Job", state: "State", time: "Time", by: "Started by", spent: "API estimate", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
+    pane: pane => `Herdr pane ${pane}`, tokens: "tokens", turns: "turns", nobody: "not recorded",
+    reading: "Reading…", notRead: "Could not be read", inBacklog: "Open in Backlog", opening: "Opening…", children: "Subtasks", screen: "On screen now", noScreen: "The pane can't be read right now.", folder: "Folder", pane0: "Pane",
+    fields: {assignee: "Assignee", reporter: "Reporter", labels: "Labels", dependencies: "Depends on", references: "References", documentation: "Documents", priority: "Priority", milestone: "Milestone", type: "Type", parent_task_id: "Part of", created_date: "Opened", updated_date: "Updated"},
+    sections: {"": "Text", Description: "Description", "Acceptance Criteria": "Acceptance criteria", "Definition of Done": "Definition of done", "Implementation Plan": "Plan", "Implementation Notes": "Notes", "Final Summary": "Final summary"},
+    model: "Model", thinking: "Thinking", harness: "Tool", task: "Task", cost: "Cost at API prices", why: "What happened",
+    brief: "Brief", result: "Result", attempts: "Attempts", log: "Log", cut: "Only the first part is shown.", noResult: "No result yet.", attempt: n => `Attempt ${n}`,
+    high: "high", medium: "medium", low: "low", xhigh: "very high",
+    states: {verified: "verified", "artifact-present": "result written", "check-failed": "check failed", "handed-over": "handed to you", failed: "failed", blocked: "blocked", stopped: "stopped", pending: "waiting", started: "started", checking: "checking", removed: "removed", working: "working", running: "working", busy: "working", idle: "idle", done: "done", unknown: "unknown"},
+    gone: "The folder is gone", stateless: "State could not be read", upgrade: "Its .pm needs an upgrade", agentsRunning: n => `${n} running`, last: at => `last work ${at}`,
+    down: "The bridge does not answer; what you see may be old.", noProject: "No project yet. Run python .pm/tools/pm_open.py window in one.",
+    min: "min", hour: "h", day: "d", today: "today", tomorrow: "tomorrow",
   },
   tr: {
-    brand: "proje penceresi", projects: "Projeler", soon: "Yaklaşan", foot: "Görevlere yazmaz, ajan başlatmaz. Kapatınca iş olduğu gibi sürer.",
-    waiting: n => `Seni bekleyen ${n} kart`, empty: "Çekmece boş", order: "Takılan en önde, sonra en eski.",
-    unknown: "Her proje okunamadı", unknownText: "Bu listede eksik kart olabilir; hangi projeler olduğu solda yazıyor.",
-    none: "Burada seni bekleyen bir şey yok. Çalışan ajanlar sağda görünür.", only: "Yalnız bu proje", all: "Tüm projeler",
+    brand: "proje penceresi", projects: "Projeler", soon: "Yaklaşan",
+    waiting: n => `Seni bekleyen ${n} kart`, empty: "Çekmece boş",
+    unknown: "Her proje okunamadı",
+    none: "Burada seni bekleyen bir şey yok.", only: "Yalnız bu proje", all: "Tüm projeler",
     now: "Şu an", idle: "Çalışan ajan yok", noHerdr: "Herdr cevap vermedi", finished: "Biten",
     board: "Pano", map: "Harita", agents: "Ajanlar", close: "Çekmeceyi kapat", open: n => `Çekmeceyi aç · ${n} kart`,
-    stuck: "Takıldı", decision: "Karar", review: "İnceleme", openBoard: "Panoda aç", openAgents: "Ajanlarda aç",
-    keys: "Kısayol: 1 2 3 araç, [ ] proje. Harita içindeyken önce dışına tıkla.",
+    stuck: "Takıldı", decision: "Karar", review: "İnceleme", openBoard: "Görevi aç", openAgents: "İşi aç",
     Active: "Devam eden", Ready: "Hazır", "Owner check": "Sende", "In review": "İncelemede", Done: "Son biten",
     waitsYou: "seni bekliyor", blocked: "engelli", noTasks: "Henüz görev yok.",
     mapNone: "Bu projede harita yok", mapNoneText: "pm_init --map ile eklenir.", mapOff: name => `${name}: harita kapalı`,
-    mapOffText: "Yalnız sen isteyince başlar; yanlış proje gösterilmez.", mapForeign: name => `${name}: haritanın portunda başka bir program var`,
-    mapForeignText: "Başlat, üstündeki boş bir portu bulur.", start: "Başlat", starting: "Başlıyor…", stop: "Durdur", from: name => `${name} klasöründen`,
-    agent: "Ajan", job: "İş", state: "Durum", time: "Zaman", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
-    gone: "Klasör bulunamadı", stateless: "Durum okunamadı", agentsRunning: n => `${n} ajan çalışıyor`, last: at => `son iş ${at}`,
-    updated: at => `Güncellendi ${at}`, down: "Köprü cevap vermiyor; gördüklerin eski olabilir.", noProject: "Henüz proje yok. Bir projede python .pm/tools/pm_open.py window çalıştır.",
-    min: "dk", hour: "sa", day: "gün", today: "bugün", tomorrow: "yarın", opened: (what, tool) => `${what}: ${tool} açıldı.`,
+    mapForeign: name => `${name}: haritanın portunda başka bir program var`,
+    start: "Başlat", starting: "Başlıyor…", stop: "Durdur", from: name => `${name} klasöründen`,
+    newTab: "Yeni sekme", full: "Tam ekran", small: "Küçült", shut: "Kapat",
+    agent: "Ajan", job: "İş", state: "Durum", time: "Süre", by: "Başlatan", spent: "API tahmini", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
+    pane: pane => `Herdr paneli ${pane}`, tokens: "token", turns: "tur", nobody: "kayıtlı değil",
+    reading: "Okunuyor…", notRead: "Okunamadı", inBacklog: "Backlog'da aç", opening: "Açılıyor…", children: "Alt görevler", screen: "Şu anki ekran", noScreen: "Panel şu an okunamıyor.", folder: "Klasör", pane0: "Panel",
+    fields: {assignee: "Atanan", reporter: "Açan", labels: "Etiketler", dependencies: "Bağlı olduğu", references: "Kaynaklar", documentation: "Belgeler", priority: "Öncelik", milestone: "Kilometre taşı", type: "Tür", parent_task_id: "Üst görev", created_date: "Açıldı", updated_date: "Güncellendi"},
+    sections: {"": "Metin", Description: "Açıklama", "Acceptance Criteria": "Kabul ölçütleri", "Definition of Done": "Bitti tanımı", "Implementation Plan": "Plan", "Implementation Notes": "Notlar", "Final Summary": "Kapanış özeti"},
+    model: "Model", thinking: "Düşünme", harness: "Araç", task: "Görev", cost: "API fiyatıyla maliyet", why: "Ne oldu",
+    brief: "Brief", result: "Sonuç", attempts: "Denemeler", log: "Günlük", cut: "Yalnız ilk bölümü gösteriliyor.", noResult: "Henüz sonuç yok.", attempt: n => `${n}. deneme`,
+    high: "yüksek", medium: "orta", low: "düşük", xhigh: "çok yüksek",
+    states: {verified: "doğrulandı", "artifact-present": "sonuç yazıldı", "check-failed": "kontrolden kaldı", "handed-over": "sana devredildi", failed: "başarısız", blocked: "engellendi", stopped: "durduruldu", pending: "sırada", started: "başladı", checking: "kontrol ediliyor", removed: "kaldırıldı", working: "çalışıyor", running: "çalışıyor", busy: "çalışıyor", idle: "boşta", done: "bitti", unknown: "bilinmiyor"},
+    gone: "Klasör bulunamadı", stateless: "Durum okunamadı", upgrade: ".pm yükseltilmeli", agentsRunning: n => `${n} ajan çalışıyor`, last: at => `son iş ${at}`,
+    down: "Köprü cevap vermiyor; gördüklerin eski olabilir.", noProject: "Henüz proje yok. Bir projede python .pm/tools/pm_open.py window çalıştır.",
+    min: "dk", hour: "sa", day: "gün", today: "bugün", tomorrow: "yarın",
   },
 };
 const lang = (navigator.language || "en").toLowerCase().startsWith("tr") ? "tr" : "en";
@@ -240,16 +374,95 @@ const ICON = {
   go: '<svg viewBox="0 0 16 16"><path d="M3 8h9M8.5 4.5L12 8l-3.5 3.5"/></svg>',
   ok: '<svg viewBox="0 0 16 16"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>',
   play: '<svg viewBox="0 0 16 16"><path d="M5 3.5l8 4.5-8 4.5z"/></svg>',
+  stop: '<svg viewBox="0 0 16 16"><rect x="4" y="4" width="8" height="8" rx="1"/></svg>',
+  out: '<svg viewBox="0 0 16 16"><path d="M9.5 3H13v3.5M13 3L7.5 8.5M11.5 9.5V13H3V4.5h3.5"/></svg>',
+  full: '<svg viewBox="0 0 16 16"><path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3"/></svg>',
+  small: '<svg viewBox="0 0 16 16"><path d="M6 3v3H3M13 6h-3V3M10 13v-3h3M3 10h3v3"/></svg>',
+  drawer: '<svg viewBox="0 0 16 16"><path d="M3 3.5h10v9H3zM3 7h10"/></svg>',
+  shut: '<svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>',
+  box: '<svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>',
+  more: '<svg viewBox="0 0 16 16"><path d="M6 3.5L10.5 8 6 12.5"/></svg>',
 };
 const REFRESH_MS = 15000;
 const COLUMNS = ["Active", "In review", "Owner check", "Ready", "Done"];
 const WORKING = ["working", "running", "busy"];
+const STUCK = ["handed-over", "blocked", "failed", "check-failed"];
 let projects = [], states = {}, cur = null, tool = "board", only = false, failed = false, mapNote = "";
+let open = null;  // the task, job or agent the sheet shows: {kind, id, project, from, live}
+let lastTop = null, shown = "";  // where the rail's mark stands; what was last drawn, so an unchanged refresh draws nothing
+const counts = {};
+const EASE = "cubic-bezier(.16,1,.3,1)";
+const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function stored(name) {
+  try {
+    const value = JSON.parse(localStorage.getItem(name));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];  // a broken or blocked store must never stop the page
+  }
+}
+const closed = new Set(stored("pm-window-closed"));  // the sections a person keeps shut
 const frames = {};  // one map frame per project, kept while the page lives, so a map stays where it was left
 const $ = id => document.getElementById(id);
 const esc = text => String(text ?? "").replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
 const P = () => projects.find(p => p.id === cur);
 const S = id => (states[id] && states[id].state) || null;
+
+/* Words for what the files hold in codes */
+const LEVEL = /-(low|medium|high|xhigh)$/;
+const nice = model => String(model || "").split("/").pop().replace(LEVEL, "").replace(/(\d)-(?=\d)/g, "$1.").replace(/-(?=\d)/g, " ").replace(/-([a-z])/g, (_, ch) => ` ${ch.toUpperCase()}`).replace(/^./, ch => ch.toUpperCase()).replace(/^Gpt /, "GPT-");
+const thought = job => level(job.thinking || (String(job.model || "").match(LEVEL) || [])[1]);
+const cap = text => String(text || "").replace(/^./, ch => ch.toLocaleUpperCase(lang));
+const word = text => T.states[text] || text || "";
+const level = text => T[text] || text || "";
+const number = value => new Intl.NumberFormat(lang, {maximumFractionDigits: 1, notation: "compact"}).format(value);
+const money = value => new Intl.NumberFormat(lang, {style: "currency", currency: "USD", maximumFractionDigits: 2}).format(value);
+const spent = job => job.cost_usd ? `${job.usage_partial ? "≥ " : ""}${money(job.cost_usd)}` : "";
+function lasted(from, to) {
+  const start = Date.parse(from || "");
+  if (!start) return "";
+  const minutes = Math.max(0, Math.round(((Date.parse(to || "") || Date.now()) - start) / 60000));
+  return minutes < 60 ? `${minutes} ${T.min}` : `${Math.floor(minutes / 60)} ${T.hour}${minutes % 60 ? ` ${minutes % 60} ${T.min}` : ""}`;
+}
+function byWhom(job, state) {
+  const who = job.started_by;
+  if (!who) return T.nobody;
+  const parent = who.by_job && (state.jobs || []).find(j => `${j.run}/${j.job}` === who.by_job);
+  return parent ? nice(parent.model) : who.lead || who.tool || T.nobody;
+}
+const taskName = (state, id) => ((state.board || []).find(t => t.id === id) || {}).title || "";
+
+/* Just enough Markdown for task notes and briefs; everything is escaped first, only web links stay links */
+function inline(text) {
+  return esc(text).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+}
+function markdown(text) {
+  const out = [], lines = String(text || "").split(/\r?\n/);
+  for (let i = 0; i < lines.length;) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    if (line.startsWith("```")) {
+      const code = [];
+      for (i++; i < lines.length && !lines[i].startsWith("```"); i++) code.push(lines[i]);
+      i++;
+      out.push(`<pre>${esc(code.join("\n"))}</pre>`);
+    } else if (/^#{1,6}\s/.test(line)) {
+      out.push(`<h4>${inline(line.replace(/^#+\s*/, ""))}</h4>`);
+      i++;
+    } else if (/^\s*([-*]|\d+\.)\s/.test(line)) {
+      const tag = /^\s*\d/.test(line) ? "ol" : "ul", items = [];
+      for (; i < lines.length && /^\s*([-*]|\d+\.)\s/.test(lines[i]); i++) items.push(`<li>${inline(lines[i].replace(/^\s*([-*]|\d+\.)\s+/, ""))}</li>`);
+      out.push(`<${tag}>${items.join("")}</${tag}>`);
+    } else {
+      const words = [];
+      for (; i < lines.length && lines[i].trim() && !/^(#{1,6}\s|```|\s*([-*]|\d+\.)\s)/.test(lines[i]); i++) words.push(lines[i]);
+      out.push(`<p>${inline(words.join("\n"))}</p>`);
+    }
+  }
+  return `<div class="md">${out.join("")}</div>`;
+}
 
 function ago(iso) {
   const then = Date.parse(iso || "");
@@ -279,16 +492,29 @@ function renderProjects() {
     const state = S(p.id), count = state ? state.waiting.length : 0;
     const working = state && state.agents ? state.agents.filter(a => WORKING.includes(a.status)).length : 0;
     const lastAt = state && state.events[0] ? state.events[0].time : null;
+    const popped = counts[p.id] !== undefined && counts[p.id] !== count;
+    counts[p.id] = count;
     const words = [];
     if (!p.found) words.push(T.gone);
-    else if (!state) words.push(T.stateless);
+    else if (!state) words.push(/upgrade/.test((states[p.id] || {}).why || "") ? T.upgrade : T.stateless);
     if (working) words.push(T.agentsRunning(working));
     if (lastAt) words.push(T.last(ago(lastAt)));
     return `<li><button class="proj" type="button" data-p="${esc(p.id)}" aria-current="${p.id === cur}">
-      <b><span>${esc(p.name)}</span>${count ? `<span class="count">${count}</span>` : ""}</b>
+      <b><span>${esc(p.name)}</span>${count ? `<span class="count ${popped ? "pop" : ""}">${count}</span>` : ""}</b>
       <span class="line">${esc(words.join(" · ")) || "&nbsp;"}</span>
-      <span class="tools"><span><i class="${state ? "" : "off"}"></i>${T.board}</span><span><i class="${p.map.state === "running" ? "" : "off"}"></i>${T.map}</span><span><i class="${working ? "" : "off"}"></i>${T.agents}</span></span></button></li>`;
+      <span class="tools"><span><i class="${state ? "" : "off"}"></i>${T.board}</span><span><i class="${p.map.state === "running" ? "" : "off"}"></i>${T.map}</span><span><i class="${working ? "live" : "off"}"></i>${T.agents}</span></span></button></li>`;
   }).join("");
+  const here = document.querySelector('.proj[aria-current="true"]');
+  if (!here) return;
+  const mark = document.createElement("li");
+  mark.className = "mark";
+  mark.setAttribute("aria-hidden", "true");
+  mark.style.height = `${here.offsetHeight}px`;
+  mark.style.transform = `translateY(${lastTop ?? here.parentElement.offsetTop}px)`;
+  $("projects").append(mark);
+  lastTop = here.parentElement.offsetTop;
+  void mark.offsetWidth;
+  mark.style.transform = `translateY(${lastTop}px)`;
 }
 
 function renderSoon() {
@@ -303,16 +529,14 @@ function renderDrawer() {
   const cards = allCards(), list = only ? cards.filter(c => c.project.id === cur) : cards;
   const unread = (only ? projects.filter(p => p.id === cur) : projects).some(p => !S(p.id));
   $("waitTitle").textContent = list.length ? T.waiting(list.length) : unread ? T.unknown : T.empty;
-  $("waitNote").textContent = !list.length ? "" : unread ? T.unknownText : T.order;
   $("filter").textContent = only ? T.all : T.only;
-  $("wide").textContent = document.body.classList.contains("wide") ? T.open(cards.length) : T.close;
-  $("wide").classList.toggle("bad", document.body.classList.contains("wide") && cards.some(c => c.kind === "stuck"));
+  renderActions();
   $("drawer").classList.toggle("empty", !list.length);
-  $("drawer").innerHTML = list.length ? list.map((c, i) => `<button class="c a${Math.min(i, 3)}" type="button" data-card="${i}" data-key="${esc(`${c.project.id}|${c.kind}|${c.title}|${c.ref}`)}">
+  $("drawer").innerHTML = list.length ? list.map((c, i) => `<button class="c a${Math.min(i, 3)}" style="--i:${Math.min(i, 6)}" type="button" data-card="${i}" data-key="${esc(`${c.project.id}|${c.kind}|${c.title}|${c.ref}`)}">
       <span class="tab ${c.kind === "stuck" ? "bad" : ""}">${T[c.kind]}</span><h3>${esc(c.title)}</h3><p>${esc(c.text)}</p>
       <span class="go">${c.tool === "board" ? T.openBoard : T.openAgents}${ICON.go}</span>
       <span class="meta"><span>${esc(c.project.name)}${c.ref ? ` · ${esc(c.ref)}` : ""}</span><span class="age ${c.kind === "stuck" ? "hot" : ""}">${esc(ago(c.since))}</span></span></button>`).join("")
-    : `<p class="none">${unread ? T.unknownText : T.none}</p>`;
+    : `<p class="none">${unread ? "" : T.none}</p>`;
   renderDrawer.list = list;
 }
 
@@ -325,12 +549,16 @@ function renderNow() {
     if (state.agents === null) herdr = true;
     for (const a of state.agents || []) {
       const bad = a.status === "blocked";
-      if (bad || WORKING.includes(a.status)) rows.push(`<li><i class="pip ${bad ? "bad" : ""}"></i><div><b>${esc(a.agent || a.name)}</b><span>${esc(a.job || a.title || p.name)}</span></div><time>${esc(p.name)}</time></li>`);
+      const job = jobOf(state, a);
+      if (bad || WORKING.includes(a.status)) rows.push(`<li><i class="pip ${bad ? "bad" : "live"}"></i><div><b>${esc(job ? nice(job.model) : a.agent || a.name)}</b><span>${esc((job && (job.brief || job.job)) || a.title || p.name)}</span></div><time>${esc(p.name)}</time></li>`);
     }
   }
   if (!rows.length) rows.push(`<li><i class="pip done"></i><div><b>${herdr ? T.noHerdr : T.idle}</b></div><time></time></li>`);
   const finished = projects.flatMap(p => ((S(p.id) || {}).events || []).filter(e => e.kind !== "commit")).sort((a, b) => Date.parse(b.time) - Date.parse(a.time))[0];
-  if (finished) rows.push(`<li><i class="pip done"></i><div><b>${T.finished}</b><span title="${esc(finished.what)}">${esc(finished.what)}</span></div><time>${esc(ago(finished.time))}</time></li>`);
+  const lastJob = projects.flatMap(p => (S(p.id) || {}).jobs || []).filter(j => j.ended).sort((a, b) => Date.parse(b.ended) - Date.parse(a.ended))[0];
+  const jobFirst = lastJob && (!finished || Date.parse(lastJob.ended) >= Date.parse(finished.time));
+  const finishedWhat = jobFirst ? `${nice(lastJob.model)} · ${lastJob.brief || lastJob.job}` : finished && finished.what;
+  if (finishedWhat) rows.push(`<li><i class="pip done"></i><div><b>${T.finished}</b><span title="${esc(finishedWhat)}">${esc(finishedWhat)}</span></div><time>${esc(ago(jobFirst ? lastJob.ended : finished.time))}</time></li>`);
   $("now").innerHTML = rows.slice(0, 4).join("");
 }
 
@@ -340,13 +568,35 @@ function boardHtml(p) {
   if (!state.board.length) return offState(p.name, T.noTasks);
   const others = [...new Set(state.board.map(t => t.status))].filter(name => !COLUMNS.includes(name));
   const columns = [...COLUMNS.slice(0, -1), ...others, "Done"].map(name => [name, state.board.filter(t => t.status === name)]).filter(([, tasks]) => tasks.length);
-  const row = t => `<div class="row ${t.priority === "high" ? "high" : ""} ${t.waiting ? "wait" : ""}">${esc(t.title)}
-    <small><span>${esc(t.id)}</span>${t.waiting ? `<span class="flag">${T.waitsYou}</span>` : ""}${t.blocker ? `<span class="flag bad" title="${esc(t.blocker)}">${T.blocked}</span>` : ""}</small></div>`;
-  return `<div class="board">${columns.map(([name, tasks]) => `<div><h3>${esc(T[name] || name)} · ${tasks.length}</h3>${tasks.map(row).join("")}</div>`).join("")}</div>`;
+  const row = t => `<button class="row ${t.priority === "high" ? "high" : ""} ${t.waiting ? "wait" : ""}" type="button" data-task="${esc(t.id)}" aria-current="${open && open.kind === "task" && open.id === t.id}">${esc(t.title)}
+    <small><span>${esc(t.id)}</span><time>${esc(ago(t.updated))}</time>${t.waiting ? `<span class="flag">${T.waitsYou}</span>` : ""}${t.blocker ? `<span class="flag bad" title="${esc(t.blocker)}">${T.blocked}</span>` : ""}</small></button>`;
+  return `<div class="board">${columns.map(([name, tasks]) => `<div><h3><b>${esc(T[name] || name)}</b> · ${tasks.length}</h3>${tasks.map(row).join("")}</div>`).join("")}</div>`;
 }
 
 function offState(title, text, button = "") {
   return `<div class="off-state"><h3>${esc(title)}</h3><p>${esc(text)}</p>${mapNote ? `<pre>${esc(mapNote)}</pre>` : ""}${button}</div>`;
+}
+
+function jobOf(state, agent) {
+  return (state.jobs || []).find(j => `${j.run}/${j.job}` === agent.job) || null;
+}
+
+function jobRow(state, job, status) {
+  const name = `${job.run}/${job.job}`, shown = status || job.state, bad = STUCK.includes(shown) || shown === "blocked";
+  const task = job.task ? `${job.task}${taskName(state, job.task) ? ` · ${taskName(state, job.task)}` : ""}` : name;
+  return `<tr data-job="${esc(name)}" aria-current="${open && open.kind === "job" && open.id === name}">
+    <td><span class="model">${esc(nice(job.model))}</span><small>${esc([job.harness, thought(job)].filter(Boolean).join(" · "))}</small></td>
+    <td><button class="door" type="button" data-job="${esc(name)}">${esc(job.brief || job.job)}</button><small>${esc(task)}</small>${job.why && bad ? `<small class="stuckline">${esc(job.why)}</small>` : ""}</td>
+    <td class="side ${job.started_by ? "" : "dim"}">${esc(byWhom(job, state))}</td>
+    <td class="${bad ? "bad" : ""}">${WORKING.includes(shown) ? '<i class="pip live"></i> ' : ""}${esc(cap(word(shown)))}</td>
+    <td class="num">${esc(lasted(job.started, job.ended))}<small>${esc(job.ended ? ago(job.ended) : "")}</small></td>
+    <td class="num side">${esc(spent(job))}<small>${job.tokens ? esc(`${number(job.tokens)} ${T.tokens}`) : ""}</small></td></tr>`;
+}
+
+function agentRow(a) {
+  const bad = a.status === "blocked";
+  return `<tr data-pane="${esc(a.pane)}" aria-current="${open && open.kind === "pane" && open.id === a.pane}"><td><span class="model">${esc(a.agent || a.name)}</span><small>${esc(T.pane(a.pane))}</small></td>
+    <td><button class="door" type="button" data-pane="${esc(a.pane)}">${esc(a.title || a.pane)}</button><small>${esc(a.cwd)}</small></td><td class="side dim">${esc(T.nobody)}</td><td class="${bad ? "bad" : ""}">${WORKING.includes(a.status) ? '<i class="pip live"></i> ' : ""}${esc(cap(word(a.status)))}</td><td class="num"></td><td class="num side"></td></tr>`;
 }
 
 function agentsHtml(p) {
@@ -354,11 +604,13 @@ function agentsHtml(p) {
   if (!state) return offState(p.found ? T.stateless : T.gone, (states[p.id] && states[p.id].why) || "");
   const agents = state.agents || [], jobs = state.jobs || [];
   if (!agents.length && !jobs.length) return offState(p.name, state.agents === null ? T.noHerdr : T.noAgents);
-  const rowA = a => `<tr><td>${esc(a.agent || a.name)}</td><td>${esc(a.job || a.title)}</td><td>${a.status === "blocked" ? `<b>${esc(a.status)}</b>` : esc(a.status)}</td></tr>`;
-  const stuck = job => ["handed-over", "blocked", "failed", "check-failed"].includes(job.state);
-  const rowJ = j => `<tr><td>${esc(j.run)}/${esc(j.job)}</td><td>${stuck(j) ? `<b>${esc(j.state)}</b>` : esc(j.state)}</td><td>${esc(ago(j.ended || j.started))}</td><td class="why">${esc(j.why)}</td></tr>`;
-  return (agents.length ? `<table><caption>${T.running}</caption><thead><tr><th>${T.agent}</th><th>${T.job}</th><th>${T.state}</th></tr></thead><tbody>${agents.map(rowA).join("")}</tbody></table>` : "")
-    + (jobs.length ? `<table><caption>${T.jobs}</caption><thead><tr><th>${T.job}</th><th>${T.state}</th><th>${T.time}</th><th></th></tr></thead><tbody>${jobs.map(rowJ).join("")}</tbody></table>` : "");
+  const live = agents.map(a => { const job = jobOf(state, a); return job ? jobRow(state, job, a.status) : agentRow(a); });
+  const held = agents.map(a => a.job);
+  const waiting = jobs.filter(j => !j.ended && !held.includes(`${j.run}/${j.job}`)).map(j => jobRow(state, j));
+  const finished = jobs.filter(j => j.ended).map(j => jobRow(state, j));
+  const head = `<thead><tr><th class="a">${T.agent}</th><th>${T.job}</th><th class="side">${T.by}</th><th class="st">${T.state}</th><th class="num">${T.time}</th><th class="num side cost">${T.spent}</th></tr></thead>`;
+  const table = (title, rows) => rows.length ? `<table class="runs"><caption>${title}</caption>${head}<tbody>${rows.join("")}</tbody></table>` : "";
+  return table(T.running, [...live, ...waiting]) + table(T.jobs, finished);
 }
 
 function mapFrame(p) {
@@ -373,6 +625,191 @@ function mapFrame(p) {
   return frame;
 }
 
+function arrive() {
+  if (document.hidden || calm) return;
+  const parts = [...document.querySelectorAll(".board>div,#pane>table,#pane>.off-state")];
+  parts.forEach((part, i) => part.animate(
+    [{opacity: 0, transform: "translateY(9px)"}, {opacity: 1, transform: "none"}],
+    {duration: 300, delay: Math.min(i, 5) * 38, easing: EASE, fill: "backwards"}));
+}
+
+function moveTabMark() {
+  const on = document.querySelector("[role=tab][aria-selected=true]");
+  if (on) $("tabmark").style.transform = `translateX(${on.offsetLeft}px) scaleX(${on.offsetWidth / 100})`;
+}
+
+function renderActions() {
+  const p = P(), hidden = document.body.classList.contains("wide"), big = Boolean(document.fullscreenElement);
+  const count = allCards().length, stuck = allCards().some(c => c.kind === "stuck");
+  const map = tool === "map" && p && p.map.state === "running" ? `<span class="act proof" title="${esc(T.from(p.name))}" aria-label="${esc(T.from(p.name))}">${ICON.ok}</span>
+    <button class="act" id="stop" type="button">${ICON.stop}${T.stop}</button>
+    <a class="act" href="${esc(p.map.url)}" target="_blank" rel="noopener">${ICON.out}${T.newTab}</a>` : "";
+  const drawer = big ? "" : `<button class="act ${hidden && stuck ? "bad" : ""}" id="wide" type="button">${ICON.drawer}${hidden ? T.open(count) : T.close}</button>`;
+  $("actions").innerHTML = `${map}${drawer}<button class="act" id="full" type="button">${big ? ICON.small : ICON.full}${big ? T.small : T.full}</button>`;
+  if ($("stop")) $("stop").onclick = () => change("stop", p);
+  if ($("wide")) $("wide").onclick = () => { document.body.classList.toggle("wide"); renderActions(); };
+  $("full").onclick = toggleFull;
+}
+
+function toggleFull() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.querySelector("main").requestFullscreen().catch(() => {});
+}
+
+/* The sheet: one task or job in full, read when it is opened */
+function dropSheet() {
+  open = null;
+  $("sheet").hidden = true;
+  $("sheet").innerHTML = "";
+}
+
+function closeSheet() {
+  const from = open && open.from, mine = open;
+  const done = () => {
+    if (open !== mine) return;
+    dropSheet();
+    renderTool();
+    const back = from && document.querySelector(from);
+    if (back) back.focus({preventScroll: true});
+  };
+  if (calm) return done();
+  $("sheet").animate([{opacity: 1, transform: "none"}, {opacity: 0, transform: "translateX(22px)"}], {duration: 150, easing: "ease-in"}).finished.then(done, done);
+}
+
+function fold(title, body, name, shut) {
+  const start = name === undefined ? !shut : !closed.has(name) && !shut;
+  return `<details ${start ? "open" : ""} ${name === undefined ? "" : `data-name="${esc(name)}"`}><summary>${ICON.more}${title}</summary><div class="inner">${body}</div></details>`;
+}
+
+function sheet(tab, bad, title, facts, body, ends = "") {
+  const rows = facts.filter(([, value]) => value).map(([name, value, raw]) => `<div><dt>${esc(name)}</dt><dd>${raw ? value : esc(value)}</dd></div>`).join("");
+  $("sheet").innerHTML = `<div class="sheetcard" role="region" aria-label="${esc(title)}"><span class="tab ${bad ? "bad" : ""}">${esc(cap(tab))}</span>
+    <div class="sheethead"><h2>${esc(title)}</h2><div class="ends">${ends}<button class="shut" id="shut" type="button" aria-label="${T.shut}" title="${T.shut}">${ICON.shut}</button></div>${rows ? `<dl class="facts">${rows}</dl>` : ""}</div>
+    <div class="sheetbody" id="sheetbody" tabindex="-1">${body}</div></div>`;
+  $("shut").onclick = closeSheet;
+}
+
+function fieldFact(field) {
+  const name = (T.fields || {})[field.name] || cap(field.name.replace(/_/g, " "));
+  const values = [field.value].flat();
+  if (field.name === "parent_task_id" || field.name === "dependencies") return [name, values.map(id => `<button type="button" data-task="${esc(id)}">${esc(id)}</button>`).join(""), true];
+  if (field.name.endsWith("_date")) return [name, ago(values[0])];
+  if (field.name === "priority") return [name, level(values[0])];
+  return [name, values.join(", ")];
+}
+
+function taskSheet(t) {
+  const part = s => {
+    const body = s.checks ? `<ul class="criteria">${s.checks.map((c, i) => `<li class="${c.done ? "did" : "open"}" style="--i:${Math.min(i, 10)}">${c.done ? ICON.ok : ICON.box}<span>${inline(c.text)}</span></li>`).join("")}</ul>` : markdown(s.text);
+    const tally = s.checks ? ` <small>${s.checks.filter(c => c.done).length}/${s.checks.length}</small>` : "";
+    return fold(`${esc(T.sections[s.name] || s.name)}${tally}`, body, s.name);
+  };
+  const kids = ((S(open.project) || {}).board || []).filter(x => x.parent === t.id);
+  const kidList = kids.length ? fold(`${T.children} <small>${kids.length}</small>`, kids.map(x => `<button class="kid" type="button" data-task="${esc(x.id)}">${esc(x.title)}<small>${esc(x.id)} · ${esc(T[x.status] || x.status)}</small></button>`).join(""), "children") : "";
+  sheet(T[t.status] || t.status, false, t.title, [[T.task, t.id], ...t.fields.map(fieldFact)], t.sections.map(part).join("") + kidList,
+    `<button class="act" id="inBacklog" type="button">${ICON.out}${T.inBacklog}</button>`);
+  $("inBacklog").onclick = () => toBacklog(t.id, open.project);
+}
+
+async function toBacklog(id, project) {
+  const mine = open, button = $("inBacklog"), tab = window.open("about:blank", "_blank");  // a later tab would be blocked
+  button.disabled = true;
+  button.lastChild.textContent = T.opening;
+  try {
+    const answer = await post("/api/board/start", project);
+    if (!answer.ok) throw new Error(answer.message);
+    if (tab) tab.location = `${answer.url}/tasks/${encodeURIComponent(id)}`;
+  } catch (error) {
+    if (tab) tab.close();
+    if (open === mine && $("sheetbody")) $("sheetbody").insertAdjacentHTML("afterbegin", `<p class="stuckline">${esc(error.message)}</p>`);
+  }
+  button.disabled = false;
+  button.lastChild.textContent = T.inBacklog;
+}
+
+const screenHtml = text => fold(T.screen, `<pre class="screen" id="screen" tabindex="0">${esc(text || T.noScreen)}</pre>`);
+
+function jobSheet(j) {
+  const state = S(open.project) || {}, bad = STUCK.includes(j.state);
+  const cut = read => read.cut ? `<p class="dim">${T.cut}</p>` : "";
+  const attempts = j.attempts.map((a, i) => `<li><b>${esc(T.attempt(i + 1))}</b> · ${esc(nice(a.model))} · ${esc(lasted(a.started, a.ended))}${a.why ? `<br>${esc(a.why)}` : ""}</li>`).join("");
+  const body = (j.running ? screenHtml(j.screen) : "") + (j.why ? `<h3>${T.why}</h3><p>${esc(j.why)}</p>` : "")
+    + fold(T.result, j.result ? markdown(j.result.text) + cut(j.result) : `<p class="dim">${T.noResult}</p>`, "job-result")
+    + j.briefs.map(b => fold(`${T.brief} · ${esc(b.name.split("/").pop())}`, markdown(b.text) + cut(b), "job-brief", Boolean(j.result))).join("")
+    + (attempts ? fold(T.attempts, `<div class="md"><ul>${attempts}</ul></div>`, undefined, true) : "")
+    + (j.log ? fold(T.log, `<div class="md"><pre>${esc(j.log)}</pre></div>`, undefined, true) : "");
+  sheet(word(j.state), bad, j.title || `${j.run}/${j.job}`,
+    [[T.model, nice(j.model)], [T.thinking, thought(j)], [T.harness, j.harness], [T.by, byWhom(j, state)], [T.task, j.task ? `${j.task} · ${taskName(state, j.task)}` : ""], [T.job, `${j.run}/${j.job}`],
+      [T.time, j.attempts.length ? lasted(j.attempts[0].started, j.attempts[j.attempts.length - 1].ended) : ""],
+      [cap(T.tokens), j.tokens ? number(j.tokens) : ""], [cap(T.turns), j.turns ? String(j.turns) : ""], [T.cost, spent(j)]], body);
+}
+
+function paneSheet(a) {
+  sheet(word(a.status), a.status === "blocked", a.title || a.agent || a.pane,
+    [[T.agent, a.agent || a.name], [T.pane0, a.pane], [T.state, cap(word(a.status))], [T.folder, a.cwd]], screenHtml(a.screen));
+}
+
+function detailUrl(want) {
+  return `/api/${want.kind}?project=${encodeURIComponent(want.project)}&id=${encodeURIComponent(want.id)}`;
+}
+
+/* The focal moment: what was clicked travels into the sheet, as a card leaves the drawer */
+function pull(from, change) {
+  if (!from || calm || !document.startViewTransition || document.fullscreenElement) {
+    change();
+    return Promise.resolve();
+  }
+  from.style.viewTransitionName = "pulled";
+  const move = document.startViewTransition(() => {
+    from.style.viewTransitionName = "";
+    change();
+    const card = document.querySelector(".sheetcard");
+    if (card) card.style.viewTransitionName = "pulled";
+  });
+  move.ready.catch(() => {});  // a transition cut short by the next click is no error
+  move.finished.catch(() => {}).finally(() => {
+    const card = document.querySelector(".sheetcard");
+    if (card) card.style.viewTransitionName = "";
+  });
+  return move.updateCallbackDone.catch(() => {});
+}
+
+async function openDetail(kind, id, project, from, element) {
+  const mine = open = {kind, id, project, from};
+  await pull(element, () => {
+    if (open !== mine) return;  // the transition runs later than the click: this sheet may be gone already
+    $("sheet").hidden = false;
+    sheet(T.reading, false, id, [], "");
+    renderTool();
+  });
+  if (open !== mine) return;
+  let answer;
+  try {
+    answer = await get(detailUrl(mine));
+  } catch {
+    answer = {found: null, why: T.down};
+  }
+  if (open !== mine) return;  // another row was opened meanwhile
+  if (!answer.found) sheet(T.notRead, true, id, [], `<p>${esc(answer.why)}</p>`);
+  else ({task: taskSheet, job: jobSheet, pane: paneSheet})[kind](answer.found);
+  mine.live = Boolean(answer.found && answer.found.running);
+  if ($("screen")) $("screen").scrollTop = $("screen").scrollHeight;
+  $("shut").focus({preventScroll: true});
+}
+
+async function followScreen() {
+  const want = open;
+  if (!want || !want.live) return;
+  const answer = await get(detailUrl(want)).catch(() => null);
+  const screen = $("screen");
+  if (open !== want || !screen || !answer) return;  // a failed read says nothing new; the next refresh tries again
+  const found = answer.found;
+  if (!found || !found.running) want.live = false;
+  const atEnd = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 24;
+  screen.textContent = (found && found.running && found.screen) || T.noScreen;
+  if (atEnd) screen.scrollTop = screen.scrollHeight;
+}
+
 function renderTool() {
   const p = P();
   document.querySelectorAll("[role=tab]").forEach(tab => {
@@ -381,9 +818,10 @@ function renderTool() {
     tab.setAttribute("aria-selected", on);
     tab.tabIndex = on ? 0 : -1;
   });
+  moveTabMark();
   Object.values(frames).forEach(frame => { frame.hidden = true; });
   $("pane").hidden = false;
-  $("owner").innerHTML = "";
+  renderActions();
   if (!p) {
     $("pane").innerHTML = offState(T.noProject, "");
     return;
@@ -395,13 +833,11 @@ function renderTool() {
   if (p.map.state === "running") {
     mapFrame(p).hidden = false;
     $("pane").hidden = true;
-    $("owner").innerHTML = `${ICON.ok}<span>${esc(T.from(p.name))}</span><button class="link" id="stop" type="button">${T.stop}</button>`;
-    $("stop").onclick = () => change("stop", p);
   } else if (p.map.state === "none") {
     $("pane").innerHTML = offState(T.mapNone, T.mapNoneText);
   } else {
     const foreign = p.map.state === "foreign";
-    $("pane").innerHTML = offState(foreign ? T.mapForeign(p.name) : T.mapOff(p.name), foreign ? T.mapForeignText : T.mapOffText, button);
+    $("pane").innerHTML = offState(foreign ? T.mapForeign(p.name) : T.mapOff(p.name), "", button);
     $("start").onclick = () => change("start", p);
   }
 }
@@ -414,7 +850,7 @@ async function change(action, p) {
   }
   mapNote = "";
   try {
-    const answer = await (await fetch(`/api/map/${action}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({project: p.id})})).json();
+    const answer = await post(`/api/map/${action}`, p.id);
     if (answer.map) p.map = answer.map;
     if (!answer.ok) mapNote = answer.message || "";
     if (action === "stop" && frames[p.id] && answer.ok) {
@@ -435,6 +871,10 @@ function renderAll() {
   renderTool();
 }
 
+async function post(path, project) {
+  return (await fetch(path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({project})})).json();
+}
+
 async function get(path) {
   const answer = await fetch(path);
   if (!answer.ok) throw new Error(answer.status);
@@ -448,13 +888,16 @@ async function refresh() {
     for (const id of Object.keys(states)) if (!found.includes(id)) delete states[id];
     await Promise.all(found.map(async id => { states[id] = await get(`/api/state?project=${id}`); }));
     failed = false;
+    if (open && !found.includes(open.project)) dropSheet();  // its project went away; the sheet must not outlive it
     if (!P() && projects.length) cur = (projects.find(p => (S(p.id) || {waiting: []}).waiting.length) || projects[0]).id;
-    $("status").textContent = T.updated(new Date().toLocaleTimeString(lang, {hour: "2-digit", minute: "2-digit"}));
   } catch {
     failed = true;
-    $("status").textContent = T.down;
   }
-  $("status").classList.toggle("bad", failed);
+  $("trouble").textContent = failed ? T.down : "";
+  followScreen();
+  const now = JSON.stringify([projects, Object.values(states).map(entry => ({...entry, state: entry.state && {...entry.state, generated: 0}})), Math.floor(Date.now() / 60000)]);
+  if (now === shown) return;  // nothing new: a hover, a focus and a breathing dot stay as they are
+  shown = now;
   // A refresh must not move what is being read, or take away the keyboard's place.
   const reading = tool !== "map" && $("frame").scrollTop, sideways = $("drawer").scrollLeft;
   const place = document.activeElement && document.activeElement.dataset;
@@ -465,28 +908,60 @@ async function refresh() {
   if (held && document.querySelector(held)) document.querySelector(held).focus({preventScroll: true});
 }
 
-function pick(id) { cur = id; mapNote = ""; renderAll(); }
+function pick(id) {
+  const moved = id !== cur;
+  dropSheet();
+  cur = id;
+  mapNote = "";
+  renderAll();
+  if (moved) arrive();
+}
+
+function choose(name) {
+  if (name === tool) return;
+  tool = name;
+  renderTool();
+  arrive();
+}
 
 document.addEventListener("click", event => {
   const project = event.target.closest("[data-p]");
   if (project) return pick(project.dataset.p);
   const tab = event.target.closest("[data-tool]");
-  if (tab) { tool = tab.dataset.tool; return renderTool(); }
+  if (tab) return choose(tab.dataset.tool);
   const card = event.target.closest("[data-card]");
   if (card) {
     const c = renderDrawer.list[+card.dataset.card];
-    cur = c.project.id;
-    tool = c.tool;
-    renderAll();
-    $("status").textContent = T.opened(c.title, T[c.tool]);
+    const back = `[data-key="${CSS.escape(card.dataset.key)}"]`;
+    pick(c.project.id);
+    choose(c.tool);
+    const again = document.querySelector(back);
+    if (c.tool === "board" && c.ref) openDetail("task", c.ref, c.project.id, back, again);
+    if (c.tool === "agents" && c.job) openDetail("job", c.job, c.project.id, back, again);
+    return;
   }
+  const task = event.target.closest("[data-task]");
+  if (task) return openDetail("task", task.dataset.task, cur, `[data-task="${CSS.escape(task.dataset.task)}"]`, task);
+  const job = event.target.closest("[data-job]");
+  if (job) return openDetail("job", job.dataset.job, cur, `button[data-job="${CSS.escape(job.dataset.job)}"]`, job);
+  const pane = event.target.closest("[data-pane]");
+  if (pane) return openDetail("pane", pane.dataset.pane, cur, `button[data-pane="${CSS.escape(pane.dataset.pane)}"]`, pane);
 });
+document.addEventListener("toggle", event => {
+  const name = event.target.dataset && event.target.dataset.name;
+  if (name === undefined || !open) return;
+  if (event.target.open) closed.delete(name); else closed.add(name);
+  try { localStorage.setItem("pm-window-closed", JSON.stringify([...closed])); } catch { /* it is only remembered here */ }
+}, true);
+document.addEventListener("visibilitychange", () => document.body.classList.toggle("away", document.hidden));
 $("filter").onclick = () => { only = !only; renderDrawer(); };
-$("wide").onclick = () => { document.body.classList.toggle("wide"); renderDrawer(); };
+document.addEventListener("fullscreenchange", renderActions);
 document.addEventListener("keydown", event => {
   if (event.ctrlKey || event.metaKey || event.altKey) return;
+  if (event.key === "Escape" && open) return closeSheet();
+  if (event.key === "f") return toggleFull();
   const index = ["1", "2", "3"].indexOf(event.key);
-  if (index >= 0) { tool = ["board", "map", "agents"][index]; renderTool(); }
+  if (index >= 0) choose(["board", "map", "agents"][index]);
   if ((event.key === "[" || event.key === "]") && projects.length) {
     const step = projects.findIndex(p => p.id === cur) + (event.key === "]" ? 1 : -1);
     pick(projects[(step + projects.length) % projects.length].id);
@@ -495,17 +970,15 @@ document.addEventListener("keydown", event => {
 $("tabs").addEventListener("keydown", event => {
   if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
   const order = ["board", "map", "agents"];
-  tool = order[(order.indexOf(tool) + (event.key === "ArrowRight" ? 1 : 2)) % 3];
-  renderTool();
+  choose(order[(order.indexOf(tool) + (event.key === "ArrowRight" ? 1 : 2)) % 3]);
   document.querySelector(`[data-tool=${tool}]`).focus();
 });
 
 $("brand").textContent = T.brand;
+document.title = cap(T.brand);
 $("railTitle").textContent = T.projects;
 $("soonTitle").textContent = T.soon;
-$("foot").textContent = T.foot;
 $("nowTitle").textContent = T.now;
-$("keys").textContent = T.keys;
 $("drawer").classList.add("first");
 setTimeout(() => $("drawer").classList.remove("first"), 2000);
 refresh();

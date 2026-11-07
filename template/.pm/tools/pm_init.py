@@ -993,6 +993,21 @@ def language_only(target, args):
     return 0
 
 
+def join_window(target):
+    """Put the project on this machine's list and refresh the window's own copy; a trial folder stays out of both."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import pm_open  # a sibling script, which owns the project list
+
+    if pm_open.throwaway(target):
+        return
+    try:
+        if not pm_open.install_window(package_commit()):
+            print("  The project window on this machine is newer than this package, so it was left as it is.")
+        pm_open.remember(target)
+    except OSError as error:  # the window is optional: an install never fails for it
+        print(f"The project window was not updated: {error}")
+
+
 def main(argv=None):
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Install or upgrade the .pm/ package in a project.")
@@ -1149,6 +1164,7 @@ def main(argv=None):
         print(line)
     if not first:
         tool_updates(target)
+    join_window(target)
     print("\nNext:")
     if first:
         # The install guide records, commits and hands over first; /pm-setup belongs to a new chat after that.
