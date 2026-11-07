@@ -282,6 +282,37 @@ class State(Case):
         self.assertIn("upgrade", self.state()["why"])
 
 
+class Details(Case):
+    def detail(self, kind, name):
+        answer, body = self.ask("GET", f"/api/{kind}?project={self.id}&id={name}")
+        self.assertEqual(answer.status, 200)
+        return json.loads(body)
+
+    def test_a_task_and_a_job_come_from_the_projects_own_tool(self):
+        self.write_state("import json, sys\nprint(json.dumps({'version': 2, 'found': {'asked': sys.argv[1:]}}))\n")
+        self.assertEqual(self.detail("task", "REQ-1.2")["found"]["asked"], ["--task", "REQ-1.2"])
+        self.assertEqual(self.detail("job", "run-1/a.b")["found"]["asked"], ["--job", "run-1/a.b"])
+
+    def test_nothing_found_is_said(self):
+        self.write_state("import json\nprint(json.dumps({'version': 2, 'found': None}))\n")
+        answer = self.detail("task", "REQ-1")
+        self.assertIsNone(answer["found"])
+        self.assertIn("REQ-1", answer["why"])
+
+    def test_an_older_project_is_told_to_upgrade(self):
+        self.assertIn("upgrade", self.detail("task", "REQ-1")["why"])
+
+    def test_a_name_that_is_no_name_never_reaches_the_tool(self):
+        for name in ("--task", "..%2F..%2Fx", "a%20b", "a/b/c", "%2Fetc"):
+            with mock.patch.object(pm_bridge, "run") as run:
+                self.assertIsNone(self.detail("job", name)["found"], name)
+            run.assert_not_called()
+
+    def test_an_unknown_project_is_refused(self):
+        answer, _ = self.ask("GET", "/api/task?project=nope&id=REQ-1")
+        self.assertEqual(answer.status, 404)
+
+
 class RedLines(Case):
     """The promises in the module docstring: tested on what the program does, and on what its source could do."""
 

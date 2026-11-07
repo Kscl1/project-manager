@@ -9,6 +9,8 @@ started keep working. The projects are the ones in pm_open's project list (`pyth
   GET  /api/health     says this is the bridge, so a second start can tell it from another program
   GET  /api/projects   every registered project and the state of its map
   GET  /api/state?project=<id>   that project's own `pm_state.py` output; `state` is null with `why` when it fails
+  GET  /api/task?project=<id>&id=<task>     that task in full, from the same pm_state
+  GET  /api/job?project=<id>&id=<run/job>   that job in full: brief, result, attempts
   POST /api/map/start  {"project": "<id>"}: pm_open starts the map, or finds the one already running
   POST /api/map/stop   {"project": "<id>"}: pm_open stops the map, only if pm_open started it
 
@@ -49,6 +51,7 @@ START_SECONDS = 160  # pm_open may check the npx cache (up to 120 s), then waits
 STOP_SECONDS = 20
 HEALTH_SECONDS = 2
 BODY_LIMIT = 4096
+DETAIL_NAME = re.compile(r"\w[\w.-]*(/\w[\w.-]*)?")  # a task id or run/job; it reaches pm_state as one argument
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # no console flashes up on Windows
 # The page is one file with its style and script inside; a frame may only ever show a map on this machine (the API
 # gives no other address), and no other page may frame this one.
@@ -80,9 +83,9 @@ def map_command(folder, action):
     return [sys.executable, tool, *words, "--root", folder, "--no-browser"]
 
 
-def state_command(folder):
+def state_command(folder, *detail):
     """The one way to read a project's state: that project's own pm_state, which writes nothing."""
-    return [sys.executable, str(Path(folder) / ".pm" / "tools" / "pm_state.py")]
+    return [sys.executable, str(Path(folder) / ".pm" / "tools" / "pm_state.py"), *detail]
 
 
 def run(command, folder, seconds):
@@ -150,6 +153,18 @@ def projects():
     """Every registered project; asked side by side, since each map check waits on its ports."""
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         return list(pool.map(project, sorted(pm_open.read_store().get("projects", {}).items())))
+
+
+def project_detail(folder, kind, name):
+    """{"found": <one task or job>}, or {"found": None, "why": ...}; a project too old to answer is told to upgrade."""
+    if not DETAIL_NAME.fullmatch(name):
+        return {"found": None, "why": "that is not a task or job name"}
+    _, out, _ = run(state_command(folder, f"--{kind}", name), folder, STATE_SECONDS)
+    try:
+        found = json.loads(out)["found"]
+    except (ValueError, KeyError, TypeError):
+        return {"found": None, "why": "this project's .pm cannot show details yet; upgrade it"}
+    return {"found": found} if found else {"found": None, "why": f"{name} was not found"}
 
 
 def project_state(folder):
@@ -236,6 +251,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if folder is None:
                 return self.refuse(404, "no such project")
             return self.reply(200, project_state(folder))
+        if url.path in ("/api/task", "/api/job"):
+            query = parse_qs(url.query)
+            folder = project_folder(query.get("project", [""])[0])
+            if folder is None:
+                return self.refuse(404, "no such project")
+            return self.reply(200, project_detail(folder, url.path.rsplit("/", 1)[1], query.get("id", [""])[0]))
         return self.refuse(404, "no such address")
 
     def body(self):

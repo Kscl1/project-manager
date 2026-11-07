@@ -2,6 +2,8 @@
 
 Usage: python .pm/tools/pm_board.py --state
        python .pm/tools/pm_state.py
+       python .pm/tools/pm_state.py --task REQ-1      one task in full, for the window's detail view
+       python .pm/tools/pm_state.py --job run/job     one job in full: its brief, result and attempts
 
 The state is computed on each call from what is already there, and the call writes nothing:
 - Backlog task files: the open tasks (Active, In review, Owner check) with their live block, and what waits on the owner;
@@ -14,6 +16,9 @@ The state is computed on each call from what is already there, and the call writ
 worker Herdr shows as blocked, a task's `Needs owner:` line, a task in Owner check. `board` is every open task, most
 important first, then the last closed ones; a task's `waiting` says it is in that list. `soon` is the `Review by:`
 dates of the open tasks, nearest first.
+A job's `started_by` is what pm_run recorded about who started the run: the tool, and a `lead` line a job may name in
+jobs.json, since no tool tells a program which model is driving it. A run started from a Herdr pane that holds another
+job of this project names that job in `by_job`. Runs older than the field have none.
 `events` lists today's commits (by commit time), closed tasks and ended jobs, newest first, all in local time. A job's
 optional `task` field in jobs.json names the task it works for; `workers_by_task` groups the jobs by it. A job's `lease`
 is how fresh its run's pm_run.lease is: `fresh` when the loop rewrote it in the last LEASE_FRESH_S, else `stale`. It is
@@ -27,8 +32,10 @@ commits), a job's `state` when its run's receipts.json cannot be read. An ended 
 `why` says what stopped it.
 """
 
+import itertools
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -57,6 +64,8 @@ SOON = 5  # how many review dates
 HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]
 HERDR_TIMEOUT = 5
+DETAIL_CHARS = 60000  # how much of one brief, result or log a detail view shows; the rest is said to be cut
+LOG_LINES = 400  # how far back in a run's log a job's own lines are looked for
 GIT_TIMEOUT = 10  # a hung git (a network drive, a held lock) must not hold up the screen that waits for this answer
 
 
@@ -129,6 +138,7 @@ def recent_jobs(now):
             if job_state in ENDED and ended is not None and now - ended > RECENT_S:
                 continue
             artifact = last.get("artifact") if isinstance(last.get("artifact"), dict) else {}
+            usage = last.get("usage") if isinstance(last.get("usage"), dict) else {}
             jobs.append(
                 {
                     "run": run.name,
@@ -147,9 +157,59 @@ def recent_jobs(now):
                     "check_exit": last.get("verify_rc"),
                     "pane": last.get("pane"),
                     "agent_name": last.get("name"),
+                    "brief": brief_title(job),
+                    "tokens": usage.get("total_tokens"),
+                    "turns": usage.get("turns"),
+                    "cost_usd": usage.get("cost_usd"),
+                    "started_by": started_by(state, job) if readable else None,
                 }
             )
+    for job in jobs:  # a run started from a pane that holds another job was started by that job
+        pane = job["started_by"]["pane"] if job["started_by"] else None
+        if pane:
+            job["started_by"]["by_job"] = next(
+                (f"{other['run']}/{other['job']}" for other in jobs if other is not job and other["pane"] == pane), None
+            )
     return jobs
+
+
+def started_by(receipts, job):
+    """Who started this job's run, as pm_run recorded it, or None for a run older than that record."""
+    who = receipts.get("_started_by")
+    lead = job.get("lead") if isinstance(job.get("lead"), str) else None
+    if not isinstance(who, dict) and not lead:
+        return None
+    who = who if isinstance(who, dict) else {}
+    return {"tool": who.get("tool"), "lead": lead, "pane": who.get("pane"), "by_job": None}
+
+
+def project_file(name):
+    """The file a job's list names, only when it sits inside this project: a detail view reads nothing else."""
+    try:
+        path = (ROOT / name).resolve()
+        path.relative_to(ROOT.resolve())
+    except (OSError, ValueError):
+        return None
+    return path if path.is_file() else None
+
+
+def brief_title(job):
+    """The first line of the job's first brief, the plainest name for what the job does; None when unreadable."""
+    briefs = job.get("briefs")
+    if not isinstance(briefs, list) or not briefs or not isinstance(briefs[0], str):
+        return None
+    path = project_file(briefs[0])
+    if path is None:
+        return None
+    try:
+        with path.open(encoding="utf-8-sig", errors="replace") as lines:
+            for line in itertools.islice(lines, 40):
+                text = line.strip().lstrip("#").strip()
+                if text and text != "---":
+                    return text[:160]
+    except OSError:
+        return None
+    return None
 
 
 def inside(path, root_key):
@@ -191,7 +251,7 @@ def herdr_agents(jobs):
                 "name": agent.get("name"),
                 "agent": agent.get("display_agent") or agent.get("agent"),
                 "status": agent.get("agent_status"),
-                "title": agent.get("title"),
+                "title": agent.get("title") or agent.get("terminal_title_stripped"),
                 "cwd": cwd,
                 "job": owners.get(agent.get("name")),
             }
@@ -272,11 +332,12 @@ def waiting_cards(tasks, waits, jobs, agents):
     cards = [
         {
             "kind": "stuck",
-            "title": f"{job['run']}/{job['job']}",
+            "title": job["brief"] or f"{job['run']}/{job['job']}",
             "text": job["why"] or job["state"],
             "since": job["ended"],
             "tool": "agents",
             "ref": job["task"],
+            "job": f"{job['run']}/{job['job']}",
         }
         for job in jobs
         if job["state"] in STUCK
@@ -387,12 +448,131 @@ def snapshot(now=None):
     }
 
 
+def section(text, name):
+    """The body of one `## name` section of a task file, without Backlog's markers; empty when it has none."""
+    found = re.search(rf"^##\s+{re.escape(name)}\s*#*\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
+    if not found:
+        return ""
+    return re.sub(r"^\s*<!--\s*[A-Za-z]+:[A-Za-z0-9_:]+\s*-->\s*$", "", found.group(1), flags=re.M).strip()
+
+
+def checks(text):
+    """`- [x] #1 words` lines as [{"done": bool, "text": words}]."""
+    items = re.findall(r"^\s*-\s*\[([ xX])\]\s*(?:#\d+\s*)?(.+)$", text, re.M)
+    return [{"done": mark != " ", "text": words.strip()} for mark, words in items]
+
+
+def task_detail(task_id):
+    """One task in full from its file, or None when no open, closed or draft task has this id."""
+    for directory in (pm_resume.TASKS_DIR, pm_resume.DRAFTS_DIR, *pm_resume.CLOSED_DIRS):
+        for path in sorted(directory.glob("*.md")):
+            try:
+                text = path.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeError):
+                continue
+            fields = pm_resume.read_frontmatter(text.splitlines()) or {}
+            if fields.get("id", "").strip().casefold() != task_id.casefold():
+                continue
+            return {
+                "id": fields["id"].strip(),
+                "title": fields.get("title", "").strip(),
+                "status": fields.get("status", "").strip(),
+                "priority": fields.get("priority", "").strip().lower() or None,
+                "milestone": fields.get("milestone", "").strip() or None,
+                "parent": fields.get("parent_task_id", "").strip() or None,
+                "created": local_time(fields.get("created_date", "")),
+                "updated": local_time(fields.get("updated_date", "")),
+                "description": section(text, "Description"),
+                "criteria": checks(section(text, "Acceptance Criteria")),
+                "notes": section(text, "Implementation Notes"),
+                "summary": section(text, "Final Summary"),
+            }
+    return None
+
+
+def clipped(path):
+    """{"text", "cut"} of a project file, or None when it cannot be read."""
+    try:
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    return {"text": text[:DETAIL_CHARS], "cut": len(text) > DETAIL_CHARS}
+
+
+def job_log(run, job_id):
+    """The lines of the run's log that name this job, newest last, or None."""
+    try:
+        lines = (run / "pm_run.log").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    named = re.compile(rf"(?<![\w-]){re.escape(job_id)}(?![\w-])")  # job `a` must not match the word `started`
+    return "\n".join(line for line in lines[-LOG_LINES:] if named.search(line))[-DETAIL_CHARS:] or None
+
+
+def job_detail(name):
+    """One job of a run in full, from its own files, or None when `run/job` names none."""
+    run_name, _, job_id = name.partition("/")
+    if not job_id or not re.fullmatch(r"[\w.-]+", run_name) or run_name in (".", ".."):
+        return None  # a run is one folder directly under the runs folder
+    run = RUNS_DIR / run_name
+    listed = read_json(run / "jobs.json")
+    listed = listed if isinstance(listed, list) else []
+    job = next((j for j in listed if isinstance(j, dict) and j.get("id") == job_id), None)
+    if job is None:
+        return None
+    state = read_json(run / "receipts.json")
+    state = state if isinstance(state, dict) else {}
+    receipt = state.get(job_id) if isinstance(state.get(job_id), dict) else {}
+    attempts = [a for a in receipt.get("attempts") or [] if isinstance(a, dict)]
+    briefs = []
+    for brief in job.get("briefs") or []:
+        path = project_file(brief) if isinstance(brief, str) else None
+        read = clipped(path) if path else None
+        if read:
+            briefs.append({"name": brief, **read})
+    out = project_file(job["out"]) if isinstance(job.get("out"), str) else None
+    usage = [a["usage"] for a in attempts if isinstance(a.get("usage"), dict)]
+    return {
+        "run": run_name,
+        "job": job_id,
+        "title": brief_title(job),
+        "task": job.get("task"),
+        "model": (attempts[-1].get("model") if attempts else None) or job.get("model"),
+        "harness": job.get("harness", "pi"),
+        "thinking": job.get("thinking"),
+        "state": receipt.get("state", "pending"),
+        "why": receipt.get("why"),
+        "started_by": started_by(state, job),
+        "attempts": [
+            {
+                "model": a.get("model"),
+                "started": stamp(a.get("started")),
+                "ended": stamp(a.get("ended")),
+                "why": a.get("why"),
+            }
+            for a in attempts
+        ],
+        "tokens": sum(u.get("total_tokens") or 0 for u in usage) or None,
+        "turns": sum(u.get("turns") or 0 for u in usage) or None,
+        "cost_usd": sum(u.get("cost_usd") or 0 for u in usage) or None,
+        "out": job.get("out"),
+        "briefs": briefs,
+        "result": clipped(out) if out else None,
+        "log": job_log(run, job_id),
+    }
+
+
 def main():
     if hasattr(sys.stdout, "reconfigure"):
         try:
             sys.stdout.reconfigure(encoding="utf-8")
         except (OSError, ValueError):
             pass
+    words = sys.argv[1:]
+    if len(words) == 2 and words[0] in ("--task", "--job"):
+        found = task_detail(words[1]) if words[0] == "--task" else job_detail(words[1])
+        print(json.dumps({"version": VERSION, "found": found}, indent=2, ensure_ascii=False))
+        return 0
     print(json.dumps(snapshot(), indent=2, ensure_ascii=False))
     return 0
 

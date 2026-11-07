@@ -132,6 +132,92 @@ class StateTest(unittest.TestCase):
         script.write_text(f"import sys\nsys.stdout.write({json.dumps(json.dumps(reply))})\n", encoding="utf-8")
         self.herdr = json.dumps([sys.executable, str(script)])
 
+    def detail(self, *args):
+        return self.state(".pm/tools/pm_state.py", *args)["found"]
+
+    def test_a_task_opens_in_full_and_a_closed_one_too(self):
+        tasks = self.root / ".pm" / "backlog" / "tasks"
+        tasks.mkdir(parents=True)
+        (tasks / "req-7 - x.md").write_text(
+            "---\nid: REQ-7\ntitle: Seven\nstatus: Active\npriority: high\nparent_task_id: REQ-1\n---\n\n"
+            "## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nWhy it exists\n<!-- SECTION:DESCRIPTION:END -->\n\n"
+            "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [x] #1 Done one\n- [ ] #2 Open one\n<!-- AC:END -->\n\n"
+            "## Implementation Notes\n\n<!-- SECTION:NOTES:BEGIN -->\nNext: go\n<!-- SECTION:NOTES:END -->\n\n"
+            "## Final Summary\n\n<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nEnded well\n<!-- SECTION:FINAL_SUMMARY:END -->\n",
+            encoding="utf-8",
+        )
+        closed = self.root / ".pm" / "backlog" / "completed"
+        closed.mkdir(parents=True)
+        (closed / "req-8 - x.md").write_text("---\nid: REQ-8\ntitle: Eight\nstatus: Done\n---\n", encoding="utf-8")
+        task = self.detail("--task", "req-7")
+        self.assertEqual((task["id"], task["priority"], task["parent"]), ("REQ-7", "high", "REQ-1"))
+        self.assertEqual(task["description"], "Why it exists")
+        self.assertEqual(task["notes"], "Next: go")
+        self.assertEqual(task["summary"], "Ended well")
+        self.assertEqual(task["criteria"], [{"done": True, "text": "Done one"}, {"done": False, "text": "Open one"}])
+        self.assertEqual(self.detail("--task", "REQ-8")["status"], "Done")
+        self.assertIsNone(self.detail("--task", "REQ-9"))
+
+    def test_a_job_says_what_it_does_who_started_it_and_what_it_used(self):
+        brief = self.runs / "r" / "brief.md"
+        jobs = [
+            {
+                "id": "a",
+                "model": "m/sol",
+                "lead": "Claude Opus 5.5",
+                "briefs": [".pm/local/runs/r/brief.md"],
+                "out": ".pm/local/runs/r/out.md",
+            }
+        ]
+        attempt = {"name": "n", "started": time.time() - 60, "ended": time.time(), "pane": "w1:p1"}
+        attempt["usage"] = {"total_tokens": 10, "turns": 2, "cost_usd": 0.5}
+        run = self.run_folder(
+            "r",
+            jobs,
+            {"_started_by": {"tool": "Claude Code", "pane": None}, "a": {"state": "verified", "attempts": [attempt]}},
+        )
+        brief.write_text("---\n\n# Review the page\n\nBody\n", encoding="utf-8")
+        (run / "out.md").write_text("Findings", encoding="utf-8")
+        (run / "pm_run.log").write_text("01:00 a: started\n01:01 other: started\n", encoding="utf-8")
+        job = self.snapshot()["jobs"][0]
+        self.assertEqual(job["brief"], "Review the page")
+        self.assertEqual((job["tokens"], job["turns"], job["cost_usd"]), (10, 2, 0.5))
+        self.assertEqual(job["started_by"]["tool"], "Claude Code")
+        self.assertEqual(job["started_by"]["lead"], "Claude Opus 5.5")
+        found = self.detail("--job", "r/a")
+        self.assertEqual(found["title"], "Review the page")
+        self.assertEqual(found["result"], {"text": "Findings", "cut": False})
+        self.assertIn("Body", found["briefs"][0]["text"])
+        self.assertEqual(found["log"], "01:00 a: started")
+        self.assertEqual(found["tokens"], 10)
+
+    def test_a_helper_names_the_job_whose_pane_started_it(self):
+        def job(name):
+            return [{"id": name, "model": "m", "briefs": [], "out": "x"}]
+
+        now = time.time()
+        self.run_folder("lead", job("w"), {"w": {"state": "working", "attempts": [{"started": now, "pane": "w1:p2"}]}})
+        self.run_folder(
+            "help",
+            job("h"),
+            {"_started_by": {"tool": "pi", "pane": "w1:p2"}, "h": {"state": "working", "attempts": [{"started": now}]}},
+        )
+        jobs = {item["job"]: item for item in self.snapshot()["jobs"]}
+        self.assertEqual(jobs["h"]["started_by"]["by_job"], "lead/w")
+        self.assertIsNone(jobs["w"]["started_by"])
+
+    def test_a_detail_reads_nothing_outside_the_project(self):
+        outside = Path(self._tmp.name).parent / f"outside-{os.getpid()}.md"
+        outside.write_text("secret", encoding="utf-8")
+        self.addCleanup(outside.unlink)
+        jobs = [{"id": "a", "model": "m", "briefs": [str(outside)], "out": f"../../../../{outside.name}"}]
+        self.run_folder("r", jobs, {})
+        found = self.detail("--job", "r/a")
+        self.assertEqual(found["briefs"], [])
+        self.assertIsNone(found["result"])
+        self.assertIsNone(self.detail("--job", "../r/a"))
+        self.assertIsNone(self.detail("--job", "r/none"))
+
     def test_open_tasks_carry_their_live_block_and_owner_waits_are_listed(self):
         write_task(self.root, "REQ-1", "Build the thing", "Active", "Next: write it\nBlocker: none\nNeeds owner: none")
         write_task(self.root, "REQ-2", "Ask the owner", "Owner check", "Next: wait\nNeeds owner: try it on Windows")
