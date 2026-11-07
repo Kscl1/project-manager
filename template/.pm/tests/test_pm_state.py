@@ -218,6 +218,36 @@ class StateTest(unittest.TestCase):
         self.assertIsNone(self.detail("--job", "../r/a"))
         self.assertIsNone(self.detail("--job", "r/none"))
 
+    def link_folder(self, link, target):
+        """A folder link: a junction on Windows, which needs no special right, else a symlink."""
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], capture_output=True, check=True)
+            self.addCleanup(os.rmdir, link)  # removes the junction only, never what it points to
+        else:
+            link.symlink_to(target, target_is_directory=True)
+
+    def test_a_linked_run_folder_that_leaves_the_project_is_not_read(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as outside:
+            away = Path(outside)
+            (away / "jobs.json").write_text(json.dumps([{"id": "a", "model": "secret"}]), encoding="utf-8")
+            (away / "receipts.json").write_text("{}", encoding="utf-8")
+            self.runs.mkdir(parents=True)
+            self.link_folder(self.runs / "linked", away)
+            self.assertIsNone(self.detail("--job", "linked/a"))
+
+    def test_usage_adds_up_the_attempts_and_says_when_one_is_missing(self):
+        paid = {
+            "started": time.time() - 90,
+            "ended": time.time() - 60,
+            "usage": {"total_tokens": 10, "turns": 2, "cost_usd": 0.5},
+        }
+        jobs = [{"id": "a", "model": "m", "briefs": [], "out": "x"}]
+        self.run_folder("r", jobs, {"a": {"state": "failed", "attempts": [paid, {"started": time.time() - 30}, paid]}})
+        found = self.detail("--job", "r/a")
+        self.assertEqual((found["tokens"], found["cost_usd"], found["usage_partial"]), (20, 1.0, True))
+        listed = self.snapshot()["jobs"][0]
+        self.assertEqual((listed["tokens"], listed["cost_usd"], listed["usage_partial"]), (20, 1.0, True))
+
     def test_open_tasks_carry_their_live_block_and_owner_waits_are_listed(self):
         write_task(self.root, "REQ-1", "Build the thing", "Active", "Next: write it\nBlocker: none\nNeeds owner: none")
         write_task(self.root, "REQ-2", "Ask the owner", "Owner check", "Next: wait\nNeeds owner: try it on Windows")

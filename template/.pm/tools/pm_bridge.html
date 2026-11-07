@@ -266,10 +266,10 @@ const TEXT = {
     mapForeign: name => `${name}: another program holds the map's port`,
     start: "Start", starting: "Starting…", stop: "Stop", from: name => `from ${name}`,
     newTab: "New tab", full: "Full screen", small: "Exit full screen", shut: "Close",
-    agent: "Agent", job: "Job", state: "State", time: "Time", by: "Started by", spent: "Used", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
+    agent: "Agent", job: "Job", state: "State", time: "Time", by: "Started by", spent: "API estimate", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
     pane: pane => `Herdr pane ${pane}`, tokens: "tokens", turns: "turns", nobody: "not recorded",
     reading: "Reading…", notRead: "Could not be read", status: "Status", priority: "Priority", parent: "Part of", milestone: "Milestone", updated: "Updated", created: "Opened",
-    description: "Description", criteria: "Acceptance criteria", notes: "Notes", summary: "Final summary", model: "Model", thinking: "Thinking", harness: "Tool", task: "Task", cost: "Cost", why: "What happened",
+    description: "Description", criteria: "Acceptance criteria", notes: "Notes", summary: "Final summary", model: "Model", thinking: "Thinking", harness: "Tool", task: "Task", cost: "Cost at API prices", why: "What happened",
     brief: "Brief", result: "Result", attempts: "Attempts", log: "Log", cut: "Only the first part is shown.", noResult: "No result yet.", attempt: n => `Attempt ${n}`,
     high: "high", medium: "medium", low: "low", xhigh: "very high",
     states: {verified: "verified", "artifact-present": "result written", "check-failed": "check failed", "handed-over": "handed to you", failed: "failed", blocked: "blocked", stopped: "stopped", pending: "waiting", working: "working", running: "working", busy: "working", idle: "idle", done: "done", unknown: "unknown"},
@@ -291,10 +291,10 @@ const TEXT = {
     mapForeign: name => `${name}: haritanın portunda başka bir program var`,
     start: "Başlat", starting: "Başlıyor…", stop: "Durdur", from: name => `${name} klasöründen`,
     newTab: "Yeni sekme", full: "Tam ekran", small: "Küçült", shut: "Kapat",
-    agent: "Ajan", job: "İş", state: "Durum", time: "Süre", by: "Başlatan", spent: "Harcanan", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
+    agent: "Ajan", job: "İş", state: "Durum", time: "Süre", by: "Başlatan", spent: "API tahmini", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
     pane: pane => `Herdr paneli ${pane}`, tokens: "token", turns: "tur", nobody: "kayıtlı değil",
     reading: "Okunuyor…", notRead: "Okunamadı", status: "Durum", priority: "Öncelik", parent: "Üst görev", milestone: "Kilometre taşı", updated: "Güncellendi", created: "Açıldı",
-    description: "Açıklama", criteria: "Kabul ölçütleri", notes: "Notlar", summary: "Kapanış özeti", model: "Model", thinking: "Düşünme", harness: "Araç", task: "Görev", cost: "Maliyet", why: "Ne oldu",
+    description: "Açıklama", criteria: "Kabul ölçütleri", notes: "Notlar", summary: "Kapanış özeti", model: "Model", thinking: "Düşünme", harness: "Araç", task: "Görev", cost: "API fiyatıyla maliyet", why: "Ne oldu",
     brief: "Brief", result: "Sonuç", attempts: "Denemeler", log: "Günlük", cut: "Yalnız ilk bölümü gösteriliyor.", noResult: "Henüz sonuç yok.", attempt: n => `${n}. deneme`,
     high: "yüksek", medium: "orta", low: "düşük", xhigh: "çok yüksek",
     states: {verified: "doğrulandı", "artifact-present": "sonuç yazıldı", "check-failed": "kontrolden kaldı", "handed-over": "sana devredildi", failed: "başarısız", blocked: "engellendi", stopped: "durduruldu", pending: "sırada", working: "çalışıyor", running: "çalışıyor", busy: "çalışıyor", idle: "boşta", done: "bitti", unknown: "bilinmiyor"},
@@ -339,6 +339,7 @@ const word = text => T.states[text] || text || "";
 const level = text => T[text] || text || "";
 const number = value => new Intl.NumberFormat(lang, {maximumFractionDigits: 1, notation: "compact"}).format(value);
 const money = value => new Intl.NumberFormat(lang, {style: "currency", currency: "USD", maximumFractionDigits: 2}).format(value);
+const spent = job => job.cost_usd ? `${job.usage_partial ? "≥ " : ""}${money(job.cost_usd)}` : "";
 function lasted(from, to) {
   const start = Date.parse(from || "");
   if (!start) return "";
@@ -498,7 +499,7 @@ function jobRow(state, job, status) {
     <td class="side ${job.started_by ? "" : "dim"}">${esc(byWhom(job, state))}</td>
     <td class="${bad ? "bad" : ""}">${esc(cap(word(shown)))}</td>
     <td class="num">${esc(lasted(job.started, job.ended))}<small>${esc(job.ended ? ago(job.ended) : "")}</small></td>
-    <td class="num side">${job.cost_usd ? esc(money(job.cost_usd)) : ""}<small>${job.tokens ? esc(`${number(job.tokens)} ${T.tokens}`) : ""}</small></td></tr>`;
+    <td class="num side">${esc(spent(job))}<small>${job.tokens ? esc(`${number(job.tokens)} ${T.tokens}`) : ""}</small></td></tr>`;
 }
 
 function agentRow(a) {
@@ -552,11 +553,15 @@ function toggleFull() {
 }
 
 /* The sheet: one task or job in full, read when it is opened */
-function closeSheet() {
-  const from = open && open.from;
+function dropSheet() {
   open = null;
   $("sheet").hidden = true;
   $("sheet").innerHTML = "";
+}
+
+function closeSheet() {
+  const from = open && open.from;
+  dropSheet();
   renderTool();
   const back = from && document.querySelector(from);
   if (back) back.focus({preventScroll: true});
@@ -590,7 +595,7 @@ function jobSheet(j) {
   sheet(word(j.state), bad, j.title || `${j.run}/${j.job}`,
     [[T.model, nice(j.model)], [T.thinking, thought(j)], [T.harness, j.harness], [T.by, byWhom(j, state)], [T.task, j.task ? `${j.task} · ${taskName(state, j.task)}` : ""], [T.job, `${j.run}/${j.job}`],
       [T.time, j.attempts.length ? lasted(j.attempts[0].started, j.attempts[j.attempts.length - 1].ended) : ""],
-      [cap(T.tokens), j.tokens ? number(j.tokens) : ""], [cap(T.turns), j.turns ? String(j.turns) : ""], [T.cost, j.cost_usd ? money(j.cost_usd) : ""]], body);
+      [cap(T.tokens), j.tokens ? number(j.tokens) : ""], [cap(T.turns), j.turns ? String(j.turns) : ""], [T.cost, spent(j)]], body);
 }
 
 async function openDetail(kind, id, project, from) {
@@ -684,6 +689,7 @@ async function refresh() {
     for (const id of Object.keys(states)) if (!found.includes(id)) delete states[id];
     await Promise.all(found.map(async id => { states[id] = await get(`/api/state?project=${id}`); }));
     failed = false;
+    if (open && !found.includes(open.project)) dropSheet();  // its project went away; the sheet must not outlive it
     if (!P() && projects.length) cur = (projects.find(p => (S(p.id) || {waiting: []}).waiting.length) || projects[0]).id;
   } catch {
     failed = true;
@@ -700,7 +706,7 @@ async function refresh() {
 }
 
 function pick(id) {
-  if (open) { open = null; $("sheet").hidden = true; $("sheet").innerHTML = ""; }
+  dropSheet();
   cur = id;
   mapNote = "";
   renderAll();

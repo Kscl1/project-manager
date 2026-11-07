@@ -138,7 +138,6 @@ def recent_jobs(now):
             if job_state in ENDED and ended is not None and now - ended > RECENT_S:
                 continue
             artifact = last.get("artifact") if isinstance(last.get("artifact"), dict) else {}
-            usage = last.get("usage") if isinstance(last.get("usage"), dict) else {}
             jobs.append(
                 {
                     "run": run.name,
@@ -158,9 +157,7 @@ def recent_jobs(now):
                     "pane": last.get("pane"),
                     "agent_name": last.get("name"),
                     "brief": brief_title(job),
-                    "tokens": usage.get("total_tokens"),
-                    "turns": usage.get("turns"),
-                    "cost_usd": usage.get("cost_usd"),
+                    **used(attempts),
                     "started_by": started_by(state, job) if readable else None,
                 }
             )
@@ -171,6 +168,18 @@ def recent_jobs(now):
                 (f"{other['run']}/{other['job']}" for other in jobs if other is not job and other["pane"] == pane), None
             )
     return jobs
+
+
+def used(attempts):
+    """What a job's attempts used, added up. `usage_partial` says an attempt is missing, so the sum is a floor."""
+    known = [a["usage"] for a in attempts if isinstance(a.get("usage"), dict)]
+    costs = [u["cost_usd"] for u in known if isinstance(u.get("cost_usd"), (int, float))]
+    return {
+        "tokens": sum(u.get("total_tokens") or 0 for u in known) or None,
+        "turns": sum(u.get("turns") or 0 for u in known) or None,
+        "cost_usd": round(sum(costs), 4) if costs else None,
+        "usage_partial": bool(known) and len(costs) < len(attempts),
+    }
 
 
 def started_by(receipts, job):
@@ -501,8 +510,11 @@ def clipped(path):
 
 def job_log(run, job_id):
     """The lines of the run's log that name this job, newest last, or None."""
+    path = project_file(run / "pm_run.log")
+    if path is None:
+        return None
     try:
-        lines = (run / "pm_run.log").read_text(encoding="utf-8", errors="replace").splitlines()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
         return None
     named = re.compile(rf"(?<![\w-]){re.escape(job_id)}(?![\w-])")  # job `a` must not match the word `started`
@@ -515,12 +527,15 @@ def job_detail(name):
     if not job_id or not re.fullmatch(r"[\w.-]+", run_name) or run_name in (".", ".."):
         return None  # a run is one folder directly under the runs folder
     run = RUNS_DIR / run_name
-    listed = read_json(run / "jobs.json")
+    jobs_file, receipts_file = project_file(run / "jobs.json"), project_file(run / "receipts.json")
+    if jobs_file is None:
+        return None  # no such run, or a link that leaves the project
+    listed = read_json(jobs_file)
     listed = listed if isinstance(listed, list) else []
     job = next((j for j in listed if isinstance(j, dict) and j.get("id") == job_id), None)
     if job is None:
         return None
-    state = read_json(run / "receipts.json")
+    state = read_json(receipts_file) if receipts_file else None
     state = state if isinstance(state, dict) else {}
     receipt = state.get(job_id) if isinstance(state.get(job_id), dict) else {}
     attempts = [a for a in receipt.get("attempts") or [] if isinstance(a, dict)]
@@ -531,7 +546,6 @@ def job_detail(name):
         if read:
             briefs.append({"name": brief, **read})
     out = project_file(job["out"]) if isinstance(job.get("out"), str) else None
-    usage = [a["usage"] for a in attempts if isinstance(a.get("usage"), dict)]
     return {
         "run": run_name,
         "job": job_id,
@@ -552,9 +566,7 @@ def job_detail(name):
             }
             for a in attempts
         ],
-        "tokens": sum(u.get("total_tokens") or 0 for u in usage) or None,
-        "turns": sum(u.get("turns") or 0 for u in usage) or None,
-        "cost_usd": sum(u.get("cost_usd") or 0 for u in usage) or None,
+        **used(attempts),
         "out": job.get("out"),
         "briefs": briefs,
         "result": clipped(out) if out else None,
