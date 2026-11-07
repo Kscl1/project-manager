@@ -139,7 +139,9 @@ class StateTest(unittest.TestCase):
         tasks = self.root / ".pm" / "backlog" / "tasks"
         tasks.mkdir(parents=True)
         (tasks / "req-7 - x.md").write_text(
-            "---\nid: REQ-7\ntitle: Seven\nstatus: Active\npriority: high\nparent_task_id: REQ-1\n---\n\n"
+            "---\nid: REQ-7\ntitle: Seven\nstatus: Active\nordinal: 9\npriority: high\nparent_task_id: REQ-1\n"
+            "labels:\n  - a\n  - 'b'\ndependencies: []\nrisk: low\n---\n\n"
+            "## Our own part\n\nCustom words\n\n"
             "## Description\n\n<!-- SECTION:DESCRIPTION:BEGIN -->\nWhy it exists\n<!-- SECTION:DESCRIPTION:END -->\n\n"
             "## Acceptance Criteria\n<!-- AC:BEGIN -->\n- [x] #1 Done one\n- [ ] #2 Open one\n<!-- AC:END -->\n\n"
             "## Implementation Notes\n\n<!-- SECTION:NOTES:BEGIN -->\nNext: go\n<!-- SECTION:NOTES:END -->\n\n"
@@ -150,11 +152,19 @@ class StateTest(unittest.TestCase):
         closed.mkdir(parents=True)
         (closed / "req-8 - x.md").write_text("---\nid: REQ-8\ntitle: Eight\nstatus: Done\n---\n", encoding="utf-8")
         task = self.detail("--task", "req-7")
-        self.assertEqual((task["id"], task["priority"], task["parent"]), ("REQ-7", "high", "REQ-1"))
-        self.assertEqual(task["description"], "Why it exists")
-        self.assertEqual(task["notes"], "Next: go")
-        self.assertEqual(task["summary"], "Ended well")
-        self.assertEqual(task["criteria"], [{"done": True, "text": "Done one"}, {"done": False, "text": "Open one"}])
+        self.assertEqual(task["id"], "REQ-7")
+        fields = {field["name"]: field["value"] for field in task["fields"]}
+        self.assertEqual(fields, {"priority": "high", "parent_task_id": "REQ-1", "labels": ["a", "b"], "risk": "low"})
+        sections = {item["name"]: item for item in task["sections"]}
+        self.assertEqual(task["sections"][0]["name"], "Final Summary")
+        self.assertEqual(sections["Description"]["text"], "Why it exists")
+        self.assertEqual(sections["Implementation Notes"]["text"], "Next: go")
+        self.assertEqual(sections["Our own part"]["text"], "Custom words")
+        self.assertIsNone(sections["Our own part"]["checks"])
+        self.assertEqual(
+            sections["Acceptance Criteria"]["checks"],
+            [{"done": True, "text": "Done one"}, {"done": False, "text": "Open one"}],
+        )
         self.assertEqual(self.detail("--task", "REQ-8")["status"], "Done")
         self.assertIsNone(self.detail("--task", "REQ-9"))
 
@@ -205,6 +215,24 @@ class StateTest(unittest.TestCase):
         jobs = {item["job"]: item for item in self.snapshot()["jobs"]}
         self.assertEqual(jobs["h"]["started_by"]["by_job"], "lead/w")
         self.assertIsNone(jobs["w"]["started_by"])
+
+    def test_a_running_agent_shows_its_screen_and_a_foreign_pane_is_not_read(self):
+        script = self.root / "fake_herdr.py"
+        here = str(self.root)
+        agents = [
+            {"pane_id": "w1:p1", "cwd": here, "agent": "pi", "agent_status": "working"},
+            {"pane_id": "w2:p1", "cwd": str(self.root.parent), "agent": "pi", "agent_status": "working"},
+        ]
+        reply = json.dumps({"result": {"snapshot": {"agents": agents}}})
+        script.write_text(
+            "import sys\n"
+            f"reply = {reply!r}\n"
+            "print('screen of ' + sys.argv[3] if sys.argv[1:3] == ['pane', 'read'] else reply)\n",
+            encoding="utf-8",
+        )
+        self.herdr = json.dumps([sys.executable, str(script)])
+        self.assertEqual(self.detail("--pane", "w1:p1")["screen"], "screen of w1:p1")
+        self.assertIsNone(self.detail("--pane", "w2:p1"))
 
     def test_a_detail_reads_nothing_outside_the_project(self):
         outside = Path(self._tmp.name).parent / f"outside-{os.getpid()}.md"

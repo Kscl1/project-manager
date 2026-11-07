@@ -4,6 +4,7 @@ Usage: python .pm/tools/pm_board.py --state
        python .pm/tools/pm_state.py
        python .pm/tools/pm_state.py --task REQ-1      one task in full, for the window's detail view
        python .pm/tools/pm_state.py --job run/job     one job in full: its brief, result and attempts
+       python .pm/tools/pm_state.py --pane w1:p1      one Herdr agent of this project, with what its pane shows
 
 The state is computed on each call from what is already there, and the call writes nothing:
 - Backlog task files: the open tasks (Active, In review, Owner check) with their live block, and what waits on the owner;
@@ -65,6 +66,8 @@ HERDR = os.environ.get("PM_RUN_HERDR") or shutil.which("herdr") or "herdr"
 HERDR_CMD = json.loads(HERDR) if HERDR.startswith("[") else [HERDR]
 HERDR_TIMEOUT = 5
 DETAIL_CHARS = 60000  # how much of one brief, result or log a detail view shows; the rest is said to be cut
+SCREEN_LINES = 60  # how much of a running agent's pane a detail view shows
+HIDDEN_FIELDS = ("id", "title", "status", "ordinal")  # the first three head the view; ordinal is only board order
 LOG_LINES = 400  # how far back in a run's log a job's own lines are looked for
 GIT_TIMEOUT = 10  # a hung git (a network drive, a held lock) must not hold up the screen that waits for this answer
 
@@ -457,12 +460,45 @@ def snapshot(now=None):
     }
 
 
-def section(text, name):
-    """The body of one `## name` section of a task file, without Backlog's markers; empty when it has none."""
-    found = re.search(rf"^##\s+{re.escape(name)}\s*#*\s*$(.*?)(?=^##\s|\Z)", text, re.M | re.S)
-    if not found:
-        return ""
-    return re.sub(r"^\s*<!--\s*[A-Za-z]+:[A-Za-z0-9_:]+\s*-->\s*$", "", found.group(1), flags=re.M).strip()
+def front_fields(text):
+    """Every frontmatter field in file order, lists too, as [{"name", "value"}]; a custom field shows like any other."""
+    lines = text.splitlines()
+    fields = []
+    if not lines or lines[0].strip() != "---":
+        return fields
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        item = re.match(r"\s*-\s+(.*)$", line)
+        if fields and item:
+            value = fields[-1]["value"]
+            fields[-1]["value"] = [*(value if isinstance(value, list) else []), pm_resume.scalar(item.group(1))]
+        elif fields and line[:1] in (" ", "\t"):  # the next line of a folded value
+            fields[-1]["value"] = f"{fields[-1]['value']} {line.strip()}".strip()
+        else:
+            name, separator, value = line.partition(":")
+            value = value.strip()
+            if separator:
+                empty = value in ("[]", ">", ">-", ">+", "|", "|-", "|+")
+                fields.append({"name": name.strip(), "value": "" if empty else pm_resume.scalar(value)})
+    return [field for field in fields if field["value"] and field["name"] not in HIDDEN_FIELDS]
+
+
+def task_sections(text):
+    """Every `## ` section of a task file in order, the closing summary first, without Backlog's markers.
+
+    A section of checklist lines alone also comes as `checks`. Text before the first heading is a section with no name.
+    """
+    body = re.split(r"^---\s*$", text, maxsplit=2, flags=re.M)[-1]
+    parts = re.split(r"^##[ \t]+(.+?)[ \t]*#*[ \t]*$", body, flags=re.M)
+    found = []
+    for name, part in zip(["", *parts[1::2]], parts[0::2]):
+        clean = re.sub(r"^\s*<!--\s*[A-Za-z]+:[A-Za-z0-9_:]+\s*-->\s*$", "", part, flags=re.M).strip()
+        if clean:
+            lines = [line for line in clean.splitlines() if line.strip()]
+            items = checks(clean)
+            found.append({"name": name, "text": clean, "checks": items if len(items) == len(lines) else None})
+    return sorted(found, key=lambda item: item["name"] != "Final Summary")
 
 
 def checks(text):
@@ -486,15 +522,8 @@ def task_detail(task_id):
                 "id": fields["id"].strip(),
                 "title": fields.get("title", "").strip(),
                 "status": fields.get("status", "").strip(),
-                "priority": fields.get("priority", "").strip().lower() or None,
-                "milestone": fields.get("milestone", "").strip() or None,
-                "parent": fields.get("parent_task_id", "").strip() or None,
-                "created": local_time(fields.get("created_date", "")),
-                "updated": local_time(fields.get("updated_date", "")),
-                "description": section(text, "Description"),
-                "criteria": checks(section(text, "Acceptance Criteria")),
-                "notes": section(text, "Implementation Notes"),
-                "summary": section(text, "Final Summary"),
+                "fields": front_fields(text),
+                "sections": task_sections(text),
             }
     return None
 
@@ -506,6 +535,32 @@ def clipped(path):
     except OSError:
         return None
     return {"text": text[:DETAIL_CHARS], "cut": len(text) > DETAIL_CHARS}
+
+
+def pane_screen(pane):
+    """What this pane shows now, or None; only a pane Herdr lists in this project is read."""
+    if not pane or not any(agent["pane"] == pane for agent in herdr_agents([]) or []):
+        return None
+    try:
+        command = [*HERDR_CMD, "pane", "read", pane, "--source", "recent", "--lines", str(SCREEN_LINES)]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=HERDR_TIMEOUT,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return result.stdout.rstrip() if result.returncode == 0 else None
+
+
+def pane_detail(pane):
+    """One Herdr agent of this project with what it shows now, or None."""
+    agent = next((a for a in herdr_agents([]) or [] if a["pane"] == pane), None)
+    return {**agent, "screen": pane_screen(pane)} if agent else None
 
 
 def job_log(run, job_id):
@@ -571,6 +626,7 @@ def job_detail(name):
         "briefs": briefs,
         "result": clipped(out) if out else None,
         "log": job_log(run, job_id),
+        "screen": pane_screen(attempts[-1].get("pane")) if attempts and receipt.get("state") not in ENDED else None,
     }
 
 
@@ -581,8 +637,9 @@ def main():
         except (OSError, ValueError):
             pass
     words = sys.argv[1:]
-    if len(words) == 2 and words[0] in ("--task", "--job"):
-        found = task_detail(words[1]) if words[0] == "--task" else job_detail(words[1])
+    details = {"--task": task_detail, "--job": job_detail, "--pane": pane_detail}
+    if len(words) == 2 and words[0] in details:
+        found = details[words[0]](words[1])
         print(json.dumps({"version": VERSION, "found": found}, indent=2, ensure_ascii=False))
         return 0
     print(json.dumps(snapshot(), indent=2, ensure_ascii=False))

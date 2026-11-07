@@ -11,6 +11,7 @@ import http.client
 import importlib.util
 import json
 import os
+import re
 import shutil
 import socket
 import tempfile
@@ -161,8 +162,8 @@ class Refusals(Case):
             ran.assert_not_called()
         self.assertEqual(self.ask("GET", "/api/state?project=abcdef")[0].status, 404)
 
-    def test_only_the_map_can_be_started(self):
-        for path in ("/api/board/start", "/api/agent/start", "/api/map/restart"):
+    def test_nothing_else_can_be_started(self):
+        for path in ("/api/agent/start", "/api/board/stop", "/api/map/restart"):
             with mock.patch.object(pm_bridge, "run") as ran:
                 self.assertEqual(self.post(path, {"project": self.id})[0].status, 404)
             ran.assert_not_called()
@@ -303,7 +304,7 @@ class Details(Case):
         self.assertIn("upgrade", self.detail("task", "REQ-1")["why"])
 
     def test_a_name_that_is_no_name_never_reaches_the_tool(self):
-        for name in ("--task", "..%2F..%2Fx", "a%20b", "a/b/c", "%2Fetc"):
+        for name in ("--task", "--pane", "..%2F..%2Fx", "a%20b", "a/b/c", "%2Fetc"):
             with mock.patch.object(pm_bridge, "run") as run:
                 self.assertIsNone(self.detail("job", name)["found"], name)
             run.assert_not_called()
@@ -311,6 +312,42 @@ class Details(Case):
     def test_an_unknown_project_is_refused(self):
         answer, _ = self.ask("GET", "/api/task?project=nope&id=REQ-1")
         self.assertEqual(answer.status, 404)
+
+
+class Board(Case):
+    def post_board(self):
+        answer, body = self.post("/api/board/start", {"project": self.id})
+        self.assertEqual(answer.status, 200)
+        return json.loads(body)
+
+    def test_a_click_starts_backlog_through_pm_open_and_gives_its_own_address(self):
+        launch = {
+            "configurations": [
+                {
+                    "name": "backlog-board",
+                    "runtimeExecutable": "backlog",
+                    "runtimeArgs": ["browser", "--no-open"],
+                    "port": 6420,
+                }
+            ]
+        }
+        (self.project / ".claude" / "launch.json").write_text(json.dumps(launch), encoding="utf-8")
+        with mock.patch.object(pm_bridge, "run", return_value=(0, "ok", "")) as run:
+            with mock.patch.object(pm_bridge, "board_url", return_value="http://127.0.0.1:6420"):
+                answer = self.post_board()
+        self.assertEqual((answer["ok"], answer["url"]), (True, "http://127.0.0.1:6420"))
+        self.assertEqual(run.call_args[0][0][2:], ["board", "--root", self.key, "--no-browser"])
+
+    def test_a_board_entry_that_is_not_backlog_is_never_run(self):
+        launch = {"configurations": [{"name": "board", "runtimeExecutable": "calc", "runtimeArgs": [], "port": 6420}]}
+        (self.project / ".claude" / "launch.json").write_text(json.dumps(launch), encoding="utf-8")
+        with mock.patch.object(pm_bridge, "run") as run:
+            self.assertFalse(self.post_board()["ok"])
+        run.assert_not_called()
+
+    def test_another_site_cannot_start_it(self):
+        answer, _ = self.post("/api/board/start", {"project": self.id}, Origin="http://evil.example")
+        self.assertEqual(answer.status, 403)
 
 
 class RedLines(Case):
@@ -374,23 +411,23 @@ class RedLines(Case):
         }
         self.assertEqual(imported, known)
 
-    def test_a_process_starts_in_one_place_with_two_commands_only(self):
+    def test_a_process_starts_in_one_place_with_three_commands_only(self):
         calls = []
         for node in ast.walk(self.tree()):
             if isinstance(node, ast.Attribute) and getattr(node.value, "id", "") == "subprocess":
                 if node.attr in ("run", "Popen", "call", "check_call", "check_output"):
                     calls.append(node.attr)
             if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "run":
-                self.assertIn(node.args[0].func.id, ("map_command", "state_command"))
+                self.assertIn(node.args[0].func.id, ("map_command", "board_command", "state_command"))
         self.assertEqual(calls, ["run"])
         for action in ("start", "stop"):
             self.assertEqual(Path(pm_bridge.map_command("x", action)[1]).name, "pm_open.py")
+        self.assertEqual(Path(pm_bridge.board_command("x")[1]).name, "pm_open.py")
         self.assertEqual(Path(pm_bridge.state_command("x")[-1]).name, "pm_state.py")
 
-    def test_the_map_is_the_only_thing_it_can_start(self):
+    def test_the_map_and_backlog_are_all_it_can_start(self):
         text = SCRIPT.read_text(encoding="utf-8")
-        self.assertEqual(text.count('"/api/map/start"'), 1)
-        self.assertNotIn("backlog browser", text)
+        self.assertEqual(sorted(re.findall(r'"(/api/[a-z]+/start)"', text)), ["/api/board/start", "/api/map/start"])
 
 
 if __name__ == "__main__":

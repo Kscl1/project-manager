@@ -11,15 +11,18 @@ started keep working. The projects are the ones in pm_open's project list (`pyth
   GET  /api/state?project=<id>   that project's own `pm_state.py` output; `state` is null with `why` when it fails
   GET  /api/task?project=<id>&id=<task>     that task in full, from the same pm_state
   GET  /api/job?project=<id>&id=<run/job>   that job in full: brief, result, attempts
+  GET  /api/pane?project=<id>&id=<pane>     one Herdr agent of that project, with what its pane shows
   POST /api/map/start  {"project": "<id>"}: pm_open starts the map, or finds the one already running
   POST /api/map/stop   {"project": "<id>"}: pm_open stops the map, only if pm_open started it
+  POST /api/board/start {"project": "<id>"}: pm_open starts Backlog's own board, or finds the one running
 
 A map's `url` is given only after pm_open's ownership check says it is this project's own map: a port that
 answers proves nothing.
 
 What this program never does, under test in test_pm_bridge.py: write a file, touch .pm/backlog or .pm/decisions, call
-a model, start an agent, or run anything but the two commands in map_command and state_command. A map entry in a
-project's launch.json runs only when it is a LikeC4 start command (is_likec4); anything else in that file is refused.
+a model, start an agent, or run anything but the commands in map_command, board_command and state_command. A map entry
+in a project's launch.json runs only when it is a LikeC4 start command (is_likec4), a board entry only when it is
+Backlog's own (is_backlog); anything else in that file is refused.
 A request with a foreign Host or Origin is refused, so a web page cannot reach it through a name of its own; a POST
 must carry this page's Origin and a JSON body, so another site cannot start or stop anything.
 """
@@ -51,7 +54,7 @@ START_SECONDS = 160  # pm_open may check the npx cache (up to 120 s), then waits
 STOP_SECONDS = 20
 HEALTH_SECONDS = 2
 BODY_LIMIT = 4096
-DETAIL_NAME = re.compile(r"\w[\w.-]*(/\w[\w.-]*)?")  # a task id or run/job; it reaches pm_state as one argument
+DETAIL_NAME = re.compile(r"\w[\w.:-]*(/\w[\w.-]*)?")  # a task id, run/job or pane; pm_state gets it as one argument
 NO_WINDOW = 0x08000000 if os.name == "nt" else 0  # no console flashes up on Windows
 # The page is one file with its style and script inside; a frame may only ever show a map on this machine (the API
 # gives no other address), and no other page may frame this one.
@@ -74,6 +77,17 @@ def is_likec4(command):
     else:
         return False
     return len(words) > 1 and bool(re.fullmatch(r"likec4(@[\w.-]+)?", words[0])) and words[1] in ("start", "dev")
+
+
+def is_backlog(command):
+    """True for `backlog browser ...`: all a board entry may run from here."""
+    program, *words = command
+    return Path(program).stem.lower() == "backlog" and words[:1] == ["browser"]
+
+
+def board_command(folder):
+    """The one way to start a project's board: this program's own pm_open, pointed at that folder."""
+    return [sys.executable, str(HERE / "pm_open.py"), "board", "--root", folder, "--no-browser"]
 
 
 def map_command(folder, action):
@@ -134,6 +148,17 @@ def map_state(folder, server):
         if seen == pm_open.ANSWERS:
             state = seen
     return {"state": "foreign" if state == pm_open.ANSWERS else "stopped"}
+
+
+def board_url(folder, server):
+    """The address of this project's own board, or None: a port that answers proves nothing here either."""
+    found = pm_open.entry(Path(folder), "board")
+    server = server if isinstance(server, dict) else {}
+    for port in dict.fromkeys((server.get("port"), found[1] if found else None)):
+        seen, _, address = pm_open.ownership(folder, "board", server if port == server.get("port") else {}, port)
+        if port and seen == pm_open.OURS:
+            return address
+    return None
 
 
 def project(item):
@@ -200,6 +225,19 @@ def change_map(folder, action):
     return {"ok": code == 0, "message": (out + err).strip()[-600:], "map": map_state(folder, record.get("map"))}
 
 
+def start_board(folder):
+    """Start or find the project's Backlog board through pm_open, as one click asked; its address comes back."""
+    found = pm_open.entry(Path(folder), "board")
+    if found is None or not is_backlog(found[0]):
+        why = (
+            "This project's board entry in .claude/launch.json is not a Backlog start command, so nothing was started."
+        )
+        return {"ok": False, "message": why}
+    code, out, err = run(board_command(folder), folder, START_SECONDS)
+    url = board_url(folder, pm_open.record_of(pm_open.read_store(), folder).get("board"))
+    return {"ok": code == 0 and url is not None, "url": url, "message": (out + err).strip()[-600:]}
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = NAME
     sys_version = ""
@@ -251,7 +289,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if folder is None:
                 return self.refuse(404, "no such project")
             return self.reply(200, project_state(folder))
-        if url.path in ("/api/task", "/api/job"):
+        if url.path in ("/api/task", "/api/job", "/api/pane"):
             query = parse_qs(url.query)
             folder = project_folder(query.get("project", [""])[0])
             if folder is None:
@@ -278,7 +316,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.refuse(403, "foreign Host or Origin")
         if self.headers.get("Content-Type", "").split(";")[0].strip().lower() != "application/json":
             return self.refuse(415, "send JSON")
-        actions = {"/api/map/start": "start", "/api/map/stop": "stop"}
+        actions = {"/api/map/start": "start", "/api/map/stop": "stop", "/api/board/start": "board"}
         action = actions.get(urlsplit(self.path).path)
         if action is None:
             return self.refuse(404, "no such address")
@@ -286,7 +324,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         folder = project_folder(data.get("project")) if data else None
         if folder is None:
             return self.refuse(404, "no such project")
-        return self.reply(200, change_map(folder, action))
+        return self.reply(200, start_board(folder) if action == "board" else change_map(folder, action))
 
 
 class Bridge(http.server.ThreadingHTTPServer):
