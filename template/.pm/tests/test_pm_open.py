@@ -1194,6 +1194,16 @@ class LauncherTest(unittest.TestCase):
         self.assertLess(time.monotonic() - began, 1)
         self.assertEqual(said.getvalue(), "")
 
+    def test_children_of_a_window_started_by_the_shortcut_get_a_console_python(self):
+        folder = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        for name in ("python.exe", "pythonw.exe"):
+            (folder / name).write_text("", encoding="utf-8")
+        with mock.patch.object(pm_open.sys, "executable", str(folder / "pythonw.exe")):
+            self.assertEqual(Path(pm_open.console_python()), folder / "python.exe")
+        with mock.patch.object(pm_open.sys, "executable", str(folder / "python.exe")):
+            self.assertEqual(Path(pm_open.console_python()), folder / "python.exe")
+
     def test_an_older_package_leaves_a_newer_window_alone_unless_asked(self):
         self.assertTrue(pm_open.install_window("aaa1111 2026-11-07"))
         kept = pm_open.window_home() / "VERSION"

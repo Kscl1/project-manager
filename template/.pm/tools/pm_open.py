@@ -1083,6 +1083,18 @@ def on_windows():
     return os.name == "nt"
 
 
+def console_python():
+    """python.exe when this runs under pythonw, else this Python.
+
+    The window may start from the shortcut under pythonw, which has no console. A child it starts then has none to
+    share, so each git call that pm_state makes opens a console window of its own. A console Python started with
+    CREATE_NO_WINDOW keeps one hidden console that its children share.
+    """
+    python = Path(sys.executable)
+    console = python.with_name("python.exe")
+    return str(console) if python.name.lower() == "pythonw.exe" and console.is_file() else sys.executable
+
+
 def quiet_python():
     """pythonw on Windows, which opens no console window behind the browser; this Python elsewhere."""
     python = Path(sys.executable)
@@ -1148,7 +1160,7 @@ def open_window():
         process = None
         server = data.get("window")
         if not (isinstance(server, dict) and process_of(server)):  # one started by another run is still coming up
-            process = start([sys.executable, str(window_program()), "--port", str(WINDOW_PORT)], ROOT, log_path)
+            process = start([console_python(), str(window_program()), "--port", str(WINDOW_PORT)], ROOT, log_path)
             data["window"] = {"port": WINDOW_PORT, "pid": process.pid, "started": start_time(process.pid)}
             if not write_store(data):
                 warn_store()

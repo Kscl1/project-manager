@@ -88,19 +88,19 @@ def is_backlog(command):
 
 def board_command(folder):
     """The one way to start a project's board: this program's own pm_open, pointed at that folder."""
-    return [sys.executable, str(HERE / "pm_open.py"), "board", "--root", folder, "--no-browser"]
+    return [pm_open.console_python(), str(HERE / "pm_open.py"), "board", "--root", folder, "--no-browser"]
 
 
 def map_command(folder, action):
     """The one way to start or stop a project's map: this program's own pm_open, pointed at that folder."""
     tool = str(HERE / "pm_open.py")
     words = ["map"] if action == "start" else ["stop", "map"]
-    return [sys.executable, tool, *words, "--root", folder, "--no-browser"]
+    return [pm_open.console_python(), tool, *words, "--root", folder, "--no-browser"]
 
 
 def state_command(folder, *detail):
     """The one way to read a project's state: that project's own pm_state, which writes nothing."""
-    return [sys.executable, str(Path(folder) / ".pm" / "tools" / "pm_state.py"), *detail]
+    return [pm_open.console_python(), str(Path(folder) / ".pm" / "tools" / "pm_state.py"), *detail]
 
 
 def run(command, folder, seconds):
