@@ -6,9 +6,16 @@ Usage: python .pm/tools/pm_open.py board|map [--download]
        python .pm/tools/pm_open.py opening ask|always|never
        python .pm/tools/pm_open.py window
        python .pm/tools/pm_open.py stop window
+       python .pm/tools/pm_open.py add|forget
+       python .pm/tools/pm_open.py shortcut
 
 `window` opens the project window (pm_bridge.py), started once for the whole machine, with this project on its list;
 `stop window` ends it if this tool started it, and every server and agent keeps running.
+
+The window belongs to the machine, not to a project: pm_init and `shortcut` keep a copy of its three files in
+~/.pm/window, so it starts from anywhere, and `shortcut` puts one icon on the desktop (Windows) or in the application
+list (Linux) that starts it if needed and opens it. Nothing starts at login. A project joins the list when pm_init
+runs in it or a session opens there; `add` does it by hand and `forget` takes one off. A temporary folder never joins.
 
 --root names another project's folder and --no-browser leaves the browser alone: the project window (pm_bridge.py)
 runs this tool that way, for any registered project.
@@ -20,7 +27,7 @@ the board runs `backlog browser --no-open --port 6420`, and the map has no defau
 The project list in ~/.pm/projects.json (or the folder PM_HOME names) is what lets several projects run at once. It
 holds one entry per project, keyed by its resolved folder: the port of each server, the map's HMR port, and the
 process this tool started, with its id and the time it started. A project joins it the first time this command opens
-something in it. A lock file next to the list lets one run at a time read it, choose ports and write it back; a run
+something in it, or as said above. A lock file next to the list lets one run at a time read it, choose ports and write it back; a run
 that cannot take the lock changes nothing and says so, so two runs never write their old copy over each other.
 
 A port that answers is not proof that the server is ours, and a running process id is not proof that it is our
@@ -54,6 +61,17 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+WINDOW_FILES = ("pm_open.py", "pm_bridge.py", "pm_bridge.html")  # all the project window needs to run on its own
+SHORTCUT_NAME = "Project window"
+SHORTCUT_SCRIPT = (
+    "$link = (New-Object -ComObject WScript.Shell).CreateShortcut("
+    "(Join-Path ([Environment]::GetFolderPath('Desktop')) ($env:PM_LINK_NAME + '.lnk')));"
+    "$link.TargetPath = $env:PM_LINK_PYTHON;"
+    "$link.Arguments = '\"' + $env:PM_LINK_TOOL + '\" window';"
+    "$link.WorkingDirectory = $env:PM_LINK_FOLDER;"
+    "$link.Description = 'Every PM project on this machine';"
+    "$link.Save(); Write-Output $link.FullName"
+)
 WINDOW_PORT = 7420  # pm_bridge.py's port; a bridge on another one is started by hand and not looked after here
 WAIT_SECONDS = 30  # how long a server may take to answer on its port
 POLL_SECONDS = 0.5
@@ -962,14 +980,126 @@ def window_running():
         return False
 
 
+def window_home():
+    return store_dir() / "window"
+
+
+def install_window():
+    """Copy the project window's files beside the project list, so it needs no project folder to start."""
+    home = window_home()
+    home.mkdir(parents=True, exist_ok=True)
+    here = Path(__file__).resolve().parent
+    if here != home.resolve():
+        for name in WINDOW_FILES:
+            shutil.copy2(here / name, home / name)
+    return home
+
+
+def window_program():
+    """The machine's copy of the bridge when there is one, so every project starts the same program."""
+    program = window_home() / "pm_bridge.py"
+    return program if program.is_file() else Path(__file__).resolve().parent / "pm_bridge.py"
+
+
+def throwaway(folder):
+    """True for a folder under the system's temporary one: trials and tests, which no list should keep."""
+    folder, temporary = Path(folder).resolve(), Path(tempfile.gettempdir()).resolve()
+    return folder == temporary or temporary in folder.parents
+
+
+def remember(folder):
+    """Put a project on the list, once and quietly; True when it was added. A session start calls this."""
+    folder = Path(folder)
+    if throwaway(folder) or not (folder / ".pm" / "tools").is_dir() or record_of(read_store(), folder):
+        return False
+    with locked() as held:
+        if not held:
+            return False
+        data = read_store()
+        if record_of(data, folder):
+            return False
+        data.setdefault("projects", {})[folder_key(folder)] = {"name": folder.resolve().name}
+        return write_store(data)
+
+
+def add_project():
+    if remember(ROOT):
+        print(f"{ROOT} is on the project list now.")
+    elif record_of(read_store(), ROOT):
+        print(f"{ROOT} is already on the project list.")
+    else:
+        print(f"{ROOT} was not added: a temporary folder or one without .pm/tools stays off the list.")
+        return 1
+    return 0
+
+
+def forget_project():
+    """Take this project off the list; its files and any server it runs stay as they are."""
+    with locked() as held:
+        if not held:
+            return 1
+        data = read_store()
+        key = folder_key(ROOT)
+        names = [name for name in data["projects"] if same_key(name, key)]
+        for name in names:
+            del data["projects"][name]
+        if names and not write_store(data):
+            warn_store()
+            return 1
+    print(f"{ROOT} is off the project list." if names else f"{ROOT} was not on the project list.")
+    return 0
+
+
+def quiet_python():
+    """pythonw on Windows, which opens no console window behind the browser; this Python elsewhere."""
+    python = Path(sys.executable)
+    silent = python.with_name("pythonw.exe")
+    return silent if silent.is_file() else python
+
+
+def make_shortcut():
+    """One icon that starts the project window if needed and opens it, from anywhere on this machine."""
+    tool = install_window() / "pm_open.py"
+    if os.name == "nt":
+        env = {
+            **os.environ,
+            "PM_LINK_NAME": SHORTCUT_NAME,
+            "PM_LINK_PYTHON": str(quiet_python()),
+            "PM_LINK_TOOL": str(tool),
+            "PM_LINK_FOLDER": str(tool.parent),
+        }
+        command = ["powershell", "-NoProfile", "-NonInteractive", "-Command", SHORTCUT_SCRIPT]
+        done = subprocess.run(command, env=env, capture_output=True, text=True, check=False)
+        if done.returncode:
+            print(f"The shortcut was not made: {done.stderr.strip()[-300:]}")
+            return 1
+        print(f"Made the shortcut: {done.stdout.strip()}")
+        return 0
+    if sys.platform == "darwin":
+        print(f"No shortcut on macOS yet. Run: {sys.executable} {tool} window")
+        return 1
+    entry_file = Path.home() / ".local" / "share" / "applications" / "pm-window.desktop"
+    entry_file.parent.mkdir(parents=True, exist_ok=True)
+    entry_file.write_text(
+        "[Desktop Entry]\nType=Application\n"
+        f'Name={SHORTCUT_NAME}\nExec="{sys.executable}" "{tool}" window\nTerminal=false\nCategories=Development;\n',
+        encoding="utf-8",
+    )
+    print(f"Made the shortcut: {entry_file}")
+    return 0
+
+
 def open_window():
-    """Put this project on the list, start the project window if it is not running, and open it."""
+    """Put this project on the list, start the project window if it is not running, and open it.
+
+    From the machine's own copy (the shortcut) there is no project to add.
+    """
     with locked() as held:
         if not held:
             return 1
         data = read_store()
         record_of_project = record_of(data, ROOT)
-        if not record_of_project:
+        if not record_of_project and Path(__file__).resolve().parent != window_home().resolve():
             data.setdefault("projects", {})[folder_key(ROOT)] = {"name": ROOT.name}
             if not write_store(data):
                 warn_store()
@@ -984,8 +1114,7 @@ def open_window():
         process = None
         server = data.get("window")
         if not (isinstance(server, dict) and process_of(server)):  # one started by another run is still coming up
-            program = Path(__file__).resolve().parent / "pm_bridge.py"
-            process = start([sys.executable, str(program), "--port", str(WINDOW_PORT)], ROOT, log_path)
+            process = start([sys.executable, str(window_program()), "--port", str(WINDOW_PORT)], ROOT, log_path)
             data["window"] = {"port": WINDOW_PORT, "pid": process.pid, "started": start_time(process.pid)}
             if not write_store(data):
                 warn_store()
@@ -1073,6 +1202,8 @@ def main(argv=None):
             "  --download: map only; allows the first start to download LikeC4 from npm.\n"
             "window: the project window for every project on this machine.\n"
             "stop board|map|window: stop what this tool started.\n"
+            "add, forget: put this project on the list, or take it off.\n"
+            "shortcut: one icon that opens the project window from anywhere on this machine.\n"
             "list: every project opened this way, with its board and map and whether they run.\n"
             "opening ask|always|never: whether a session start offers the project window (the default is ask)."
         ),
@@ -1080,8 +1211,8 @@ def main(argv=None):
     )
     parser.add_argument(
         "name",
-        choices=("board", "map", "window", "stop", "list", "opening"),
-        metavar="board|map|window|stop|list|opening",
+        choices=("board", "map", "window", "stop", "list", "opening", "add", "forget", "shortcut"),
+        metavar="board|map|window|stop|list|opening|add|forget|shortcut",
         help="what to do",
     )
     parser.add_argument("value", nargs="?", help="stop: board, map or window; opening: ask, always or never")
@@ -1100,6 +1231,8 @@ def main(argv=None):
 
     if args.name == "list":
         return show_list()
+    if args.name in ("add", "forget", "shortcut"):
+        return {"add": add_project, "forget": forget_project, "shortcut": make_shortcut}[args.name]()
     if args.name == "stop":
         if args.value == "window":
             return stop_window()

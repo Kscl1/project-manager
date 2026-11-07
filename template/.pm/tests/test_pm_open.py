@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import signal
 import socket
 import subprocess
@@ -1163,6 +1164,47 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(Path(self.runs[0][0][1]).name, "pm_bridge.py")
         self.assertEqual(self.opened, [pm_open.window_address()])
         self.assertIn(pm_open.folder_key(self.root), pm_open.read_store()["projects"])
+
+    def test_the_window_gets_a_home_of_its_own_and_starts_from_it(self):
+        home = pm_open.install_window()
+        self.assertEqual(sorted(path.name for path in home.iterdir()), sorted(pm_open.WINDOW_FILES))
+        self.assertEqual(pm_open.window_program(), home / "pm_bridge.py")
+
+    def test_a_project_joins_once_and_a_temporary_folder_never(self):
+        real = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, real, ignore_errors=True)
+        (real / ".pm" / "tools").mkdir(parents=True)
+        self.assertFalse(pm_open.remember(real))  # it sits in the temporary folder
+        with mock.patch.object(pm_open, "throwaway", return_value=False):
+            self.assertTrue(pm_open.remember(real))
+            self.assertFalse(pm_open.remember(real))
+            self.assertFalse(pm_open.remember(real / "no-such-project"))
+        self.assertEqual(pm_open.record_of(pm_open.read_store(), real), {"name": real.name})
+
+    def test_forget_takes_a_project_off_and_changes_nothing_else(self):
+        data = {"projects": {pm_open.folder_key(pm_open.ROOT): {"name": "x"}, "other": {"name": "y"}}}
+        pm_open.write_store(data)
+        self.assertEqual(pm_open.forget_project(), 0)
+        self.assertEqual(list(pm_open.read_store()["projects"]), ["other"])
+
+    def test_the_shortcut_starts_the_machines_copy_and_needs_no_project(self):
+        done = subprocess.CompletedProcess([], 0, stdout="C:/Desktop/Project window.lnk", stderr="")
+        with mock.patch.object(pm_open.os, "name", "nt"), mock.patch.object(
+            pm_open.subprocess, "run", return_value=done
+        ) as ran:
+            self.assertEqual(pm_open.make_shortcut(), 0)
+        env = ran.call_args.kwargs["env"]
+        self.assertEqual(Path(env["PM_LINK_TOOL"]), pm_open.window_home() / "pm_open.py")
+        self.assertTrue((pm_open.window_home() / "pm_bridge.html").is_file())
+
+    def test_a_shortcut_that_fails_says_why(self):
+        done = subprocess.CompletedProcess([], 1, stdout="", stderr="no desktop")
+        with mock.patch.object(pm_open.os, "name", "nt"), mock.patch.object(
+            pm_open.subprocess, "run", return_value=done
+        ):
+            with contextlib.redirect_stdout(io.StringIO()) as said:
+                self.assertEqual(pm_open.make_shortcut(), 1)
+        self.assertIn("no desktop", said.getvalue())
 
     def test_a_running_window_is_opened_not_started(self):
         self.window_ready([True])
