@@ -82,8 +82,14 @@ REPLACED_BY = re.compile(r"→\s*(D-\d+)")
 # A decision ID in running text; an ID that ends or starts a range ("D-01…D-23", "D-01 to D-23") is a span, not a cite.
 CITED = re.compile(r"(?<![\w-])D-\d+(?![\w-])")
 RANGE_MARK = re.compile(r"^\s*(?:…|\.\.\.?|–|—|-|to|ile)\s*$")
-# The same line says it is history: a dated update marker or a struck-through span.
-HISTORY_MARK = re.compile(r"\((?:Güncelleme|Update)\b|~~", re.IGNORECASE)
+# History from where it starts on a line: an update note with a date or a decision ID,
+# "(Update, 7 Nov: ...)" or "(Güncelleme: D-140 ...)".
+HISTORY_MARK = re.compile(r"\((?:Güncelleme|Update)\b[,:]?\s*(?:\d|D-\d)", re.IGNORECASE)
+STRUCK = re.compile(r"~~.+?~~")
+# Inline code: a run of backticks closed by a run of the same length (CommonMark).
+CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
+# A fence opens with three or more backticks or tildes; group 2 is any info text after it.
+FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})(.*)$")
 DECISION_FILE = re.compile(r"^D-\d+$")
 # A file path in backticks, alone or inside a command: `docs/x.md`, `python ../repo/tool.py`, `pm_check.py`.
 # A bare file name (no folder) counts only with one of these extensions; a commit is 7 to 40 hex digits.
@@ -497,17 +503,34 @@ def check_record_type(name, front):
     return []
 
 
+def mask(pattern, text):
+    """Blank out each match of pattern, keeping the column of everything else."""
+    return pattern.sub(lambda found: " " * len(found.group(0)), text)
+
+
 def check_text_cites(name, lines, decisions):
     """A living doc that cites a replaced decision in its text, as if it were in force (depends_on only covers a list)."""
-    problems, start, in_fence = [], 0, False
-    if lines and lines[0].strip("﻿").strip() == "---":
+    problems, start, fence = [], 0, None
+    if lines and lines[0].strip("\ufeff").strip() == "---":
         start = next((n for n, line in enumerate(lines[1:], start=1) if line.strip() == "---"), 0) + 1
     for number, line in enumerate(lines[start:], start=start + 1):
-        if line.lstrip().startswith("```"):
-            in_fence = not in_fence
-        if in_fence or HISTORY_MARK.search(line):
+        opener = FENCE_LINE.match(line)
+        if fence:  # inside a fenced block: only a closing fence of the same character and length ends it
+            if (
+                opener
+                and opener.group(1)[0] == fence[0]
+                and len(opener.group(1)) >= len(fence)
+                and not opener.group(2).strip()
+            ):
+                fence = None
             continue
-        line = INLINE_CODE.sub(lambda code: " " * len(code.group(0)), line)  # `D-11` in code is an example
+        if opener:
+            fence = opener.group(1)
+            continue
+        line = mask(STRUCK, mask(CODE_SPAN, line))  # `D-11` in code is an example, ~~D-32~~ is struck out
+        marker = HISTORY_MARK.search(line)
+        if marker:  # a dated (Update, 7 Nov: ...) note is history from where it starts
+            line = line[: marker.start()]
         matches = list(CITED.finditer(line))
         for index, match in enumerate(matches):
             ref, replacement = match.group(0), decisions.get(match.group(0))
@@ -521,7 +544,7 @@ def check_text_cites(name, lines, decisions):
                 problems.append(
                     f"{name}:{number}: cites {ref}, which is archived and no longer in force here\n"
                     f"    → if the line states a rule in force, rewrite it without {ref}; if it is history, mark it"
-                    f" with a dated (Update: ...) note"
+                    f" with a dated (Update, <date>: ...) note"
                 )
             elif not re.search(rf"(?<![\w-]){re.escape(replacement)}(?![\w-])", line):
                 problems.append(

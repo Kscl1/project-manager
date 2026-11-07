@@ -297,6 +297,48 @@ class TextCiteTest(RepoTestCase):
         out = self.living("Follow D-23 for the archive.")
         self.assertIn("cites D-23, which is archived and no longer in force here", out)
 
+    def test_recorded_audit_cases_warn(self):
+        # The four lines the weekly audits of 6 and 10 Oct found, in their old wording.
+        cases = [
+            "- **In:** the `.pm/` package (D-47, D-49); the rules for working with a co-lead model (D-58).",
+            "- **Constraints:** exploration goes to cheaper models (D-58, binding per person D-70).",
+            "| peer lead / second opinion | A different model family from the lead; gives independent review (D-58). |",
+            "Count `Active` + `In review` + `Owner check` together: at most **3**, plus **1** urgent (D-32).",
+        ]
+        out = self.living("\n".join(cases))
+        self.assertIn("docs/guide.md:6: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:7: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:8: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:9: cites D-32, which was superseded by D-95", out)
+
+    def test_markers_hide_only_what_they_mark(self):
+        lines = [
+            "Use D-58, not ~~the retired UI~~.",  # line 6: strikethrough elsewhere on the line
+            "Use D-58 (Update: pending).",  # line 7: an update note without a date or decision
+            "Use D-58 now. *(Update, 7 Nov: the old D-32 was dropped.)*",  # line 8: D-58 is before the note
+            "Example `(Update, 1 Nov:` then D-58.",  # line 9: a marker inside code is not a marker
+        ]
+        out = self.living("\n".join(lines))
+        for number in (6, 7, 8, 9):
+            self.assertIn(f"docs/guide.md:{number}: cites D-58", out)
+        self.assertNotIn("cites D-32", out)
+
+    def test_code_forms_are_skipped(self):
+        body = "\n".join(
+            [
+                "Inline ``D-58`` and ``a `D-32` b`` are examples.",
+                "~~~",
+                "D-58",
+                "~~~",
+                "````markdown",
+                "```",
+                "D-32",
+                "```",
+                "````",
+            ]
+        )
+        self.assertIn("No problems found", self.living(body))
+
     def test_history_lines_pass(self):
         lines = [
             "D-58 was replaced by D-88 on 6 Oct.",  # names the replacement
