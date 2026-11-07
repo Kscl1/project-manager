@@ -258,7 +258,7 @@ table.runs{table-layout:fixed}
   .c:hover,.c:focus-visible,.c:active,.act:hover svg,.act:active{transform:none}
   .drawer.first .c,.count.pop,.sheetwrap,.criteria .did path{animation:none}
   .tools i.live::after,.pip.live::after{display:none}
-  #tabmark,.projects li.mark,.fold,.tabs{transition:none}
+  #tabmark,.projects li.mark,.fold,.tabs,.sheetbody summary svg,.sheetbody details::details-content{transition:none}
 }
 @media (max-width:1180px){.top{grid-template-columns:minmax(0,1fr)}.now{display:none}}
 @media (max-width:1360px){.c{padding-left:11px;padding-right:11px}.c .meta{gap:6px}}
@@ -328,13 +328,13 @@ const TEXT = {
     newTab: "New tab", full: "Full screen", small: "Exit full screen", shut: "Close",
     agent: "Agent", job: "Job", state: "State", time: "Time", by: "Started by", spent: "API estimate", running: "Running agents", jobs: "Jobs of the last day", noAgents: "No agent is working in this project.",
     pane: pane => `Herdr pane ${pane}`, tokens: "tokens", turns: "turns", nobody: "not recorded",
-    reading: "Reading…", notRead: "Could not be read", inBacklog: "Open in Backlog", opening: "Opening…", children: "Subtasks", screen: "On screen now", folder: "Folder", pane0: "Pane",
+    reading: "Reading…", notRead: "Could not be read", inBacklog: "Open in Backlog", opening: "Opening…", children: "Subtasks", screen: "On screen now", noScreen: "The pane can't be read right now.", folder: "Folder", pane0: "Pane",
     fields: {assignee: "Assignee", reporter: "Reporter", labels: "Labels", dependencies: "Depends on", references: "References", documentation: "Documents", priority: "Priority", milestone: "Milestone", type: "Type", parent_task_id: "Part of", created_date: "Opened", updated_date: "Updated"},
     sections: {"": "Text", Description: "Description", "Acceptance Criteria": "Acceptance criteria", "Definition of Done": "Definition of done", "Implementation Plan": "Plan", "Implementation Notes": "Notes", "Final Summary": "Final summary"},
     model: "Model", thinking: "Thinking", harness: "Tool", task: "Task", cost: "Cost at API prices", why: "What happened",
     brief: "Brief", result: "Result", attempts: "Attempts", log: "Log", cut: "Only the first part is shown.", noResult: "No result yet.", attempt: n => `Attempt ${n}`,
     high: "high", medium: "medium", low: "low", xhigh: "very high",
-    states: {verified: "verified", "artifact-present": "result written", "check-failed": "check failed", "handed-over": "handed to you", failed: "failed", blocked: "blocked", stopped: "stopped", pending: "waiting", working: "working", running: "working", busy: "working", idle: "idle", done: "done", unknown: "unknown"},
+    states: {verified: "verified", "artifact-present": "result written", "check-failed": "check failed", "handed-over": "handed to you", failed: "failed", blocked: "blocked", stopped: "stopped", pending: "waiting", started: "started", checking: "checking", removed: "removed", working: "working", running: "working", busy: "working", idle: "idle", done: "done", unknown: "unknown"},
     gone: "The folder is gone", stateless: "State could not be read", upgrade: "Its .pm needs an upgrade", agentsRunning: n => `${n} running`, last: at => `last work ${at}`,
     down: "The bridge does not answer; what you see may be old.", noProject: "No project yet. Run python .pm/tools/pm_open.py window in one.",
     min: "min", hour: "h", day: "d", today: "today", tomorrow: "tomorrow",
@@ -355,13 +355,13 @@ const TEXT = {
     newTab: "Yeni sekme", full: "Tam ekran", small: "Küçült", shut: "Kapat",
     agent: "Ajan", job: "İş", state: "Durum", time: "Süre", by: "Başlatan", spent: "API tahmini", running: "Çalışan ajanlar", jobs: "Son bir günün işleri", noAgents: "Bu projede çalışan ajan yok.",
     pane: pane => `Herdr paneli ${pane}`, tokens: "token", turns: "tur", nobody: "kayıtlı değil",
-    reading: "Okunuyor…", notRead: "Okunamadı", inBacklog: "Backlog'da aç", opening: "Açılıyor…", children: "Alt görevler", screen: "Şu anki ekran", folder: "Klasör", pane0: "Panel",
+    reading: "Okunuyor…", notRead: "Okunamadı", inBacklog: "Backlog'da aç", opening: "Açılıyor…", children: "Alt görevler", screen: "Şu anki ekran", noScreen: "Panel şu an okunamıyor.", folder: "Klasör", pane0: "Panel",
     fields: {assignee: "Atanan", reporter: "Açan", labels: "Etiketler", dependencies: "Bağlı olduğu", references: "Kaynaklar", documentation: "Belgeler", priority: "Öncelik", milestone: "Kilometre taşı", type: "Tür", parent_task_id: "Üst görev", created_date: "Açıldı", updated_date: "Güncellendi"},
     sections: {"": "Metin", Description: "Açıklama", "Acceptance Criteria": "Kabul ölçütleri", "Definition of Done": "Bitti tanımı", "Implementation Plan": "Plan", "Implementation Notes": "Notlar", "Final Summary": "Kapanış özeti"},
     model: "Model", thinking: "Düşünme", harness: "Araç", task: "Görev", cost: "API fiyatıyla maliyet", why: "Ne oldu",
     brief: "Brief", result: "Sonuç", attempts: "Denemeler", log: "Günlük", cut: "Yalnız ilk bölümü gösteriliyor.", noResult: "Henüz sonuç yok.", attempt: n => `${n}. deneme`,
     high: "yüksek", medium: "orta", low: "düşük", xhigh: "çok yüksek",
-    states: {verified: "doğrulandı", "artifact-present": "sonuç yazıldı", "check-failed": "kontrolden kaldı", "handed-over": "sana devredildi", failed: "başarısız", blocked: "engellendi", stopped: "durduruldu", pending: "sırada", working: "çalışıyor", running: "çalışıyor", busy: "çalışıyor", idle: "boşta", done: "bitti", unknown: "bilinmiyor"},
+    states: {verified: "doğrulandı", "artifact-present": "sonuç yazıldı", "check-failed": "kontrolden kaldı", "handed-over": "sana devredildi", failed: "başarısız", blocked: "engellendi", stopped: "durduruldu", pending: "sırada", started: "başladı", checking: "kontrol ediliyor", removed: "kaldırıldı", working: "çalışıyor", running: "çalışıyor", busy: "çalışıyor", idle: "boşta", done: "bitti", unknown: "bilinmiyor"},
     gone: "Klasör bulunamadı", stateless: "Durum okunamadı", upgrade: ".pm yükseltilmeli", agentsRunning: n => `${n} ajan çalışıyor`, last: at => `son iş ${at}`,
     down: "Köprü cevap vermiyor; gördüklerin eski olabilir.", noProject: "Henüz proje yok. Bir projede python .pm/tools/pm_open.py window çalıştır.",
     min: "dk", hour: "sa", day: "gün", today: "bugün", tomorrow: "yarın",
@@ -393,7 +393,15 @@ let lastTop = null, shown = "";  // where the rail's mark stands; what was last 
 const counts = {};
 const EASE = "cubic-bezier(.16,1,.3,1)";
 const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-const closed = new Set(JSON.parse(localStorage.getItem("pm-window-closed") || "[]"));  // the sections a person keeps shut
+function stored(name) {
+  try {
+    const value = JSON.parse(localStorage.getItem(name));
+    return Array.isArray(value) ? value : [];
+  } catch {
+    return [];  // a broken or blocked store must never stop the page
+  }
+}
+const closed = new Set(stored("pm-window-closed"));  // the sections a person keeps shut
 const frames = {};  // one map frame per project, kept while the page lives, so a map stays where it was left
 const $ = id => document.getElementById(id);
 const esc = text => String(text ?? "").replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
@@ -618,10 +626,10 @@ function mapFrame(p) {
 }
 
 function arrive() {
-  if (document.hidden) return;
+  if (document.hidden || calm) return;
   const parts = [...document.querySelectorAll(".board>div,#pane>table,#pane>.off-state")];
   parts.forEach((part, i) => part.animate(
-    calm ? [{opacity: 0}, {opacity: 1}] : [{opacity: 0, transform: "translateY(9px)"}, {opacity: 1, transform: "none"}],
+    [{opacity: 0, transform: "translateY(9px)"}, {opacity: 1, transform: "none"}],
     {duration: 300, delay: Math.min(i, 5) * 38, easing: EASE, fill: "backwards"}));
 }
 
@@ -704,7 +712,7 @@ function taskSheet(t) {
 }
 
 async function toBacklog(id, project) {
-  const button = $("inBacklog"), tab = window.open("about:blank", "_blank");  // a tab opened after the wait would be blocked
+  const mine = open, button = $("inBacklog"), tab = window.open("about:blank", "_blank");  // a later tab would be blocked
   button.disabled = true;
   button.lastChild.textContent = T.opening;
   try {
@@ -713,19 +721,19 @@ async function toBacklog(id, project) {
     if (tab) tab.location = `${answer.url}/tasks/${encodeURIComponent(id)}`;
   } catch (error) {
     if (tab) tab.close();
-    $("sheetbody").insertAdjacentHTML("afterbegin", `<p class="stuckline">${esc(error.message)}</p>`);
+    if (open === mine && $("sheetbody")) $("sheetbody").insertAdjacentHTML("afterbegin", `<p class="stuckline">${esc(error.message)}</p>`);
   }
   button.disabled = false;
   button.lastChild.textContent = T.inBacklog;
 }
 
-const screenHtml = text => fold(T.screen, `<pre class="screen" id="screen" tabindex="0">${esc(text)}</pre>`);
+const screenHtml = text => fold(T.screen, `<pre class="screen" id="screen" tabindex="0">${esc(text || T.noScreen)}</pre>`);
 
 function jobSheet(j) {
   const state = S(open.project) || {}, bad = STUCK.includes(j.state);
   const cut = read => read.cut ? `<p class="dim">${T.cut}</p>` : "";
   const attempts = j.attempts.map((a, i) => `<li><b>${esc(T.attempt(i + 1))}</b> · ${esc(nice(a.model))} · ${esc(lasted(a.started, a.ended))}${a.why ? `<br>${esc(a.why)}` : ""}</li>`).join("");
-  const body = (j.screen ? screenHtml(j.screen) : "") + (j.why ? `<h3>${T.why}</h3><p>${esc(j.why)}</p>` : "")
+  const body = (j.running ? screenHtml(j.screen) : "") + (j.why ? `<h3>${T.why}</h3><p>${esc(j.why)}</p>` : "")
     + fold(T.result, j.result ? markdown(j.result.text) + cut(j.result) : `<p class="dim">${T.noResult}</p>`, "job-result")
     + j.briefs.map(b => fold(`${T.brief} · ${esc(b.name.split("/").pop())}`, markdown(b.text) + cut(b), "job-brief", Boolean(j.result))).join("")
     + (attempts ? fold(T.attempts, `<div class="md"><ul>${attempts}</ul></div>`, undefined, true) : "")
@@ -738,7 +746,7 @@ function jobSheet(j) {
 
 function paneSheet(a) {
   sheet(word(a.status), a.status === "blocked", a.title || a.agent || a.pane,
-    [[T.agent, a.agent || a.name], [T.pane0, a.pane], [T.state, cap(word(a.status))], [T.folder, a.cwd]], a.screen ? screenHtml(a.screen) : `<p class="dim">${T.noResult}</p>`);
+    [[T.agent, a.agent || a.name], [T.pane0, a.pane], [T.state, cap(word(a.status))], [T.folder, a.cwd]], screenHtml(a.screen));
 }
 
 function detailUrl(want) {
@@ -747,7 +755,10 @@ function detailUrl(want) {
 
 /* The focal moment: what was clicked travels into the sheet, as a card leaves the drawer */
 function pull(from, change) {
-  if (!from || calm || !document.startViewTransition || document.fullscreenElement) return change();
+  if (!from || calm || !document.startViewTransition || document.fullscreenElement) {
+    change();
+    return Promise.resolve();
+  }
   from.style.viewTransitionName = "pulled";
   const move = document.startViewTransition(() => {
     from.style.viewTransitionName = "";
@@ -755,19 +766,23 @@ function pull(from, change) {
     const card = document.querySelector(".sheetcard");
     if (card) card.style.viewTransitionName = "pulled";
   });
-  move.finished.finally(() => {
+  move.ready.catch(() => {});  // a transition cut short by the next click is no error
+  move.finished.catch(() => {}).finally(() => {
     const card = document.querySelector(".sheetcard");
     if (card) card.style.viewTransitionName = "";
   });
+  return move.updateCallbackDone.catch(() => {});
 }
 
 async function openDetail(kind, id, project, from, element) {
   const mine = open = {kind, id, project, from};
-  pull(element, () => {
+  await pull(element, () => {
+    if (open !== mine) return;  // the transition runs later than the click: this sheet may be gone already
     $("sheet").hidden = false;
     sheet(T.reading, false, id, [], "");
     renderTool();
   });
+  if (open !== mine) return;
   let answer;
   try {
     answer = await get(detailUrl(mine));
@@ -777,7 +792,7 @@ async function openDetail(kind, id, project, from, element) {
   if (open !== mine) return;  // another row was opened meanwhile
   if (!answer.found) sheet(T.notRead, true, id, [], `<p>${esc(answer.why)}</p>`);
   else ({task: taskSheet, job: jobSheet, pane: paneSheet})[kind](answer.found);
-  mine.live = Boolean(answer.found && answer.found.screen);
+  mine.live = Boolean(answer.found && answer.found.running);
   if ($("screen")) $("screen").scrollTop = $("screen").scrollHeight;
   $("shut").focus({preventScroll: true});
 }
@@ -787,9 +802,11 @@ async function followScreen() {
   if (!want || !want.live) return;
   const answer = await get(detailUrl(want)).catch(() => null);
   const screen = $("screen");
-  if (open !== want || !screen || !answer || !answer.found || !answer.found.screen) return;
+  if (open !== want || !screen || !answer) return;  // a failed read says nothing new; the next refresh tries again
+  const found = answer.found;
+  if (!found || !found.running) want.live = false;
   const atEnd = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 24;
-  screen.textContent = answer.found.screen;
+  screen.textContent = (found && found.running && found.screen) || T.noScreen;
   if (atEnd) screen.scrollTop = screen.scrollHeight;
 }
 
@@ -934,7 +951,7 @@ document.addEventListener("toggle", event => {
   const name = event.target.dataset && event.target.dataset.name;
   if (name === undefined || !open) return;
   if (event.target.open) closed.delete(name); else closed.add(name);
-  localStorage.setItem("pm-window-closed", JSON.stringify([...closed]));
+  try { localStorage.setItem("pm-window-closed", JSON.stringify([...closed])); } catch { /* it is only remembered here */ }
 }, true);
 document.addEventListener("visibilitychange", () => document.body.classList.toggle("away", document.hidden));
 $("filter").onclick = () => { only = !only; renderDrawer(); };
