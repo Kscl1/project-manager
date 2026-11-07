@@ -284,12 +284,12 @@ class TextCiteTest(RepoTestCase):
         return self.run_check().stdout
 
     def test_replaced_decision_cited_as_current_warns_with_its_replacement(self):
-        # .pm/charter.md in the 6 Oct audit: D-58 had been replaced by D-88.
+        # A charter line from a 6 Oct audit: a replaced decision cited as current.
         out = self.living("- the rules for working with a co-lead model (D-58)")
         self.assertIn("docs/guide.md:6: cites D-58, which was superseded by D-88", out)
 
     def test_old_wip_rule_warns(self):
-        # .pm/board.md in the 10 Oct audit: D-32 had been replaced by D-95.
+        # A board rule from a 10 Oct audit: the old work-in-progress limit.
         out = self.living("Count Active and Owner check together: at most **3** (D-32).")
         self.assertIn("cites D-32, which was superseded by D-95", out)
 
@@ -315,7 +315,7 @@ class TextCiteTest(RepoTestCase):
         lines = [
             "Use D-58, not ~~the retired UI~~.",  # line 6: strikethrough elsewhere on the line
             "Use D-58 (Update: pending).",  # line 7: an update note without a date or decision
-            "Use D-58 now. *(Update, 7 Nov: the old D-32 was dropped.)*",  # line 8: D-58 is before the note
+            "Use D-58 now. *(Update, 7 Nov: the old D-32 was dropped.)*",  # line 8: the cite before the note
             "Example `(Update, 1 Nov:` then D-58.",  # line 9: a marker inside code is not a marker
         ]
         out = self.living("\n".join(lines))
@@ -342,6 +342,7 @@ class TextCiteTest(RepoTestCase):
     def test_history_lines_pass(self):
         lines = [
             "D-58 was replaced by D-88 on 6 Oct.",  # names the replacement
+            "D-58 was replaced. *(Update: D-88 is the current rule.)*",  # the replacement in the note
             "*(Güncelleme, 7 Kasım: D-58 artık geçerli değil.)*",  # dated update marker
             "*(Update, 7 Nov: D-32 is gone.)*",
             "- ~~WIP at most 3 (D-32)~~",  # struck through

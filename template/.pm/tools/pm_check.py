@@ -79,11 +79,12 @@ SKIP_PREFIXES = ((".pm", "local"), (".claude", "worktrees"), (".pm", "backlog", 
 # A decision is a list item that starts with its bold ID, optionally struck through. Examples in prose do not count.
 DECISION = re.compile(r"^\s*-\s+(?:~~)?\*\*(D-\d+)\*\*")
 REPLACED_BY = re.compile(r"→\s*(D-\d+)")
-# A decision ID in running text; an ID that ends or starts a range ("D-01…D-23", "D-01 to D-23") is a span, not a cite.
+# A decision ID in running text. An ID that starts or ends a range (D-01, then "…", "–" or "to", then
+# another ID) is a span, not a cite.
 CITED = re.compile(r"(?<![\w-])D-\d+(?![\w-])")
 RANGE_MARK = re.compile(r"^\s*(?:…|\.\.\.?|–|—|-|to|ile)\s*$")
 # History from where it starts on a line: an update note with a date or a decision ID,
-# "(Update, 7 Nov: ...)" or "(Güncelleme: D-140 ...)".
+# "(Update, 7 Nov: ...)" or "(Güncelleme: D-01 ...)".
 HISTORY_MARK = re.compile(r"\((?:Güncelleme|Update)\b[,:]?\s*(?:\d|D-\d)", re.IGNORECASE)
 STRUCK = re.compile(r"~~.+?~~")
 # Inline code: a run of backticks closed by a run of the same length (CommonMark).
@@ -527,10 +528,9 @@ def check_text_cites(name, lines, decisions):
         if opener:
             fence = opener.group(1)
             continue
-        line = mask(STRUCK, mask(CODE_SPAN, line))  # `D-11` in code is an example, ~~D-32~~ is struck out
-        marker = HISTORY_MARK.search(line)
-        if marker:  # a dated (Update, 7 Nov: ...) note is history from where it starts
-            line = line[: marker.start()]
+        whole = mask(STRUCK, mask(CODE_SPAN, line))  # an ID in code is an example, a struck-out one is history
+        marker = HISTORY_MARK.search(whole)
+        line = whole[: marker.start()] if marker else whole  # a dated note is history from where it starts
         matches = list(CITED.finditer(line))
         for index, match in enumerate(matches):
             ref, replacement = match.group(0), decisions.get(match.group(0))
@@ -546,7 +546,7 @@ def check_text_cites(name, lines, decisions):
                     f"    → if the line states a rule in force, rewrite it without {ref}; if it is history, mark it"
                     f" with a dated (Update, <date>: ...) note"
                 )
-            elif not re.search(rf"(?<![\w-]){re.escape(replacement)}(?![\w-])", line):
+            elif not re.search(rf"(?<![\w-]){re.escape(replacement)}(?![\w-])", whole):
                 problems.append(
                     f"{name}:{number}: cites {ref}, which was superseded by {replacement}\n"
                     f"    → if the line states a rule in force, reread it against {replacement} and cite that;"
