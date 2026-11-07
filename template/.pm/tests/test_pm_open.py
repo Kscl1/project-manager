@@ -1200,7 +1200,10 @@ class LauncherTest(unittest.TestCase):
         self.assertFalse(pm_open.install_window("bbb2222 2026-10-01"))
         self.assertIn("aaa1111", kept.read_text(encoding="utf-8"))
         self.assertTrue(pm_open.install_window("ccc3333 2026-11-07"))
-        self.assertTrue(pm_open.install_window())  # by hand, the way back
+        with mock.patch.object(pm_open, "own_stamp", return_value="ddd4444 2026-10-15"):
+            self.assertTrue(pm_open.install_window())  # by hand, the way back
+        self.assertIn("ddd4444", kept.read_text(encoding="utf-8"))  # and it still says which package it is
+        self.assertFalse(pm_open.install_window("eee5555 2026-10-01"))
 
     def test_forget_on_a_missing_list_says_so(self):
         if pm_open.store_path().exists():

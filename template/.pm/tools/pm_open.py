@@ -991,6 +991,14 @@ def stamp_date(stamp):
     return found.group() if found else ""
 
 
+def own_stamp():
+    """This package's stamp from the project's `.pm/VERSION` ('package: <hash> <date>'), or '' outside a project."""
+    version = Path(__file__).resolve().parent.parent / "VERSION"
+    text = version.read_text(encoding="utf-8") if version.is_file() else ""
+    found = re.search(r"^package: (.+)$", text, re.M)
+    return found.group(1).strip() if found else ""
+
+
 def install_window(stamp=None):
     """Copy the project window's files beside the project list, so it needs no project folder to start.
 
@@ -1009,7 +1017,9 @@ def install_window(stamp=None):
         return False
     for name in WINDOW_FILES:
         shutil.copy2(here / name, home / name)
-    version.write_text(f"{stamp or ''}\n", encoding="utf-8")
+    # By hand there is no stamp to compare, but the copy still says which package it is, or the next older
+    # install would find no date to stop at.
+    version.write_text(f"{stamp or own_stamp()}\n", encoding="utf-8")
     return True
 
 
