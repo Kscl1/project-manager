@@ -2856,6 +2856,25 @@ class LockedFileTest(unittest.TestCase):
             self.run.load("jobs.json", [])  # at start and for --status a clear stop is right
 
 
+class CallerTest(unittest.TestCase):
+    def test_a_claude_code_lead_is_named_with_its_pane(self):
+        with patch.dict(os.environ, {"CLAUDECODE": "1", "HERDR_PANE_ID": "w1:p1"}):
+            self.assertEqual(pm_run.caller(), {"tool": "Claude Code", "pane": "w1:p1"})
+
+    def test_another_tool_is_read_from_the_agent_in_its_pane(self):
+        reply = {"result": {"snapshot": {"agents": [{"pane_id": "w1:p1", "agent": "pi"}]}}}
+        with patch.dict(os.environ, {"HERDR_PANE_ID": "w1:p1"}), patch.object(pm_run, "herdr", return_value=reply):
+            os.environ.pop("CLAUDECODE", None)
+            self.assertEqual(pm_run.caller(), {"tool": "pi", "pane": "w1:p1"})
+
+    def test_a_plain_terminal_names_nobody_and_asks_herdr_nothing(self):
+        with patch.dict(os.environ), patch.object(pm_run, "herdr") as asked:
+            os.environ.pop("CLAUDECODE", None)
+            os.environ.pop("HERDR_PANE_ID", None)
+            self.assertEqual(pm_run.caller(), {"tool": None, "pane": None})
+        asked.assert_not_called()
+
+
 class HerdrSafetyTest(unittest.TestCase):
     def setUp(self):
         tmp = Path(tempfile.mkdtemp(prefix="pm_run_safety_"))
