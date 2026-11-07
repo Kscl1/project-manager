@@ -70,7 +70,7 @@ A text menu in your terminal. It checks each program, lets you tick optional par
 You need **Python 3.11+** and **Git** in a Git repository. Clone project-manager **next to** your project, not inside it, and start the screen:
 
 ```bash
-git clone --branch v0.2.0-alpha.3 https://github.com/Kscl1/project-manager.git
+git clone --branch v0.3.0-alpha.1 https://github.com/Kscl1/project-manager.git
 cd project-manager
 python -m venv tools/setup/.venv
 ```
