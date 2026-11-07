@@ -46,6 +46,7 @@ import contextlib
 import ctypes
 import hashlib
 import http.client
+import io
 import json
 import os
 import re
@@ -375,7 +376,7 @@ def warn_store():
 
 
 @contextlib.contextmanager
-def locked():
+def locked(wait=None):
     """Hold the project list's lock while it is read, ports are chosen and the result is written back.
 
     Yields True while the lock is held. The lock is a file next to the list, made with O_EXCL. A lock file older than
@@ -387,7 +388,7 @@ def locked():
     """
     folder, handle, problem = store_dir(), None, ""
     lock = folder / LOCK
-    deadline = time.monotonic() + LOCK_WAIT
+    deadline = time.monotonic() + (LOCK_WAIT if wait is None else wait)
     try:
         folder.mkdir(parents=True, exist_ok=True)
         while handle is None:
@@ -984,15 +985,32 @@ def window_home():
     return store_dir() / "window"
 
 
-def install_window():
-    """Copy the project window's files beside the project list, so it needs no project folder to start."""
+def stamp_date(stamp):
+    """The date in a package stamp ('e1597cc 2026-11-07'), or '' when it has none."""
+    found = re.search(r"\d{4}-\d{2}-\d{2}", stamp or "")
+    return found.group() if found else ""
+
+
+def install_window(stamp=None):
+    """Copy the project window's files beside the project list, so it needs no project folder to start.
+
+    `stamp` is the package revision an install brings. An older one leaves a newer copy alone, or upgrading one old
+    project would take the window of every project back with it; True says the copy is this package's. Without a
+    stamp a person asked for it by hand, which is also the way back to an older window.
+    """
     home = window_home()
     home.mkdir(parents=True, exist_ok=True)
     here = Path(__file__).resolve().parent
-    if here != home.resolve():
-        for name in WINDOW_FILES:
-            shutil.copy2(here / name, home / name)
-    return home
+    if here == home.resolve():
+        return True
+    version = home / "VERSION"
+    held = version.read_text(encoding="utf-8").strip() if version.is_file() else ""
+    if stamp and stamp_date(stamp) and stamp_date(stamp) < stamp_date(held):
+        return False
+    for name in WINDOW_FILES:
+        shutil.copy2(here / name, home / name)
+    version.write_text(f"{stamp or ''}\n", encoding="utf-8")
+    return True
 
 
 def window_program():
@@ -1012,7 +1030,8 @@ def remember(folder):
     folder = Path(folder)
     if throwaway(folder) or not (folder / ".pm" / "tools").is_dir() or record_of(read_store(), folder):
         return False
-    with locked() as held:
+    # A session start reads this: it never waits for the lock and never speaks. A missed turn comes back next session.
+    with contextlib.redirect_stdout(io.StringIO()), locked(wait=0) as held:
         if not held:
             return False
         data = read_store()
@@ -1040,7 +1059,7 @@ def forget_project():
             return 1
         data = read_store()
         key = folder_key(ROOT)
-        names = [name for name in data["projects"] if same_key(name, key)]
+        names = [name for name in data.get("projects", {}) if same_key(name, key)]
         for name in names:
             del data["projects"][name]
         if names and not write_store(data):
@@ -1048,6 +1067,10 @@ def forget_project():
             return 1
     print(f"{ROOT} is off the project list." if names else f"{ROOT} was not on the project list.")
     return 0
+
+
+def on_windows():
+    return os.name == "nt"
 
 
 def quiet_python():
@@ -1059,8 +1082,9 @@ def quiet_python():
 
 def make_shortcut():
     """One icon that starts the project window if needed and opens it, from anywhere on this machine."""
-    tool = install_window() / "pm_open.py"
-    if os.name == "nt":
+    install_window()
+    tool = window_home() / "pm_open.py"
+    if on_windows():
         env = {
             **os.environ,
             "PM_LINK_NAME": SHORTCUT_NAME,

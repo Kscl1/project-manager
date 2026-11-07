@@ -770,7 +770,10 @@ def window_line():
         import pm_open  # a sibling script, which owns the project list and the words for it
     except ImportError:
         return ""
-    pm_open.remember(ROOT)  # a project joins the machine's list by being worked on
+    try:
+        pm_open.remember(ROOT)  # a project joins the machine's list by being worked on
+    except OSError:
+        pass  # the list is a convenience: a resume never fails for it
     return pm_open.WINDOW_LINES[pm_open.opening()]
 
 

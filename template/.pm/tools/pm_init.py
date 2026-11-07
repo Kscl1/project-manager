@@ -1001,7 +1001,8 @@ def join_window(target):
     if pm_open.throwaway(target):
         return
     try:
-        pm_open.install_window()
+        if not pm_open.install_window(package_commit()):
+            print("  The project window on this machine is newer than this package, so it was left as it is.")
         pm_open.remember(target)
     except OSError as error:  # the window is optional: an install never fails for it
         print(f"The project window was not updated: {error}")
