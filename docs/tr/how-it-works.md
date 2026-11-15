@@ -11,7 +11,7 @@ Görev, Epic, brief, commit gibi yeni kelimeler [sözlükte](glossary.md).
 2. **Lider ajan bağlamı kontrol eder.** Mevcut görevi, ilgili proje kayıtlarını ve kodu okur; ardından işe yarayacak en küçük değişikliği seçer.
 3. **İş doğrudan depoda yapılır.** Lider ajan küçük bir işi kendi başına yapabilir. İsteğe bağlı sürü katmanı (`swarm`, birden fazla yardımcı ajanın birlikte çalışması) açıksa bir işçi ajana (`worker`, tek bir alt işi yapan yardımcı ajan) kısa bir görev özeti (`brief`, yapılacak alt işin talimatı), yalıtılmış bir Git çalışma ağacı (`git worktree`, aynı deponun o iş için ayrılmış çalışma klasörü) ve ekranda görebileceğin bir terminal bölmesi verir.
 4. **Kanıtlar geri döner.** Lider ajan kod farkını (`diff`, satır satır değişiklikler) okur ve kanıtları kontrol eder. Her değişiklik bağımsız bir incelemeden geçer: farklı bir model ailesinden bir inceleyici görev özetini, kod farkını ve raporu temiz bir bağlamla okur (tek model ailesi olan projede aynı modelin yeni bir oturumu okur ve bu kaydedilir). Otomatik kontrollerin geçmesi tek başına onay değildir.
-5. **Onay gereken yerde sen karar verirsin.** Lider ajan nelerin geçtiğini ve neyin kaldığını bildirir. Güvenlik sınırlarından önce, örneğin `.pm/` dışındaki dosyalarını değiştirmeden önce sorar. Ana dala ne zaman birleştirileceğine (`merge`) sen karar verirsin.
+5. **Onay gereken yerde sen karar verirsin.** Lider ajan nelerin geçtiğini ve neyin kaldığını bildirir. Altı tür adımdan önce sorar; örneğin bir işi silmeden, para harcamadan ya da proje dışındaki insanlara bir şey göndermeden önce. Geri kalanına kendisi karar verir ve göreve yazar. Ana dala ne zaman birleştirileceğine (`merge`) sen karar verirsin.
 
 ## Parçalar bir arada
 

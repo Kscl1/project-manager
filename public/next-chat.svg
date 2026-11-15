@@ -37,7 +37,8 @@
   <text class="body" x="376" y="112">It writes its plan down.</text>
   <text class="body" x="376" y="136">It changes the file and</text>
   <text class="body" x="376" y="160">runs the check.</text>
-  <text class="body" x="376" y="184">It asks before risky steps.</text>
+  <text class="body" x="376" y="184">It asks before a step</text>
+  <text class="body" x="376" y="208">that cannot be undone.</text>
 
   <path class="arrow" d="M648 164 H674"/>
 

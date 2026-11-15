@@ -11,7 +11,7 @@ New words (task, Epic, brief, commit) are in the [glossary](glossary.md).
 2. **The lead checks the context.** It reads the current task, the relevant project records and the code, then chooses the smallest useful change.
 3. **Work happens in the repository.** The lead can do a small job itself. With the optional swarm layer, it gives a worker a brief, an isolated Git worktree and a visible terminal pane.
 4. **Evidence comes back.** The lead reads the diff and checks the evidence. Every change gets an independent review: a reviewer from a different model family reads the brief, diff and report with fresh context (a project with only one model family uses a fresh session of that model and says so). Passing automation alone is not approval.
-5. **You decide where consent is needed.** The lead reports what passed and what remains. It asks before the specified safety boundaries, including changes to your files outside `.pm/`. You decide when to merge into the main branch.
+5. **You decide where consent is needed.** The lead reports what passed and what remains. It asks first before six kinds of step, such as deleting work, spending money or sending anything to people outside the project; the rest it decides and writes in the task. You decide when to merge into the main branch.
 
 ## The parts together
 

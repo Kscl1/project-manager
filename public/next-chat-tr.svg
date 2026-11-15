@@ -37,7 +37,8 @@
   <text class="body" x="376" y="112">Planını göreve yazar.</text>
   <text class="body" x="376" y="136">Dosyayı değiştirir ve</text>
   <text class="body" x="376" y="160">kontrolü çalıştırır.</text>
-  <text class="body" x="376" y="184">Riskli adımda önce sorar.</text>
+  <text class="body" x="376" y="184">Geri alınamayan adımda</text>
+  <text class="body" x="376" y="208">önce sorar.</text>
 
   <path class="arrow" d="M648 164 H674"/>
 
