@@ -32,9 +32,9 @@ Bu paket yeni bir kodlama ajanı, internette çalışan bir proje takip servisi 
 
 **Yapay zekâyı yalnız telefonda mı kullandın?** [Buradan başla](first-time.md).
 
-![Dört panel: küçük bir değişiklik istersin; yardımcı planını gösterir, sen onaylarsın, dosyayı değiştirir ve kontrolü çalıştırır; notlar projendeki .pm/ klasörüne kaydedilir; bir dahaki sefere yeni sohbet notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.](../../public/next-chat-tr.svg)
+![Dört panel: küçük bir değişiklik istersin; yardımcı planını göreve yazar, dosyayı değiştirir ve kontrolü çalıştırır, geri alınamayan bir adımdan önce sana sorar; notlar projendeki .pm/ klasörüne kaydedilir; bir dahaki sefere yeni sohbet notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.](../../public/next-chat-tr.svg)
 
-**Yeni sohbet, eski yardımcının aklını değil kayıtlı dosyaları okur.** Sözlerle: küçük bir değişiklik istersin; onayından sonra yardımcı projeyi günceller ve `.pm/` klasörüne bir iş notu yazar; sohbeti kapatırsın; yeni bir sohbette aynı klasörü açıp "devam" dersin; yardımcı notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.
+**Yeni sohbet, eski yardımcının aklını değil kayıtlı dosyaları okur.** Sözlerle: küçük bir değişiklik istersin; yardımcı projeyi günceller ve `.pm/` klasörüne bir iş notu yazar; sohbeti kapatırsın; yeni bir sohbette aynı klasörü açıp "devam" dersin; yardımcı notları okur, dosyaları kontrol eder ve sıradaki adımı söyler.
 
 `.pm/` klasörünü projenin iş defteri gibi düşün. Yardımcı iş listesini, seçimlerin nedenlerini ve nerede kaldığını oraya düz dosyalar olarak yazar. Bu bir iş defteridir, yapay zekânın belleği değildir ve bir sohbetin her kelimesini saklamaz: yardımcı her seferinde notları okur ve dosyaları kontrol eder.
 

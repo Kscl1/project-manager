@@ -15,13 +15,13 @@ Yardımcı, klasörü de kullanabilen bir yapay zekâ programıdır: Anthropic'i
 
 ## İzin
 
-Yardımcı dosyalarını değiştirebildiği için önce sana sormalı. "Evet" demeden önce planını oku; "hayır" da bir karardır. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
+Yardımcı dosyalarını değiştirebilir. İşe yalnız sen isteyince başlar; silmek ya da yayınlamak gibi geri alınamayan bir adımdan önce sana sorar. Bu kurulum dosyalarını değiştirmeden önce sana sorar; yardımcının kendi izin ayarları da önemlidir. Yapay zekâ hata yapabilir; ne yaptığını kontrol et.
 
 ## Saklanan notlar
 
 Yardımcı, sohbet kapanınca konuşulanların çoğunu unutur. project-manager işi bunun yerine dosyalarda tutar: iş listesi, seçimlerin nedenleri ve nerede kaldığın, projenin içindeki `.pm/` klasöründe. Adı noktayla başlayan bu klasörü bazı dosya pencereleri gizler. O klasör projenin iş defteridir, yapay zekânın belleği değil: yeni sohbet notları okur ve dosyaları yeniden kontrol eder.
 
-![Dört panel: küçük bir değişiklik istersin; yardımcı planını gösterir, sen onaylarsın, dosyayı düzenler ve kontrolü çalıştırır; notlar projendeki .pm/ klasörüne kaydedilir; bir dahaki sefere yeni sohbet notları okur ve sıradaki adımı söyler.](../../public/next-chat-tr.svg)
+![Dört panel: küçük bir değişiklik istersin; yardımcı planlar, dosyayı düzenler, kontrolü çalıştırır ve riskli bir adımdan önce sana sorar; notlar projendeki .pm/ klasörüne kaydedilir; bir dahaki sefere yeni sohbet notları okur ve sıradaki adımı söyler.](../../public/next-chat-tr.svg)
 
 *Yeni sohbet, eski yardımcının aklını değil kayıtlı dosyaları okur.*
 
