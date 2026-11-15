@@ -33,7 +33,7 @@ Count open top-level work (an Epic, a package, or a task with no parent) in `Act
 | Order and real blockers | `ordinal`, `dependencies` (only when B cannot start before A is done) |
 | Importance | `priority` (high, medium, low): set only by the owner, on drafts and Ready tasks; empty means not triaged yet; `backlog task list --sort priority` |
 | Which lead holds it now | `assignee` on every `Active` or `Owner check` task: the one lead holding it, changed on handoff; who touched it comes from git (`Refs:` and `Assisted-by:` lines) |
-| Plan the owner approves | `Implementation Plan`, for multi-step or code-changing work |
+| Plan the owner can read | `Implementation Plan`, for multi-step or code-changing work |
 | Owner's words, options offered, dated findings | `Comments` (author `@<owner>` or the lead) |
 | Links to decisions, research, reports, evidence | `References` (not `Documentation`); commit hashes are not listed by hand, `git log --grep "<task ID>"` finds them |
 | Finite goal several tasks reach together | `milestone` |

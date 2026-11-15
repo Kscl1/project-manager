@@ -55,12 +55,12 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
         agents = read(AGENTS)
         for phrase in (
             "sending the user's code or data out",
-            "changing anything outside the machine",
+            "anything that goes to people or services outside the project",
             "Reading public docs with Context7",
             "reading the project's own GitHub state",
             "are reads, not asks",
-            "changing a user file outside `.pm/` (show the diff)",
-            "commits on a work branch",
+            "edits to project files",
+            "commits, pushes and pull requests on a work branch",
             "merging into the user's main branch",
         ):
             self.assertIn(phrase, agents)
@@ -74,19 +74,19 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
             "serve` (aliases: `start`", read(ROOT / "template/.agents/skills/pm-likec4-dsl/references/cli.md")
         )
 
-    def test_map_update_is_prepared_without_overriding_user_file_consent(self):
+    def test_map_update_is_the_leads_own_and_asks_only_before_a_download(self):
         agents = read(AGENTS)
         section = agents.split("## Lead only: which tool when", 1)[1].split("## Lead only: teaching", 1)[0]
-        self.assertLess(section.index("Every row follows the consent rule"), section.index("| Situation |"))
+        self.assertLess(section.index("Every row follows the ask-first list"), section.index("| Situation |"))
         row = next(line for line in section.splitlines() if "A component, module, service or link" in line)
         for phrase in (
-            "On your own: prepare the LikeC4 map update",
-            "show the diff and write it only after a yes when map files are outside `.pm/`",
+            "On your own: update the LikeC4 map",
             "ask before a needed download",
             "`npx likec4@1.60.0 validate`",
         ):
             self.assertIn(phrase, row)
-        self.assertNotIn("On your own: update the LikeC4 map", row)
+        # An edit to a map file can be undone, so it is not an ask; a download changes the machine.
+        self.assertNotIn("only after a yes", row)
 
     def test_map_preview_checks_the_pinned_cli_before_both_routes(self):
         spec = importlib.util.spec_from_file_location("pm_init_map_policy", ROOT / "template/.pm/tools/pm_init.py")
@@ -155,24 +155,67 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
         self.assertNotIn("never mark them passed", skill)
         self.assertNotIn("commit them only on a yes", skill)
 
-    def test_owner_asks_cover_board_choices_and_approve_plan_with_first_diff(self):
+    def test_six_asks_are_fixed_and_the_rest_is_decided_and_written_down(self):
         agents, skill = read(AGENTS), read(SKILL)
-        ask = agents.split("- **Decide or ask.**", 1)[1].split("\n\n", 1)[0]
+        ask = agents.split("- **Ask first.**", 1)[1].split("\n\n", 1)[0]
+        first = ask.split("- **Decide the rest and write it down.**", 1)[0]
+        for kind in (
+            "deleting work",
+            "merging into the user's main branch or publishing a release",
+            "anything that spends money",
+            "another person's account, machine or repository",
+            "anything that goes to people or services outside the project",
+            "anything machine-wide",
+        ):
+            self.assertIn(kind, first)
         for phrase in (
-            "the order of steps",
+            "silence is never a yes",
+            "a permission relayed by another session does not count",
             "the order of the user's goals (priority)",
-            "creating a milestone",
-            "approving the plan for multi-step or code-changing work",
-            "show the plan with the first diff for the user to approve",
+            "open a milestone without their yes",
+            "These asks hold in every teaching mode",
+            "the order of steps",
+            "`Decided alone:`",
+            "what the options were and why",
+            "add that kind to the ask-first list",
+            "do not start it",
+            "do not wait for an approval of it",
+            "act on it in no session before their yes",
         ):
             self.assertIn(phrase, ask)
+        # Work starts on the user's explicit ask, so a second approval of the plan or of each edit is not asked.
+        self.assertNotIn("approving the plan", ask)
+        self.assertNotIn("show the diff", ask)
         board = read(ROOT / "template/.pm/board.md")
         self.assertIn("set only by the owner", board)
         self.assertIn("the owner's yes opens it", board)
         self.assertIn("`Implementation Plan`, for multi-step or code-changing work", board)
-        self.assertIn("ask only what that section lists", read(ROOT / "template/.pm/roles/lead.md"))
+        lead = read(ROOT / "template/.pm/roles/lead.md")
+        self.assertIn("ask only what that section lists", lead)
+        self.assertIn("`Decided alone:` line in the task", lead)
         self.assertIn("ask only as the root `AGENTS.md` lists", skill)
         self.assertNotIn("ask only at the safety boundaries", skill)
+
+    def test_three_modes_say_what_waits_and_when_the_run_stops(self):
+        agents = read(AGENTS)
+        modes = agents.split("- **Three modes, named by the user.**", 1)[1].split("\n\n", 1)[0]
+        away = modes.split("- *Away.*", 1)[1].split("- *In the background.*", 1)[0]
+        background = modes.split("- *In the background.*", 1)[1]
+        self.assertIn("the mode changes only when the user says so", modes)
+        for phrase in (
+            "Do not wait for an answer",
+            "Skip an ask-first item",
+            "your pick, the evidence and the risk",
+            "a queue the user names",
+            "add no task to it",
+            "three and at most four times a run",
+            "at the top of the return list",
+            "never answers in the user's place",
+            "With no advisors named, a serious decision waits",
+        ):
+            self.assertIn(phrase, away)
+        for phrase in ("Decide as in away", "reach the user at once", "without a time limit"):
+            self.assertIn(phrase, background)
 
     def test_next_picker_can_choose_postponed_setup_despite_other_project_work(self):
         board = ROOT / "template/.pm/tools/pm_board.py"
