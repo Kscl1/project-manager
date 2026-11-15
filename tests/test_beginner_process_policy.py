@@ -54,8 +54,8 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
     def test_consent_distinguishes_public_reads_and_sending_data(self):
         agents = read(AGENTS)
         for phrase in (
-            "sending the user's code or data out",
-            "anything that goes to people or services outside the project",
+            "sends the user's code or data to a service the project does not already use",
+            "anything that goes to people outside the project",
             "Reading public docs with Context7",
             "reading the project's own GitHub state",
             "are reads, not asks",
@@ -164,10 +164,29 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
             "merging into the user's main branch or publishing a release",
             "anything that spends money",
             "another person's account, machine or repository",
-            "anything that goes to people or services outside the project",
+            "anything that goes to people outside the project",
             "anything machine-wide",
         ):
             self.assertIn(kind, first)
+        # The project's own remote is not someone else's: a work-branch push is decided alone, a pull request
+        # to another repository is asked. An install is asked only when it leaves the project's folder.
+        for phrase in (
+            "a push or a pull request to a repository that is not the project's own",
+            "a service the project does not already use",
+            "an install outside the project's own folder",
+        ):
+            self.assertIn(phrase, first)
+        self.assertNotIn("pull requests on a work branch", first)
+        rest = ask.split("- **Decide the rest and write it down.**", 1)[1].split("\n- **", 1)[0]
+        for phrase in (
+            "an install inside the project's own folder",
+            "pull requests on a work branch of the project's own repository",
+            "Each time you choose between real options",
+            "these lines are the list a retro reads",
+        ):
+            self.assertIn(phrase, rest)
+        # Every lone choice is written down, not only the ones the agent thinks matter.
+        self.assertNotIn("may care about", rest)
         for phrase in (
             "silence is never a yes",
             "a permission relayed by another session does not count",
@@ -207,15 +226,23 @@ class BeginnerProcessPolicyTest(unittest.TestCase):
             "Skip an ask-first item",
             "your pick, the evidence and the risk",
             "a queue the user names",
+            "Stop when the queue is empty or the user returns",
             "add no task to it",
             "three and at most four times a run",
+            "each such consult is written with its reason",
             "at the top of the return list",
             "never answers in the user's place",
             "With no advisors named, a serious decision waits",
         ):
             self.assertIn(phrase, away)
+        # The limit on consults bends for a new serious problem, each one recorded; it is not a single extra.
+        self.assertNotIn("one more is allowed", away)
+        # Away never waits on a clock and never applies a proposal on silence.
+        self.assertNotIn("minutes", away)
         for phrase in ("Decide as in away", "reach the user at once", "without a time limit"):
             self.assertIn(phrase, background)
+        lead = read(ROOT / "template/.pm/roles/lead.md")
+        self.assertIn("Dropping a branch whose work is not merged is deleting work: ask first", lead)
 
     def test_next_picker_can_choose_postponed_setup_despite_other_project_work(self):
         board = ROOT / "template/.pm/tools/pm_board.py"
