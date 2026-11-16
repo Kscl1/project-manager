@@ -262,6 +262,108 @@ class DecisionFilesTest(RepoTestCase):
         self.assertIn("D-02 is defined twice", self.run_check().stdout)
 
 
+class TextCiteTest(RepoTestCase):
+    """A living doc that cites a replaced decision in its text, the case depends_on cannot see (weekly audits, Oct 2026)."""
+
+    def decision(self, relpath, ident, status, extra=""):
+        front = f'---\nid: {ident}\ntitle: "Rule {ident}"\nstatus: {status}\ndate: 2026-10-01\n{extra}---\n\n'
+        self.write(relpath, front + f"# {ident} Rule\n\n## Karar\n\nx\n")
+
+    def setUp(self):
+        super().setUp()
+        self.write(".pm/decisions.md", "# Decisions\n")
+        self.decision(".pm/decisions/D-88.md", "D-88", "accepted")
+        self.decision(".pm/decisions/D-95.md", "D-95", "accepted")
+        self.decision(".pm/decisions/archive/D-58.md", "D-58", "superseded", "replaced_by: D-88\n")
+        self.decision(".pm/decisions/archive/D-32.md", "D-32", "superseded", "replaced_by: D-95\n")
+        self.decision(".pm/decisions/archive/D-23.md", "D-23", "elsewhere")
+        self.run_check("--write-index")
+
+    def living(self, body):
+        self.write("docs/guide.md", f"---\ntype: living_doc\ntitle: Guide\n---\n\n{body}\n")
+        return self.run_check().stdout
+
+    def test_replaced_decision_cited_as_current_warns_with_its_replacement(self):
+        # A charter line from a 6 Oct audit: a replaced decision cited as current.
+        out = self.living("- the rules for working with a co-lead model (D-58)")
+        self.assertIn("docs/guide.md:6: cites D-58, which was superseded by D-88", out)
+
+    def test_old_wip_rule_warns(self):
+        # A board rule from a 10 Oct audit: the old work-in-progress limit.
+        out = self.living("Count Active and Owner check together: at most **3** (D-32).")
+        self.assertIn("cites D-32, which was superseded by D-95", out)
+
+    def test_decision_kept_elsewhere_warns(self):
+        out = self.living("Follow D-23 for the archive.")
+        self.assertIn("cites D-23, which is archived and no longer in force here", out)
+
+    def test_recorded_audit_cases_warn(self):
+        # The four lines the weekly audits of 6 and 10 Oct found, in their old wording.
+        cases = [
+            "- **In:** the `.pm/` package (D-47, D-49); the rules for working with a co-lead model (D-58).",
+            "- **Constraints:** exploration goes to cheaper models (D-58, binding per person D-70).",
+            "| peer lead / second opinion | A different model family from the lead; gives independent review (D-58). |",
+            "Count `Active` + `In review` + `Owner check` together: at most **3**, plus **1** urgent (D-32).",
+        ]
+        out = self.living("\n".join(cases))
+        self.assertIn("docs/guide.md:6: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:7: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:8: cites D-58, which was superseded by D-88", out)
+        self.assertIn("docs/guide.md:9: cites D-32, which was superseded by D-95", out)
+
+    def test_markers_hide_only_what_they_mark(self):
+        lines = [
+            "Use D-58, not ~~the retired UI~~.",  # line 6: strikethrough elsewhere on the line
+            "Use D-58 (Update: pending).",  # line 7: an update note without a date or decision
+            "Use D-58 now. *(Update, 7 Nov: the old D-32 was dropped.)*",  # line 8: the cite before the note
+            "Example `(Update, 1 Nov:` then D-58.",  # line 9: a marker inside code is not a marker
+        ]
+        out = self.living("\n".join(lines))
+        for number in (6, 7, 8, 9):
+            self.assertIn(f"docs/guide.md:{number}: cites D-58", out)
+        self.assertNotIn("cites D-32", out)
+
+    def test_code_forms_are_skipped(self):
+        body = "\n".join(
+            [
+                "Inline ``D-58`` and ``a `D-32` b`` are examples.",
+                "~~~",
+                "D-58",
+                "~~~",
+                "````markdown",
+                "```",
+                "D-32",
+                "```",
+                "````",
+            ]
+        )
+        self.assertIn("No problems found", self.living(body))
+
+    def test_history_lines_pass(self):
+        lines = [
+            "D-58 was replaced by D-88 on 6 Oct.",  # names the replacement
+            "D-58 was replaced. *(Update: D-88 is the current rule.)*",  # the replacement in the note
+            "*(Güncelleme, 7 Kasım: D-58 artık geçerli değil.)*",  # dated update marker
+            "*(Update, 7 Nov: D-32 is gone.)*",
+            "- ~~WIP at most 3 (D-32)~~",  # struck through
+            "| Decision list D-01…D-23 | done |",  # a range, not a cite
+            "Decisions D-01 to D-23 were the first batch.",
+            "Do not bump `D-11` → `D-58` without rereading.",  # an example in code
+            "Peer leads are equals (D-88).",  # in force
+            "D-999 is not a decision here.",  # unknown IDs are not this check's business
+        ]
+        self.assertIn("No problems found", self.living("\n".join(lines)))
+
+    def test_fenced_code_and_frontmatter_are_skipped(self):
+        self.write("docs/guide.md", "---\ntype: living_doc\ntitle: D-58 history\n---\n\n```\nD-58\n```\n")
+        self.assertIn("No problems found", self.run_check().stdout)
+
+    def test_only_living_docs_are_read(self):
+        # Research notes and other records are dated snapshots: they may cite what was in force then.
+        self.write("docs/note.md", "Back then D-58 applied.\n")
+        self.assertIn("No problems found", self.run_check().stdout)
+
+
 class RepoPathTest(RepoTestCase):
     """A living doc's file paths in backticks exist; dated records are not read; a named deleting commit passes."""
 
