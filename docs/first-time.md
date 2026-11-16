@@ -15,13 +15,13 @@ The assistant is an AI program that can also use the folder: Claude Code from An
 
 ## Permission
 
-The assistant can change your files, so it has to ask. Read its plan before you say yes; "no" is a decision too. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did.
+The assistant can change your files. It starts only when you ask, and asks before a step that cannot be undone, such as deleting or publishing. This setup asks before changing your files; your assistant's own permission settings matter too. The AI can make mistakes; check what it did.
 
 ## Saved notes
 
 The assistant forgets most of a chat when it closes. project-manager keeps the work in files instead: the job list, the reasons and where you stopped, in `.pm/` inside your project — a folder whose name starts with a dot, which some file windows hide. It is the project's notebook, not the AI's memory: a new chat reads the notes and checks the files again.
 
-![Four panels: you ask for a change; the assistant plans, you approve, it edits and checks; the notes are saved in .pm/; a new chat reads them and names the next step.](../public/next-chat.svg)
+![Four panels: you ask for a change; the assistant plans, edits, checks and asks before what cannot be undone; the notes are saved in .pm/; a new chat reads them and names the next step.](../public/next-chat.svg)
 
 *The new chat reads saved files, not the old assistant's mind.*
 

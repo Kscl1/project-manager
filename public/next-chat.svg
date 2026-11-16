@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="fig-title">
-  <title id="fig-title">Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.</title>
+  <title id="fig-title">Four panels: you ask for a small change; the assistant writes its plan in the task, changes the file and runs the check, and asks first before a step that cannot be undone; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.</title>
   <defs>
     <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0 0 L10 5 L0 10 z" fill="#6b7280"/>
@@ -34,10 +34,11 @@
   <circle cx="390" cy="66" r="14" fill="#b45309"/>
   <text class="num" x="390" y="71" text-anchor="middle">2</text>
   <text class="title" x="414" y="72">The assistant works</text>
-  <text class="body" x="376" y="112">It shows its plan.</text>
-  <text class="body" x="376" y="136">You say yes.</text>
-  <text class="body" x="376" y="160">It changes the file and</text>
-  <text class="body" x="376" y="184">runs the check.</text>
+  <text class="body" x="376" y="112">It writes its plan down.</text>
+  <text class="body" x="376" y="136">It changes the file and</text>
+  <text class="body" x="376" y="160">runs the check.</text>
+  <text class="body" x="376" y="184">It asks before a step</text>
+  <text class="body" x="376" y="208">that cannot be undone.</text>
 
   <path class="arrow" d="M648 164 H674"/>
 

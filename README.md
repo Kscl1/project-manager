@@ -6,9 +6,9 @@ You do not have to learn a new tool: it uses files and programs you already have
 
 **Only used AI on your phone?** [Start here](docs/first-time.md) · [Türkçe](docs/tr/first-time.md)
 
-![Four panels: you ask for a small change; the assistant shows its plan, you approve, it changes the file and runs the check; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.](public/next-chat.svg)
+![Four panels: you ask for a small change; the assistant writes its plan in the task, changes the file and runs the check, and asks first before a step that cannot be undone; the notes are saved in .pm/ in your project; next time a new chat reads the notes, checks the files and names the next step.](public/next-chat.svg)
 
-**The new chat reads saved files, not the old assistant's mind.** In words: you ask for a small change; after your yes the assistant updates the project and writes a work note in `.pm/`; you close the chat; in a new chat you open the same folder and say "continue"; the assistant reads the notes, checks the files and names the next action.
+**The new chat reads saved files, not the old assistant's mind.** In words: you ask for a small change; the assistant updates the project and writes a work note in `.pm/`; you close the chat; in a new chat you open the same folder and say "continue"; the assistant reads the notes, checks the files and names the next action.
 
 **The project's notebook.** Think of `.pm/` as the project's notebook. The assistant writes the job list, the reasons for choices and where you stopped there, as plain text files you can open. It is not the AI's memory, and it does not keep every word of a chat: the assistant reads the notes and checks the files each time.
 

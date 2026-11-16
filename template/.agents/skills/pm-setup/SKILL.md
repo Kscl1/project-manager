@@ -62,7 +62,7 @@ Adapt the workflow to the project, not these rules. When one clashes with the pr
 - Items 1-6 and the charter are children of the setup Epic. Before working on an item, create or reuse its child: `backlog task create "<item>" -p <epic-id> --ac "The outcome is recorded with evidence"`. The later task is outside the Epic; record items 8-10 there or in its children.
 - First read what items 1-6 need, without changing anything. When none of them has anything to merge (no agent rules of the project's own, no hooks, CI or task lists to connect, an empty merge-by-hand list), record all six in one child, `Existing setup`, and show the user what you found as a short list. Make one child per item only for the items that need work.
 - Work on one item at a time. Use what the files already show, so the user need not recite their setup. Decide routine choices; ask only as the root `AGENTS.md` lists. Give a recommendation with its trade-off when asking.
-- Record each outcome in its task, "none", declined and deferred included. Show every change to a user file outside `.pm/` as a diff, explain its effect and wait for a clear yes; a yes to install is not a yes to later merges. Ask before a push, remote change or tracker migration; follow the other safety boundaries in root `AGENTS.md`.
+- Record each outcome in its task, "none", declined and deferred included. Show every change to a user file outside `.pm/` as a diff, explain its effect and wait for a clear yes; a yes to install is not a yes to later merges. During setup, ask before a push, remote change or tracker migration; the ask-first list in root `AGENTS.md` holds as always.
 - Close a child only with checked evidence and a `Doc impact:` line; deferred work stays open.
 
 ## Walk the checklist
