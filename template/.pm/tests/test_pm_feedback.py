@@ -230,6 +230,7 @@ class FeedbackTest(unittest.TestCase):
         for answer in ("n", "no", "", "later", "send it?"):
             self.run_tool("--send", str(report), answer=answer)
         self.assertEqual(self.gh.calls, [])
+        self.assertFalse(report.with_suffix(".sent").exists())  # still on the resume's not-sent list
 
     def test_yes_opens_one_clean_issue(self):
         report, _ = self.write_report()
@@ -241,6 +242,7 @@ class FeedbackTest(unittest.TestCase):
         self.assertTrue(args[args.index("--title") + 1].startswith("[feedback] pm_check crashes on"))
         self.assertIn("### Error excerpt", body)
         self.assertIn(self.display(report), out)  # the owner sees which file went out
+        self.assertTrue(report.with_suffix(".sent").is_file())  # takes the report off the resume's not-sent list
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
 

@@ -39,6 +39,8 @@ WORKTREES_DIR = ROOT / ".worktrees"
 AUDITS_DIR = ROOT / ".pm" / "local" / "audits"
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 WEEKLY_AUDIT_DAYS = 7
+RETRO_DAYS = 7
+FEEDBACK_DIR = ROOT / ".pm" / "local" / "feedback"
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
@@ -372,6 +374,43 @@ def weekly_audit_warning(today):
         return None
     since = f"last: {last.isoformat()}" if last else "never ran"
     return f"- ⚠️ Weekly doc audit due ({since}): .pm/templates/doc-audit.md, kind weekly"
+
+
+def retro_warning(tasks, today):
+    """Warn when no retro task (a title that starts with "Retro") was closed in the last seven days.
+
+    Like the weekly audit, the first week after the package was installed stays silent.
+    """
+    installed = install_date()
+    if installed is not None and (today - installed).days < RETRO_DAYS:
+        return None
+    held = [
+        as_date(task["updated"]) or as_date(task["created"])
+        for task in tasks
+        if task["status"] == "Done" and task["title"].casefold().startswith("retro")
+    ]
+    last = max((day for day in held if day), default=None)
+    if last is not None and (today - last).days < RETRO_DAYS:
+        return None
+    since = f"last: {last.isoformat()}" if last else "never held"
+    return f"- ⚠️ Retro due ({since}): .pm/templates/retro.md"
+
+
+def feedback_lines():
+    """Package feedback reports that were written and not sent. Sending needs the owner's yes, so they wait on the owner.
+
+    pm_feedback.py leaves a `.sent` file beside a report it sent; a report the owner does not want sent is deleted.
+    """
+    try:
+        reports = sorted(FEEDBACK_DIR.glob("*.md"), key=lambda path: path.name)
+    except OSError:
+        return []
+    return [
+        f"- Package feedback report not sent: {display_path(report)}"
+        f" (python .pm/tools/pm_feedback.py --send {display_path(report)}, or delete the file)"
+        for report in reports
+        if ".redacted" not in report.name and not report.with_suffix(".sent").exists()
+    ]
 
 
 # A commit is the record itself when it writes only these: tasks and drafts, worklogs, decisions and lessons.
@@ -791,6 +830,7 @@ def main(brief=False):
     warning_lines = collect_warnings(all_tasks) + audit_warnings(all_tasks)
     for extra in (
         weekly_audit_warning(date.today()),
+        retro_warning(all_tasks + load_closed(), date.today()),
         worklog_gap_warning(),
         worklog_next_warning(all_tasks + load_closed()),
         map_warning(),
@@ -798,7 +838,7 @@ def main(brief=False):
         if extra:
             warning_lines.append(extra)
     drafts = load_tasks(DRAFTS_DIR)
-    waiting = owner_lines(all_tasks) + owner_lines(drafts)
+    waiting = owner_lines(all_tasks) + owner_lines(drafts) + feedback_lines()
     closed = closed_lines(all_tasks + load_closed())
     ready = ready_lines(all_tasks)
     pulls = pr_lines()

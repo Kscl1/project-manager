@@ -241,6 +241,10 @@ def send(root, report, yes, repo):
     code = subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
     if code == 0:
         print(f"Issue opened with the text from {display(source, root)}.")
+        try:  # the resume lists reports that were written and not sent; this file takes the report off that list
+            report.with_suffix(".sent").write_text(f"sent {time.strftime('%Y-%m-%d')}\n", encoding="utf-8")
+        except OSError:
+            pass
     return code
 
 
