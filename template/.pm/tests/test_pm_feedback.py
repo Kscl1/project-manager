@@ -104,13 +104,14 @@ class Recorder:
 
     def __init__(self):
         self.calls = []
+        self.code = 0  # what `gh issue create` exits with
         self.real = subprocess.run
 
     def __call__(self, args, *rest, **kwargs):
         if list(args[:2]) == ["gh", "issue"]:
             self.calls.append((list(args), kwargs.get("input", "")))
             self.encoding = kwargs.get("encoding")
-            return subprocess.CompletedProcess(args, 0)
+            return subprocess.CompletedProcess(args, self.code)
         return self.real(args, *rest, **kwargs)
 
 
@@ -230,6 +231,7 @@ class FeedbackTest(unittest.TestCase):
         for answer in ("n", "no", "", "later", "send it?"):
             self.run_tool("--send", str(report), answer=answer)
         self.assertEqual(self.gh.calls, [])
+        self.assertFalse(report.with_suffix(".sent").exists())  # still on the resume's not-sent list
 
     def test_yes_opens_one_clean_issue(self):
         report, _ = self.write_report()
@@ -241,6 +243,7 @@ class FeedbackTest(unittest.TestCase):
         self.assertTrue(args[args.index("--title") + 1].startswith("[feedback] pm_check crashes on"))
         self.assertIn("### Error excerpt", body)
         self.assertIn(self.display(report), out)  # the owner sees which file went out
+        self.assertTrue(report.with_suffix(".sent").is_file())  # takes the report off the resume's not-sent list
         self.assertClean(" ".join(args) + body)
         self.assertClean(out)
 
@@ -362,6 +365,24 @@ class FeedbackTest(unittest.TestCase):
         args, body = self.gh.calls[0]
         title, _, rest = shown.partition("\n")
         self.assertEqual((args[args.index("--title") + 1], body), (title.lstrip("# ").strip(), rest.strip() + "\n"))
+        self.assertTrue(report.with_suffix(".sent").is_file())  # the copy stood for this report: off the resume's list
+
+    def test_a_failed_send_leaves_no_sent_file(self):
+        report, _ = self.write_report()
+        self.gh.code = 1
+        code, _ = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 1)
+        self.assertEqual(len(self.gh.calls), 1)
+        self.assertFalse(report.with_suffix(".sent").exists())
+
+    def test_a_sent_file_that_cannot_be_written_is_said_out_loud(self):
+        report, _ = self.write_report()
+        with mock.patch.object(Path, "write_text", side_effect=OSError(13, "Permission denied")):
+            code, out = self.run_tool("--send", str(report), "--yes")
+        self.assertEqual(code, 0)  # the issue is open; only the receipt is missing
+        self.assertEqual(len(self.gh.calls), 1)
+        self.assertIn("could not be written (Permission denied)", out)
+        self.assertIn("delete the report or create that file by hand", out)
 
 
 if __name__ == "__main__":

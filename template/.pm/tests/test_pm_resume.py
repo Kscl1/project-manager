@@ -638,6 +638,51 @@ class ResumeSummaryTest(unittest.TestCase):
         (today / "lead-verification.md").write_text("15 findings, all true\n", encoding="utf-8")
         self.assertNotIn("Weekly doc audit", self.run_resume().stdout)
 
+    def test_retro_warning_until_a_retro_task_closed_this_week(self):
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-6", "Retro: the open one", "Active")
+        self.assertIn("Retro due (never held)", self.warnings_section(self.run_resume().stdout), "an open retro")
+
+        closed = write_task(self.root, "TASK-7", "retro: 1 to 7 June", "Done")
+        self.assertIn("Retro due (last: 2025-06-01)", self.warnings_section(self.run_resume().stdout))
+
+        write_task(self.root, "TASK-8", "A task about the retro template", "Done")
+        for number, title in enumerate(("Retrofit the pump", "Retrospective API migration"), start=9):
+            other = write_task(self.root, f"TASK-{number}", title, "Done")
+            recent = f"updated_date: '{date.today().isoformat()} 09:00'\nlabels: []"
+            other.write_text(other.read_text(encoding="utf-8").replace("labels: []", recent), encoding="utf-8")
+        self.assertIn("(last: 2025-06-01)", self.warnings_section(self.run_resume().stdout), "not retros")
+
+        text = closed.read_text(encoding="utf-8")
+        stamp = f"updated_date: '{date.today().isoformat()} 10:00'\nlabels: []"
+        closed.write_text(text.replace("labels: []", stamp), encoding="utf-8")
+        self.assertNotIn("Retro due", self.run_resume().stdout)
+
+    def test_no_retro_warning_in_the_first_week_after_install(self):
+        self.commit_subjects(["setup"])
+        version = self.root / ".pm" / "VERSION"
+        version.write_text("0.1.0\n", encoding="utf-8")
+        self.assertNotIn("Retro due", self.run_resume().stdout)
+
+        old = (datetime.now() - timedelta(days=8)).timestamp()
+        os.utime(version, (old, old))
+        self.assertIn("Retro due (never held)", self.warnings_section(self.run_resume().stdout))
+
+    def test_unsent_feedback_reports_wait_on_the_owner(self):
+        self.commit_subjects(["setup"])
+        folder = self.root / ".pm" / "local" / "feedback"
+        folder.mkdir(parents=True)
+        report = folder / "2026-01-02-101500-feedback.md"
+        report.write_text("# [feedback] pm_check crashes\n", encoding="utf-8")
+        (folder / "2026-01-02-101500-feedback.redacted.md").write_text("# [feedback] copy\n", encoding="utf-8")
+
+        waiting = self.run_resume().stdout.split("## Waiting on the owner\n", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("- Package feedback report not sent: .pm/local/feedback/2026-01-02-101500-feedback.md", waiting)
+        self.assertEqual(waiting.count("Package feedback report"), 1, "the redacted copy is not a second report")
+
+        report.with_suffix(".sent").write_text("sent 2026-01-02\n", encoding="utf-8")
+        self.assertNotIn("Package feedback report", self.run_resume().stdout)
+
     def held_section(self, out):
         return out.split("## Waiting and ageing work", 1)[1].split("\n## ", 1)[0]
 

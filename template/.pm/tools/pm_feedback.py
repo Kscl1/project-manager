@@ -241,7 +241,22 @@ def send(root, report, yes, repo):
     code = subprocess.run(command, input=body.strip() + "\n", encoding="utf-8").returncode
     if code == 0:
         print(f"Issue opened with the text from {display(source, root)}.")
+        mark_sent(root, report)
     return code
+
+
+def mark_sent(root, report):
+    """Leave a `.sent` file beside the report: the resume lists reports that were written and not sent.
+
+    A redacted copy (`name.redacted.md`, `name.redacted-1.md`) stands for `name.md`, so that report gets the file.
+    """
+    name = report.name.split(".redacted", 1)[0] + ".md" if ".redacted" in report.name else report.name
+    marker = report.with_name(name).with_suffix(".sent")
+    try:
+        marker.write_text(f"sent {time.strftime('%Y-%m-%d')}\n", encoding="utf-8")
+    except OSError as error:
+        print(f"The issue was opened, but {display(marker, root)} could not be written ({error.strerror or error}).")
+        print("The resume will go on listing this report as not sent: delete the report or create that file by hand.")
 
 
 def main(argv=None):
