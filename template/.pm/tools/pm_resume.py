@@ -40,6 +40,7 @@ AUDITS_DIR = ROOT / ".pm" / "local" / "audits"
 WORKLOG_DIR = ROOT / ".pm" / "worklog"
 WEEKLY_AUDIT_DAYS = 7
 RETRO_DAYS = 7
+RETRO_TITLE = re.compile(r"retro\b", re.IGNORECASE)  # "Retro: 1 to 7 June", not "Retrofit the pump"
 FEEDBACK_DIR = ROOT / ".pm" / "local" / "feedback"
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
@@ -377,7 +378,7 @@ def weekly_audit_warning(today):
 
 
 def retro_warning(tasks, today):
-    """Warn when no retro task (a title that starts with "Retro") was closed in the last seven days.
+    """Warn when no retro task (a title whose first word is "Retro") was closed in the last seven days.
 
     Like the weekly audit, the first week after the package was installed stays silent.
     """
@@ -387,7 +388,7 @@ def retro_warning(tasks, today):
     held = [
         as_date(task["updated"]) or as_date(task["created"])
         for task in tasks
-        if task["status"] == "Done" and task["title"].casefold().startswith("retro")
+        if task["status"] == "Done" and RETRO_TITLE.match(task["title"])
     ]
     last = max((day for day in held if day), default=None)
     if last is not None and (today - last).days < RETRO_DAYS:

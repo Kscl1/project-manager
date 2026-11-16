@@ -7,7 +7,7 @@ Rules:
 - Each lesson says what happened, the evidence, the cause, the rule that prevents it, and the rule's status.
 - The status is one of four:
   - **proposal (YYYY-MM-DD):** waits for the owner's yes; no session acts on it yet
-  - **trial:** written into a role card or a brief, not yet confirmed by the owner
+  - **trial (YYYY-MM-DD, where):** the owner agreed to try it in the named place; it is not permanent yet
   - **applied:** in force in a named place, and the owner said yes
   - **watching:** no rule yet, the observation goes on
 - A rule is written where it is read: a check, a template, a role card, or a sentence in `AGENTS.md`. The table below says where. The lesson keeps the reason.

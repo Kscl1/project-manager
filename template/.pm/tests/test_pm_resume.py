@@ -647,6 +647,12 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("Retro due (last: 2025-06-01)", self.warnings_section(self.run_resume().stdout))
 
         write_task(self.root, "TASK-8", "A task about the retro template", "Done")
+        for number, title in enumerate(("Retrofit the pump", "Retrospective API migration"), start=9):
+            other = write_task(self.root, f"TASK-{number}", title, "Done")
+            recent = f"updated_date: '{date.today().isoformat()} 09:00'\nlabels: []"
+            other.write_text(other.read_text(encoding="utf-8").replace("labels: []", recent), encoding="utf-8")
+        self.assertIn("(last: 2025-06-01)", self.warnings_section(self.run_resume().stdout), "not retros")
+
         text = closed.read_text(encoding="utf-8")
         stamp = f"updated_date: '{date.today().isoformat()} 10:00'\nlabels: []"
         closed.write_text(text.replace("labels: []", stamp), encoding="utf-8")

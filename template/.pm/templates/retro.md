@@ -1,6 +1,6 @@
 # Retro
 
-A look back at a stretch of work, weekly by default. `pm_board --resume` says when one is due: no task whose title starts with "Retro" was closed in the last seven days. The owner may put it off; the line stays in the resume and says when the last one was held.
+A look back at a stretch of work, weekly by default. `pm_board --resume` says when one is due: no task whose title begins with the word "Retro" was closed in the last seven days. The owner may put it off; the line stays in the resume and says when the last one was held.
 
 The retro is a task. Create it with the title `Retro: <from> to <to>`, write the two parts below into its notes, and close it with the usual final summary. Nothing is fixed inside the retro: a finding that needs work becomes its own task, and the owner sets the order.
 
