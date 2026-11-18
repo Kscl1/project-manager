@@ -977,6 +977,7 @@ class Run:
         self.failures_warned = False  # the shared failure log could not be written; said once
         self.checks = {}  # job id -> the Popen of its background check (state "checking")
         self.progress = {}  # attempt name -> what log_progress last read from its Pi session log
+        self.sample = None  # the pane content pane_quiet last read in this tick, or None
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -1238,50 +1239,61 @@ class Run:
         """Seconds the pane's content has stayed the same while the turn looks settled; None when it cannot be read.
         Herdr showed live turns as settled on 18 Oct (Claude Code mid-turn, Pi with its own agent folder), and
         without a session log nothing else tells such a turn from a finished one."""
+        self.sample = None  # the pane content this read gave, for the stall rule of a held turn (check_stall)
         text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
         if not isinstance(text, str):
             return None
-        digest = sha256(pane_content(text).encode("utf-8")).hexdigest()
+        self.sample = pane_content(text)
+        digest = sha256(self.sample.encode("utf-8")).hexdigest()
         if digest != attempt.get("settled_hash"):
             attempt.update(settled_hash=digest, settled_at=now)
         return now - attempt["settled_at"]
 
-    def warn_pane(self, job, attempt, now, loops=True):
-        """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
+    def pane_seen(self, attempt, content, now):
+        """Note the pane content the stall rule judges by when there is no log; True when it changed since."""
+        digest = sha256(content.encode("utf-8")).hexdigest()
+        previous = attempt.get("seen_hash")
+        changed = previous is not None and digest != previous
+        if changed:
+            attempt["seen_at"] = now
+        attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
+        attempt.setdefault("stall", False)
+        attempt.setdefault("loop", False)
+        attempt["seen_hash"] = digest
+        return changed
 
-        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
-        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
-        a log (another harness, a log not found) the pane decides as before: no change of its content for STALL_S.
-        Progress, or a pane change for the pane rule, ends the episode. The worker is never stopped or prompted.
-        It runs while Herdr reports the turn working, and while a settled turn is held (loops=False: the repeat
-        check stays a check of working panes).
-        """
+    def watch_working(self, job, attempt, now):
+        """The watch of a turn Herdr reports working: one pane read, the repeat check (LOOP), then the stall rule."""
         # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
         text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
         content = pane_content(text) if isinstance(text, str) else None
         if content is not None:
-            digest = sha256(content.encode("utf-8")).hexdigest()
-            previous = attempt.get("seen_hash")
-            changed = previous is not None and digest != previous
-            if changed:
-                attempt["seen_at"] = now
-            attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
-            attempt.setdefault("stall", False)
-            attempt.setdefault("loop", False)
-            if loops:
-                lines = [line for line in content.splitlines() if line.strip()][-30:]
-                line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
-                repeated = line if count >= 15 else None
-                if repeated is None:
-                    attempt["loop"] = False
-                elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
-                    attempt["loop"] = True
-                    self.log(
-                        f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
-                        f"({count} of the last 30 lines); not stopped, the caller decides"
-                    )
-                attempt["loop_line"] = repeated
-            attempt["seen_hash"] = digest
+            changed = self.pane_seen(attempt, content, now)
+            lines = [line for line in content.splitlines() if line.strip()][-30:]
+            line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
+            repeated = line if count >= 15 else None
+            if repeated is None:
+                attempt["loop"] = False
+            elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
+                attempt["loop"] = True
+                self.log(
+                    f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
+                    f"({count} of the last 30 lines); not stopped, the caller decides"
+                )
+            attempt["loop_line"] = repeated
+        self.check_stall(job, attempt, now, content)
+
+    def check_stall(self, job, attempt, now, content, probe=True):
+        """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
+
+        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
+        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
+        a log (another harness, a log not found) the pane decides as before: `content`, which the caller read and
+        noted (pane_seen), unchanged for STALL_S; None when it could not be read. Progress, or a pane change for the
+        pane rule, ends the episode. The worker is never stopped or prompted. It reads no pane itself. It runs while
+        Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
+        provider).
+        """
         progress = log_progress(job, attempt, self.repo, self.progress)
         if progress["doing"] == "unknown":
             if content is None:
@@ -1289,6 +1301,7 @@ class Run:
             since, what = attempt["seen_at"], "new output"
             stalled = now - since >= STALL_S
         else:
+            attempt.setdefault("stall", False)  # a held turn judged by its log alone has no pane to note
             since, what = progress["at"] or attempt.get("prompted", attempt["started"]), "progress"
             stalled = progress["doing"] != "tool" and now - since >= STALL_S
             if progress["doing"] == "tool" and now - since >= STALL_S and attempt.get("busy_since") != since:
@@ -1299,7 +1312,7 @@ class Run:
                 )
         if stalled and not attempt.get("stall"):
             if progress["doing"] == "unknown":
-                found = stall_cause(job, content)  # once: it may probe the provider
+                found = stall_cause(job if probe else {**job, "probe": None}, content)  # once: it may probe
                 cause, said = f"pane: {found}", f"likely {found}"
             else:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
@@ -1423,7 +1436,7 @@ class Run:
             a.pop("asked_question", None)
             if status == "working":
                 a["worked"] = True
-                self.warn_pane(job, a, now)
+                self.watch_working(job, a, now)
             settled = status in SETTLED and now - a.get("prompted", a["started"]) > SETTLE_S
             if status is None or settled:
                 if status is None:
@@ -1454,7 +1467,7 @@ class Run:
                     self.fail_or_retry(job, s, f"worker is gone and {why}")
                     continue
                 size, quiet = session_log(a, now)
-                source, watched = "Pi wrote its log", "Pi's log"
+                source, watched, self.sample = "Pi wrote its log", "Pi's log", None
                 if quiet is None:
                     quiet, source, watched = self.pane_quiet(a, now), "its pane last changed", "the pane"
                 if quiet is not None and quiet < QUIET_S and not self.hold_over(a, now):
@@ -1467,7 +1480,10 @@ class Run:
                         )
                         self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}; {then}")
                     # A log that keeps growing holds the nudge, but only progress in it holds off a stall warning.
-                    self.warn_pane(job, a, now, loops=False)
+                    # Without a log the pane sample pane_quiet just read is judged; a log-backed hold reads no pane.
+                    if self.sample is not None:
+                        self.pane_seen(a, self.sample, now)
+                    self.check_stall(job, a, now, self.sample, probe=False)
                 elif a.get("wait_until", 0) > now:
                     pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
                 elif self.stop_hand_over(job, s, a, why, now):

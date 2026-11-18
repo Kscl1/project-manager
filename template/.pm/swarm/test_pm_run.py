@@ -2990,6 +2990,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
         self.assertIn("retries on provider errors", self.attempt["stall_cause"])
         self.assertEqual(self.renamed(), [MARKED])
+        self.assertNotIn(["agent", "read"], [c[:2] for c in self.herdr_state()["calls"]], "the log decides alone")
 
     def test_an_error_text_no_utf8_file_takes_still_warns_marks_and_the_tick_goes_on(self):
         # JSON can carry a lone surrogate. A settled turn, so both log readers meet it: the HOLD line and the stall.
