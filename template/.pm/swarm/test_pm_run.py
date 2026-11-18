@@ -365,7 +365,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         settings = argv[argv.index("--settings") + 1]
         self.assertEqual(
             argv[argv.index("--") + 1 :],
-            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--settings", settings]
+            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--settings", settings]
             + ["--permission-mode", "acceptEdits"],
         )
         # The project's MCP servers start without the approval dialog that would swallow the brief, and Claude Code's
@@ -375,6 +375,24 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             {"enableAllProjectMcpServers": True, "disableBundledSkills": True},
         )
         self.assertEqual(herdr["ran"], [[herdr["gone"][self.a1]["pane"], "$env:X=1"]])
+
+    def test_claude_code_is_named_after_the_title_and_pi_keeps_its_agent_name(self):
+        # Claude Code shows the name it is given; Pi's --name is how pi_log finds the attempt's session log.
+        title = "Review of the login change"
+        self.jobs(self.job("a", "ok", harness="claude", title=title), self.job("b", "ok", title=title))
+        self.run_pm()
+        gone = self.herdr_state()["gone"]
+        claude = gone[self.a1]["argv"]
+        self.assertEqual(claude[claude.index("--name") + 1], title)
+        self.assertEqual(claude.count("--name"), 1)
+        pi = gone[pm_run.agent_name("b", 1, self.run_dir.resolve())]["argv"]
+        self.assertEqual(pi[pi.index("--name") + 1], pm_run.agent_name("b", 1, self.run_dir.resolve()))
+
+    def test_agy_gets_no_name(self):
+        self.seed_reads("PS> agy --model ok", "> Type a message")
+        self.jobs(self.job("a", "ok", harness="agy", title="Review of the login change"))
+        self.run_pm()
+        self.assertNotIn("--name", self.herdr_state()["gone"][self.a1]["argv"])
 
     def test_pi_is_the_default_harness_and_runs_no_setup(self):
         self.jobs(self.job("a", "ok"))

@@ -111,8 +111,8 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
-                       (harness "claude" starts Claude Code with --model and args, without its bundled skills
-                        (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                       (harness "claude" starts Claude Code with --model, --name <title or id> and args, without its
+                        bundled skills (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
@@ -1006,8 +1006,11 @@ class Run:
         harness = job.get("harness", "pi")
         agent_args = ["--kind", harness, "--pane", str(pane), "--", "--model", job["model"]]
         if harness == "pi":
+            # pi_log finds this attempt's session log by this name, so it stays the agent name, not the title.
             agent_args += ["--thinking", job.get("thinking", "high"), "--name", attempt["name"]]
         agent_args += NO_HELPERS[harness]
+        if harness == "claude":
+            agent_args += ["--name", label]  # Claude Code's display name for the session; nothing reads it back
         if harness == "claude":
             # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
             # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
