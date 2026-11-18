@@ -165,6 +165,7 @@ from urllib.request import urlopen
 MARKER = "<!-- done -->"
 TITLE_MAX = 60  # code points of a job's trimmed title, the label of its Herdr tab
 HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
+STALL_MARK = "⏸ "  # put before a stalled worker's tab label while the stall lasts; the hand-over mark replaces it
 RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
@@ -1284,9 +1285,33 @@ class Run:
                 f"STALLED {job['id']}: no {what} for {round((now - since) / 60, 1):g} min; {said}; not stopped, "
                 "the caller decides"
             )
+            self.mark_stall(job, attempt, True)
         elif not stalled and attempt.get("stall"):
             attempt["stall"] = False
             attempt.pop("stall_cause", None)
+        if not attempt.get("stall") and attempt.get("stall_marked"):
+            self.mark_stall(job, attempt, False)  # also after a nudge, which restarts the stall clock
+
+    def mark_stall(self, job, a, on):
+        """Put STALL_MARK before the label the tab was launched with (on), or put that label back (off).
+
+        The owner reads tabs, not logs. Like the hand-over mark: only the current attempt's tab, from its recorded
+        `label`; an attempt without `tab` or `label` is left alone; the rename waits RENAME_S at most and a failed one
+        costs one log line and nothing else (the episode and the job go on as they were). `stall_marked` says the
+        mark is on the tab, so the end of the episode, or a nudge that restarts the clock, takes it off once.
+        """
+        if not (a.get("tab") and a.get("label")):
+            return
+        a.pop("stall_marked", None)
+        renamed = herdr("tab", "rename", str(a["tab"]), (STALL_MARK if on else "") + a["label"], timeout=RENAME_S)
+        if "error" in renamed:
+            message = " ".join(renamed["error"].get("message", "unknown error").split())
+            what = "gets no stall mark" if on else "keeps its stall mark"
+            self.log(
+                f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} {what} ({message}); the worker is watched as before"
+            )
+        elif on:
+            a["stall_marked"] = True
 
     # ---- one scheduling pass --------------------------------------------------------------------------
     def tick(self, jobs, state, caps):

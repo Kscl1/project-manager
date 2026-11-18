@@ -2776,11 +2776,21 @@ class LogProgressTest(unittest.TestCase):
         self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
 
 
+MARKED, LAUNCHED = ["w1:t2", "⏸ Review"], ["w1:t2", "Review"]  # the stall tests' tab, marked and as launched
+
+
 class StallRuleTest(PmRunFixture, unittest.TestCase):
     """The stall rule through the real tick: a fake Herdr, a Pi session log the test writes, a clock it sets."""
 
     def setUp(self):
         super().setUp()
+        # The fake Herdr for the whole test, so no call can reach a real one, also outside a tick.
+        for patcher in (
+            patch.dict(os.environ, self.env),
+            patch.object(pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.run = pm_run.Run(self.run_dir)
         self.run.repo = self.tmp
         self.attempt = {"name": "worker", "started": T0, "prompted": T0, "seq0": 0, "tab": "w1:t2", "label": "Review"}
@@ -2818,11 +2828,9 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 json.dumps({"n": 0, "reads": screens, "workspaces": [], "gone": {}, "agents": {"worker": agent}}),
                 encoding="utf-8",
             )
-        with patch.dict(os.environ, self.env), patch.object(
-            pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])
-        ), patch.object(pm_run, "STALL_S", 300), patch.object(pm_run, "HARD_S", 10000), patch.object(
-            pm_run, "QUIET_S", 90
-        ), patch.object(pm_run, "SETTLE_S", 20):
+        with patch.dict(os.environ, self.env), patch.object(pm_run, "STALL_S", 300), patch.object(
+            pm_run, "HARD_S", 10000
+        ), patch.object(pm_run, "QUIET_S", 90), patch.object(pm_run, "SETTLE_S", 20):
             for minute in range(start, minutes + 1):
                 now = T0 + 60 * minute
                 if write:
@@ -2836,6 +2844,9 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.state["a"]["state"], "started")
         return self.run.log_path.read_text(encoding="utf-8") if self.run.log_path.exists() else ""
 
+    def renamed(self):
+        return self.herdr_state().get("renamed", [])
+
     def test_retries_alone_are_a_stall_whatever_the_pane_shows(self):
         self.start_log()
         screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
@@ -2847,6 +2858,9 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertIn('(last error: "503 upstream unavailable")', log)
         self.assertTrue(self.attempt["stall"])
         self.assertIn("retries on provider errors", self.attempt["stall_cause"])
+        self.assertEqual(self.renamed(), [MARKED])
+        self.run.hand_over(self.job("a", "hang"), self.state["a"], "test")  # the hand-over mark wins
+        self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
 
     def test_a_running_tool_is_not_a_stall(self):
         self.start_log(pi_line("tool", T0 + 30))
@@ -2854,6 +2868,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("STALLED", log)
         self.assertFalse(self.attempt["stall"])
         self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
+        self.assertEqual(self.renamed(), [])
         failures = self.tmp / ".pm" / "local" / "failures.log"
         self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
 
@@ -2862,6 +2877,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
         self.assertEqual(log.count("STALLED a:"), 1)
         self.assertIn("a request is pending at the provider", self.attempt["stall_cause"])
+        self.assertEqual(self.renamed(), [MARKED])
         with patch("builtins.print") as printed:
             self.run.status([self.job("a", "hang")], self.state)
         shown = "\n".join(call.args[0] for call in printed.call_args_list)
@@ -2877,9 +2893,32 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         )
         self.assertFalse(self.attempt["stall"])
         self.assertNotIn("stall_cause", self.attempt)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED], "the launched label is back")
         log = self.tick_minutes(job, 13, ["frozen"], start=8)
         self.assertEqual(log.count("STALLED a:"), 2)
         self.assertTrue(self.attempt["stall"])
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED, MARKED])
+
+    def test_a_nudge_restarts_the_stall_clock_and_takes_the_mark_off(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.attempt["prompted"] = T0 + 7 * 60  # what a nudge does, before it resets the observation
+        self.run.reset_observation(self.attempt)
+        log = self.tick_minutes(job, 10, ["frozen"], start=7)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertFalse(self.attempt["stall"])
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED])
+
+    def test_a_failed_stall_mark_costs_one_line_and_changes_nothing_else(self):
+        self.env["FAKE_RENAME_ERROR"] = "1"
+        self.start_log(pi_line("result", T0 + 30))
+        log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
+        self.assertEqual(log.count("MARK-FAILED a: "), 1)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertTrue(self.attempt["stall"])
+        self.assertNotIn("stall_marked", self.attempt, "no mark on the tab, so none to take off")
+        self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
 
     def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
         # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
@@ -2892,6 +2931,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertFalse(self.snapshots[4]["stall"])
         self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
         self.assertIn("retries on provider errors", self.attempt["stall_cause"])
+        self.assertEqual(self.renamed(), [MARKED])
 
     def test_without_a_log_the_pane_decides(self):
         for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
@@ -2902,6 +2942,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 log = self.tick_minutes(self.job("a", "hang", harness="claude"), 8, screens)
                 self.assertEqual(log.count("STALLED a: no new output for 5 min"), stalls)
                 self.assertEqual(self.attempt["stall"], bool(stalls))
+                self.assertEqual(self.renamed(), [MARKED] * stalls)
 
 
 # A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
