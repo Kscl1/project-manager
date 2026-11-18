@@ -139,9 +139,15 @@ without a check, a question, a stall...) is also appended, one line with date an
 <repo>/.pm/local/failures.log, shared by all runs of that repo root (each git worktree has its own), so
 failures are recorded when they happen, not recalled later. Give run directories unique names: the line keeps only
 the directory's own name.
-PM_RUN_STALL_S (300 seconds): warn the caller once per inactivity episode; never stop or prompt the worker.
-Working panes are also checked for suspected repeating output. Warnings reach stdout and pm_run.log; the receipt keeps stall/loop flags.
-Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new stall warning.
+PM_RUN_STALL_S (300 seconds): a worker that makes no progress for this long is stalled. pm_run says so once per
+episode: a STALLED line, the receipt's stall flag and stall_cause (--status shows both), and a pause sign (STALL_MARK)
+before the label of its Herdr tab until it makes progress again. It never stops, prompts or hands over a worker for it.
+A Pi worker is judged by its session log, whatever its pane shows and whether Herdr calls its turn working or settled:
+progress is a tool's result or a model answer written after the last prompt, not the failed calls Pi retries by
+itself, and a tool that is still running is not a stall (one BUSY line at most). A harness without a log pm_run knows (Claude Code, agy),
+or a Pi log not found, is still judged by its pane: no change of its content for that long. A nudge restarts the clock.
+Working panes are also checked for suspected repeating output (LOOP; the receipt keeps the loop flag).
+Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new pane-judged stall.
 Pi diagnostics: PM_RUN_PI_SESSIONS overrides ~/.pi/agent/sessions; log lookup is best-effort, not completion evidence.
 """
 
