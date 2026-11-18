@@ -1221,13 +1221,15 @@ class Run:
             attempt.update(settled_hash=digest, settled_at=now)
         return now - attempt["settled_at"]
 
-    def warn_pane(self, job, attempt, now):
+    def warn_pane(self, job, attempt, now, loops=True):
         """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
 
         With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
         Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
         a log (another harness, a log not found) the pane decides as before: no change of its content for STALL_S.
         Progress, or a pane change for the pane rule, ends the episode. The worker is never stopped or prompted.
+        It runs while Herdr reports the turn working, and while a settled turn is held (loops=False: the repeat
+        check stays a check of working panes).
         """
         # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
         text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
@@ -1241,18 +1243,20 @@ class Run:
             attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
             attempt.setdefault("stall", False)
             attempt.setdefault("loop", False)
-            lines = [line for line in content.splitlines() if line.strip()][-30:]
-            line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
-            repeated = line if count >= 15 else None
-            if repeated is None:
-                attempt["loop"] = False
-            elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
-                attempt["loop"] = True
-                self.log(
-                    f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
-                    f"({count} of the last 30 lines); not stopped, the caller decides"
-                )
-            attempt.update(seen_hash=digest, loop_line=repeated)
+            if loops:
+                lines = [line for line in content.splitlines() if line.strip()][-30:]
+                line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
+                repeated = line if count >= 15 else None
+                if repeated is None:
+                    attempt["loop"] = False
+                elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
+                    attempt["loop"] = True
+                    self.log(
+                        f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
+                        f"({count} of the last 30 lines); not stopped, the caller decides"
+                    )
+                attempt["loop_line"] = repeated
+            attempt["seen_hash"] = digest
         progress = log_progress(job, attempt, self.repo, self.progress)
         if progress["doing"] == "unknown":
             if content is None:
@@ -1396,6 +1400,8 @@ class Run:
                             else "pm_run nudges it in the same session"
                         )
                         self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}; {then}")
+                    # A log that keeps growing holds the nudge, but only progress in it holds off a stall warning.
+                    self.warn_pane(job, a, now, loops=False)
                 elif a.get("wait_until", 0) > now:
                     pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
                 elif self.stop_hand_over(job, s, a, why, now):

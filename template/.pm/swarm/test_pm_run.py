@@ -2803,11 +2803,17 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
             f.write(line)
         os.utime(self.session, (now, now))
 
-    def tick_minutes(self, job, minutes, screens, behaviour="hang", write=None, start=0):
+    def tick_minutes(self, job, minutes, screens, write=None, start=0):
         """Tick once a simulated minute from minute `start` on; `write(now)` adds to the log before each tick.
         Returns the run's log. The fake Herdr must never have been prompted, stopped or closed by the stall."""
         if not start:
-            agent = {"behaviour": behaviour, "prompts": ["brief"], "pane": "w1:p2", "completion_seq": 1}
+            agent = {
+                "behaviour": job["model"],
+                "prompts": ["brief"],
+                "prompted": 0,
+                "pane": "w1:p2",
+                "completion_seq": 1,
+            }
             self.fake_state.write_text(
                 json.dumps({"n": 0, "reads": screens, "workspaces": [], "gone": {}, "agents": {"worker": agent}}),
                 encoding="utf-8",
@@ -2874,6 +2880,18 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         log = self.tick_minutes(job, 13, ["frozen"], start=8)
         self.assertEqual(log.count("STALLED a:"), 2)
         self.assertTrue(self.attempt["stall"])
+
+    def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
+        # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
+        self.start_log()
+        log = self.tick_minutes(
+            self.job("a", "nothing"), 8, ["Retrying"], write=lambda now: self.add_log(pi_line("error", now), now)
+        )
+        self.assertEqual(log.count("HOLD a:"), 1)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertFalse(self.snapshots[4]["stall"])
+        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
+        self.assertIn("retries on provider errors", self.attempt["stall_cause"])
 
     def test_without_a_log_the_pane_decides(self):
         for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
