@@ -89,7 +89,8 @@ if cmd == ["workspace", "create"]:
 if cmd == ["tab", "create"]:
     ws = next(w for w in state["workspaces"] if w["workspace_id"] == opt("--workspace"))
     ws["panes"].append(f"{ws['workspace_id']}:p{n}")
-    reply({"type": "tab_created", "tab": {"tab_id": f"{ws['workspace_id']}:t{n}"}, "root_pane": {"pane_id": ws["panes"][-1]}})
+    state.setdefault("tabs", []).append(f"{ws['workspace_id']}:t{n}")  # every tab id handed out, in order
+    reply({"type": "tab_created", "tab": {"tab_id": state["tabs"][-1]}, "root_pane": {"pane_id": ws["panes"][-1]}})
 if cmd == ["tab", "rename"]:
     if os.environ.get("FAKE_RENAME_ERROR"):
         fail("server_timeout", "rename timed out")
@@ -455,11 +456,44 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 (self.run_dir / "receipts.json").unlink(missing_ok=True)
                 receipt, herdr = self.hand_over_at_launch(**extra)
                 self.assertEqual(receipt["state"], "handed-over")
-                tab = receipt["attempts"][0]["tab"]
-                created = [c for c in herdr["calls"] if c[:2] == ["tab", "create"]]
-                self.assertEqual(len(created), 1)
-                self.assertTrue(tab, "the attempt keeps the tab it was started in")
+                (tab,) = herdr["tabs"]  # the id the fake handed out, not only what the receipt says
+                self.assertEqual(receipt["attempts"][0]["tab"], tab, "the attempt keeps the tab it was started in")
+                self.assertEqual(receipt["attempts"][0]["label"], label)
                 self.assertEqual(herdr["renamed"], [[tab, "⚠ " + label]])
+
+    def launched(self, run, job, state):
+        """Start one more attempt of `job` through the fake Herdr, as a tick would; return the attempt."""
+        n = len(state.setdefault(job["id"], {"state": "started", "attempts": []})["attempts"]) + 1
+        attempt = {"name": pm_run.agent_name(job["id"], n, self.run_dir.resolve()), "started": time.time()}
+        state[job["id"]]["attempts"].append(attempt)
+        self.assertTrue(run.launch(job, attempt, state))
+        return attempt
+
+    def test_the_mark_goes_on_the_current_tab_with_the_label_it_was_launched_with(self):
+        # jobs.json is read again every tick: a title edited while the worker runs never labelled its tab.
+        run, state = pm_run.Run(self.run_dir), {}
+        run.repo = self.tmp
+        with patch.dict(os.environ, self.env), patch.object(pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])):
+            self.launched(run, self.job("a", "ok", title="First title"), state)
+            current = self.launched(run, self.job("a", "ok", title="Second title"), state)
+            run.hand_over(self.job("a", "ok", title="Edited after launch"), state["a"], "test")
+        herdr = self.herdr_state()
+        self.assertEqual(len(herdr["tabs"]), 2)
+        self.assertEqual(current["tab"], herdr["tabs"][1])
+        self.assertEqual(herdr["renamed"], [[herdr["tabs"][1], "⚠ Second title"]], "the earlier tab is untouched")
+
+    def test_an_attempt_without_a_recorded_tab_or_label_stays_unmarked(self):
+        run = pm_run.Run(self.run_dir)
+        for attempt in ({"pane": "w1:p2"}, {"pane": "w1:p2", "tab": "w1:t2"}):
+            with self.subTest(attempt=attempt), patch.object(pm_run, "herdr") as herdr:
+                run.mark_handed_over(self.job("a", "ok", title="Review"), attempt)
+                herdr.assert_not_called()
+
+    def test_the_tab_rename_waits_five_seconds_at_most(self):
+        run = pm_run.Run(self.run_dir)
+        with patch.object(pm_run, "herdr", return_value={"type": "ok"}) as herdr:
+            run.mark_handed_over(self.job("a", "ok"), {"tab": "w1:t2", "label": "a"})
+        herdr.assert_called_once_with("tab", "rename", "w1:t2", "⚠ a", timeout=5)
 
     def test_a_run_left_with_handed_over_tabs_closes_no_pane(self):
         # The receipts cannot tell whether the first shell is still idle (the owner may work in it), so it stays.

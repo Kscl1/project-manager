@@ -30,7 +30,7 @@ RESUME, or the full brief again when no turn ran (no completion_seq advance and 
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
-Every hand-over puts "⚠ " before the tab's label, so the tab stands out from live work.
+Every hand-over puts "⚠ " before the label the tab was launched with, so it stands out from live work.
 A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
 out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
@@ -164,6 +164,7 @@ from urllib.request import urlopen
 MARKER = "<!-- done -->"
 TITLE_MAX = 60  # characters of a job's title, the label of its Herdr tab
 HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
+RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
 API_NOTE = "(at API prices; plans and free models cost less)"
@@ -1000,6 +1001,7 @@ class Run:
         pane = tab.get("result", {}).get("root_pane", {}).get("pane_id")
         attempt["pane"] = pane
         attempt["tab"] = tab.get("result", {}).get("tab", {}).get("tab_id")  # renamed if the job is handed over
+        attempt["label"] = label  # the mark is built from this, not from a title edited in jobs.json since
         if not pane:
             attempt["launch_error"] = tab.get("error", {}).get("message", "tab has no pane")
             return False
@@ -1692,13 +1694,17 @@ class Run:
     def mark_handed_over(self, job, a):
         """Put HANDED_MARK before the label of a handed-over job's tab, so it stands out from live work.
 
-        A symbol, not a word, so it reads the same in every project language. A failed rename costs one log line and
-        nothing else. The tab closes with its pane when --retry closes the worker, so nothing renames it back; a tab
-        that lives on (a --stop of an ended job closes nothing) keeps the mark while its session stays unwatched.
+        A symbol, not a word, so it reads the same in every project language. Only the current attempt's tab is
+        renamed, and the mark goes before the label that tab was launched with: jobs.json is read again every tick, so
+        a title edited since then would put a label on the tab it never had. An attempt with no recorded tab or label
+        (receipts written by an older pm_run) stays unmarked. The rename is cosmetic, so it waits RENAME_S at most,
+        and a failed one costs one log line and nothing else. The tab closes with its pane when --retry closes the
+        worker, so nothing renames it back; a tab that lives on (a --stop of an ended job closes nothing) keeps the
+        mark while its session stays unwatched.
         """
-        if not a.get("tab"):  # an attempt started before tabs were recorded
+        if not (a.get("tab") and a.get("label")):
             return
-        renamed = herdr("tab", "rename", str(a["tab"]), HANDED_MARK + tab_label(job))
+        renamed = herdr("tab", "rename", str(a["tab"]), HANDED_MARK + a["label"], timeout=RENAME_S)
         if "error" in renamed:
             message = " ".join(renamed["error"].get("message", "unknown error").split())
             self.log(f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} keeps its label ({message}); still handed over")
