@@ -787,11 +787,19 @@ def turn_end(job, attempt, repo):
         return "session log not found for this attempt (bounded Pi log lookup)"
     messages = [e.get("message") for e in found[1] if e.get("type") == "message"]
     last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
-    attempt["stopReason"] = last.get("stopReason")
-    attempt["errorMessage"] = last.get("errorMessage")
-    if last.get("stopReason") == "error":
-        return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
-    return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+    attempt["stopReason"] = log_text(last.get("stopReason"))
+    attempt["errorMessage"] = log_text(last.get("errorMessage"))
+    if attempt["stopReason"] == "error":
+        return f"provider error: {attempt['errorMessage'] or 'no error message in session log'}"
+    return f"Pi stopReason: {attempt['stopReason'] or 'not found in session log sample'}"
+
+
+def log_text(value):
+    """A string read from a Pi log, safe to write as UTF-8; anything else as it was.
+
+    JSON can hold a lone surrogate (half of an escaped character pair), and no UTF-8 file takes one: each becomes "?".
+    """
+    return value.encode("utf-8", "replace").decode("utf-8") if isinstance(value, str) else value
 
 
 def log_time(entry):
@@ -866,7 +874,8 @@ def log_progress(job, attempt, repo, seen):
                     continue  # a context_edit, a session line, anything that is not a message
                 role, stop = message.get("role"), message.get("stopReason")
                 if role == "assistant" and stop == "error":
-                    last.update(kind="retry", error=" ".join(str(message.get("errorMessage") or "").split())[:160])
+                    error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
+                    last.update(kind="retry", error=error)
                     continue
                 last.update(kind="tool" if role == "assistant" and stop == "toolUse" else "pending", error=None)
                 if role in ("assistant", "toolResult"):

@@ -2813,21 +2813,26 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
             f.write(line)
         os.utime(self.session, (now, now))
 
-    def tick_minutes(self, job, minutes, screens, write=None, start=0):
+    def tick_minutes(self, job, minutes, screens, write=None, start=0, others=()):
         """Tick once a simulated minute from minute `start` on; `write(now)` adds to the log before each tick.
-        Returns the run's log. The fake Herdr must never have been prompted, stopped or closed by the stall."""
+        `others`: more (job, attempt) pairs, ticked after this one. Returns the run's log. The fake Herdr must never
+        have been prompted, stopped or closed by the stall."""
         if not start:
-            agent = {
-                "behaviour": job["model"],
-                "prompts": ["brief"],
-                "prompted": 0,
-                "pane": "w1:p2",
-                "completion_seq": 1,
+            agents = {
+                attempt["name"]: {
+                    "behaviour": each["model"],
+                    "prompts": ["brief"],
+                    "prompted": 0,
+                    "pane": f"w1:p{n + 2}",
+                    "completion_seq": 1,
+                }
+                for n, (each, attempt) in enumerate(((job, self.attempt), *others))
             }
             self.fake_state.write_text(
-                json.dumps({"n": 0, "reads": screens, "workspaces": [], "gone": {}, "agents": {"worker": agent}}),
+                json.dumps({"n": 0, "reads": screens, "workspaces": [], "gone": {}, "agents": agents}),
                 encoding="utf-8",
             )
+        jobs = [job, *(each for each, _ in others)]
         with patch.dict(os.environ, self.env), patch.object(pm_run, "STALL_S", 300), patch.object(
             pm_run, "HARD_S", 10000
         ), patch.object(pm_run, "QUIET_S", 90), patch.object(pm_run, "SETTLE_S", 20):
@@ -2836,7 +2841,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 if write:
                     write(now)
                 with patch.object(pm_run.time, "time", return_value=now):
-                    self.run.tick([job], self.state, {})
+                    self.run.tick(jobs, self.state, {})
                 self.snapshots.append(dict(self.attempt))
         calls = self.herdr_state()["calls"]
         for forbidden in (["agent", "prompt"], ["pane", "close"], ["agent", "stop"]):
@@ -2932,6 +2937,24 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
         self.assertIn("retries on provider errors", self.attempt["stall_cause"])
         self.assertEqual(self.renamed(), [MARKED])
+
+    def test_an_error_text_no_utf8_file_takes_still_warns_marks_and_the_tick_goes_on(self):
+        # JSON can carry a lone surrogate. A settled turn, so both log readers meet it: the HOLD line and the stall.
+        self.start_log()
+        bad = lambda now: pi_line("error", now).replace("503 upstream  unavailable", "bad \\ud800 text")  # noqa: E731
+        other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
+        self.state["b"] = {"state": "started", "attempts": [other]}
+        log = self.tick_minutes(
+            self.job("a", "nothing"),
+            8,
+            ["frozen"],
+            write=lambda now: self.add_log(bad(now), now),
+            others=[(self.job("b", "hang", harness="claude"), other)],
+        )
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertIn('(last error: "bad ? text")', log)
+        self.assertEqual(self.renamed(), [MARKED])
+        self.assertEqual(self.herdr_state()["calls"].count(["agent", "get", "other"]), 9, "every tick reached b")
 
     def test_without_a_log_the_pane_decides(self):
         for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
