@@ -60,7 +60,8 @@ A dependency that failed, was blocked, stopped, handed-over, check-failed or is 
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
 exists as a file, the folder that will hold the report exists, `verify` and `setup` are one line of text with no
 control character except a tab, every entry of `helpers` names a model, or model, harness and thinking, and a `title`
-is one line of text, not blank, with no control character and at most 60 characters. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
+is one line of text, not blank, with no control character or lone surrogate and at most 60 code points after trimming
+(not display width). The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it, and it never waits without a signal:
@@ -93,7 +94,7 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                                                             passes starts a new attempt instead)
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
-                       "title": "Review of the login change",  (optional: one line of at most 60 characters, the
+                       "title": "Review of the login change",  (optional: one line of at most 60 code points, the
                                                 label of the job's Herdr tab; without it the tab shows the id, which
                                                 stays the job's key everywhere else)
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
@@ -162,7 +163,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
-TITLE_MAX = 60  # characters of a job's title, the label of its Herdr tab
+TITLE_MAX = 60  # code points of a job's trimmed title, the label of its Herdr tab
 HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
 RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
@@ -612,16 +613,25 @@ def control_mark(text):
 
 
 def title_fault(title):
-    """Why a job's `title` cannot label its Herdr tab, or None: one line of text, at most 60 characters."""
+    """Why a job's `title` cannot label its Herdr tab, or None.
+
+    The title travels to Herdr on a command line, so it must be one line of text that UTF-8 can encode: no control
+    character and no lone surrogate (JSON "\\ud800" parses to one). Its length is counted in code points after
+    trimming, not in display width: "e" plus a combining accent is two, a wide letter is one. At most TITLE_MAX.
+    """
     if not isinstance(title, str):
         return "title must be text"
     if not title.strip():
         return "title is empty"
     for char in title:
-        if unicodedata.category(char) in ("Cc", "Zl", "Zp"):  # control characters, tab and line breaks included
+        kind = unicodedata.category(char)
+        if kind in ("Cc", "Zl", "Zp"):  # control characters, tab and line breaks included
             return f"title holds a line break or control character ({json.dumps(char)[1:-1]})"
-    if len(title.strip()) > TITLE_MAX:
-        return f"title is {len(title.strip())} characters long, at most {TITLE_MAX} fit a tab"
+        if kind == "Cs":
+            return f"title holds a lone surrogate ({json.dumps(char)[1:-1]}), which a command line cannot carry"
+    length = len(title.strip())
+    if length > TITLE_MAX:
+        return f"title is {length} code points long after trimming, at most {TITLE_MAX} fit a tab (not display width)"
     return None
 
 
@@ -672,8 +682,9 @@ def preflight(job, repo):
     task = job.get("task")
     if task is not None and not (isinstance(task, str) and task.strip()):
         return "task must be a task ID (text)"
-    if "title" in job and title_fault(job["title"]):
-        return title_fault(job["title"])
+    fault = title_fault(job["title"]) if "title" in job else None
+    if fault:
+        return fault
     helpers = job.get("helpers")
     if helpers and not isinstance(helpers, list):
         return "helpers must be a list of model names or objects"

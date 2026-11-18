@@ -1016,7 +1016,13 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             ("Review of\nthe login change", r"title holds a line break or control character (\n)"),
             ("Review\tof the login change", r"title holds a line break or control character (\t)"),
             ("Review of the login change\u2028", r"title holds a line break or control character (\u2028)"),
-            ("x" * 61, "title is 61 characters long, at most 60 fit a tab"),
+            ("x" * 61, "title is 61 code points long after trimming, at most 60 fit a tab (not display width)"),
+            # 31 "e" + combining acute pairs look like 31 letters but are 62 code points: the count is code points.
+            ("e\u0301" * 31, "title is 62 code points long after trimming, at most 60 fit a tab (not display width)"),
+            (
+                json.loads(r'"Review \ud800"'),
+                r"title holds a lone surrogate (\ud800), which a command line cannot carry",
+            ),
         )
         for title, why in cases:
             with self.subTest(title=title):
@@ -1029,10 +1035,23 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(state["a"]["why"], why)
                 self.assertIn(f"PREFLIGHT a: {why}", run.log_path.read_text("utf-8"), "the line names the job")
 
-    def test_a_title_of_sixty_characters_after_stripping_passes_preflight(self):
-        job = self.job("a", "ok", title="  " + "ş" * 60 + " ")
-        self.assertIsNone(pm_run.preflight(job, self.tmp))
-        self.assertEqual(pm_run.tab_label(job), "ş" * 60)
+    def test_a_title_of_sixty_code_points_after_stripping_passes_preflight(self):
+        for title in ("x" * 60, "e\u0301" * 30, "  " + "ş" * 60 + " "):
+            with self.subTest(title=title):
+                job = self.job("a", "ok", title=title)
+                self.assertIsNone(pm_run.preflight(job, self.tmp))
+                self.assertEqual(pm_run.tab_label(job), title.strip())
+
+    def test_a_lone_surrogate_in_jobs_json_fails_preflight_and_the_run_goes_on(self):
+        # JSON may spell a code point UTF-8 cannot encode; it must never reach Herdr's command line.
+        self.jobs(self.job("a", "ok", title=json.loads(r'"Review \ud800"')), self.job("b", "ok"))
+        self.assertIn(r"\ud800", (self.run_dir / "jobs.json").read_text(encoding="utf-8"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual((state["a"]["state"], state["b"]["state"]), ("failed", "verified"))
+        self.assertIn("lone surrogate", state["a"]["why"])
+        self.assertEqual(self.tab_labels(), ["b"], "no tab is opened for the job with the bad title")
 
     def test_a_job_with_a_task_field_runs_as_before(self):
         self.jobs(self.job("a", "ok", task="REQ-12"))
