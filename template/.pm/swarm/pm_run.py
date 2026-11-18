@@ -1027,7 +1027,6 @@ class Run:
         agent_args += NO_HELPERS[harness]
         if harness == "claude":
             agent_args += ["--name", label]  # Claude Code's display name for the session; nothing reads it back
-        if harness == "claude":
             # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
             # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
             settings = self.root / "claude-settings.json"
