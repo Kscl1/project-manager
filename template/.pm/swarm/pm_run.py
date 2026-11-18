@@ -951,6 +951,7 @@ class Run:
         self.bad = {}  # file name -> the parse error last logged for it
         self.failures_warned = False  # the shared failure log could not be written; said once
         self.checks = {}  # job id -> the Popen of its background check (state "checking")
+        self.progress = {}  # attempt name -> what log_progress last read from its Pi session log
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -1206,6 +1207,7 @@ class Run:
     def reset_observation(self, attempt):
         attempt.update(seen_hash=None, seen_at=attempt["prompted"], stall=False, loop=False, loop_line=None)
         attempt.update(settled_hash=None, settled_at=None)
+        attempt.pop("stall_cause", None)  # the stall clock restarts at the prompt, by the log too (log_progress)
 
     def pane_quiet(self, attempt, now):
         """Seconds the pane's content has stayed the same while the turn looks settled; None when it cannot be read.
@@ -1220,37 +1222,67 @@ class Run:
         return now - attempt["settled_at"]
 
     def warn_pane(self, job, attempt, now):
+        """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
+
+        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
+        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
+        a log (another harness, a log not found) the pane decides as before: no change of its content for STALL_S.
+        Progress, or a pane change for the pane rule, ends the episode. The worker is never stopped or prompted.
+        """
         # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
         text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
-        if not isinstance(text, str):
-            return  # failed reads neither alter the episode nor warn
-        content = pane_content(text)
-        digest = sha256(content.encode("utf-8")).hexdigest()
-        previous = attempt.get("seen_hash")
-        changed = previous is not None and digest != previous
-        if changed:
-            attempt.update(seen_at=now, stall=False)
-        attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
-        attempt.setdefault("stall", False)
-        attempt.setdefault("loop", False)
-        lines = [line for line in content.splitlines() if line.strip()][-30:]
-        line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
-        repeated = line if count >= 15 else None
-        if repeated is None:
-            attempt["loop"] = False
-        elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
-            attempt["loop"] = True
+        content = pane_content(text) if isinstance(text, str) else None
+        if content is not None:
+            digest = sha256(content.encode("utf-8")).hexdigest()
+            previous = attempt.get("seen_hash")
+            changed = previous is not None and digest != previous
+            if changed:
+                attempt["seen_at"] = now
+            attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
+            attempt.setdefault("stall", False)
+            attempt.setdefault("loop", False)
+            lines = [line for line in content.splitlines() if line.strip()][-30:]
+            line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
+            repeated = line if count >= 15 else None
+            if repeated is None:
+                attempt["loop"] = False
+            elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
+                attempt["loop"] = True
+                self.log(
+                    f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
+                    f"({count} of the last 30 lines); not stopped, the caller decides"
+                )
+            attempt.update(seen_hash=digest, loop_line=repeated)
+        progress = log_progress(job, attempt, self.repo, self.progress)
+        if progress["doing"] == "unknown":
+            if content is None:
+                return  # failed reads neither alter the episode nor warn
+            since, what = attempt["seen_at"], "new output"
+            stalled = now - since >= STALL_S
+        else:
+            since, what = progress["at"] or attempt.get("prompted", attempt["started"]), "progress"
+            stalled = progress["doing"] != "tool" and now - since >= STALL_S
+            if progress["doing"] == "tool" and now - since >= STALL_S and attempt.get("busy_since") != since:
+                attempt["busy_since"] = since  # once per tool run: a long build or test run is work, not a stall
+                self.log(
+                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but Pi's log shows a "
+                    "tool still running; not a stall"
+                )
+        if stalled and not attempt.get("stall"):
+            if progress["doing"] == "unknown":
+                found = stall_cause(job, content)  # once: it may probe the provider
+                cause, said = f"pane: {found}", f"likely {found}"
+            else:
+                error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
+                cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
+            attempt.update(stall=True, stall_cause=cause)
             self.log(
-                f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
-                f"({count} of the last 30 lines); not stopped, the caller decides"
+                f"STALLED {job['id']}: no {what} for {round((now - since) / 60, 1):g} min; {said}; not stopped, "
+                "the caller decides"
             )
-        attempt.update(seen_hash=digest, loop_line=repeated)
-        if now - attempt["seen_at"] >= STALL_S and not attempt["stall"]:
-            attempt["stall"] = True
-            self.log(
-                f"STALLED {job['id']}: no new output for {round((now - attempt['seen_at']) / 60, 1):g} min; "
-                f"likely {stall_cause(job, content)}; not stopped, the caller decides"
-            )
+        elif not stalled and attempt.get("stall"):
+            attempt["stall"] = False
+            attempt.pop("stall_cause", None)
 
     # ---- one scheduling pass --------------------------------------------------------------------------
     def tick(self, jobs, state, caps):
@@ -1825,7 +1857,7 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "stall_cause", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
             if s.get("why"):
