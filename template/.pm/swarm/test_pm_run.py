@@ -90,6 +90,11 @@ if cmd == ["tab", "create"]:
     ws = next(w for w in state["workspaces"] if w["workspace_id"] == opt("--workspace"))
     ws["panes"].append(f"{ws['workspace_id']}:p{n}")
     reply({"type": "tab_created", "tab": {"tab_id": f"{ws['workspace_id']}:t{n}"}, "root_pane": {"pane_id": ws["panes"][-1]}})
+if cmd == ["tab", "rename"]:
+    if os.environ.get("FAKE_RENAME_ERROR"):
+        fail("server_timeout", "rename timed out")
+    state.setdefault("renamed", []).append(args[2:])
+    reply({"type": "ok"})
 if cmd == ["agent", "start"]:
     name, behaviour = args[2], opt("--model")
     if os.environ.get("FAKE_TRUST"):
@@ -434,6 +439,41 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         herdr = self.herdr_state()
         self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the menu")
         self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
+
+    def hand_over_at_launch(self, **extra):
+        """Run one agy job that is handed over at its first-run screen; return its receipt and the fake's state."""
+        self.seed_reads("PS> agy --model ok", "Welcome to Antigravity CLI!\n\nChoose your color scheme:\n  > terminal")
+        self.jobs(self.job("a", "ok", harness="agy", **extra))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.receipts()["a"], self.herdr_state()
+
+    def test_a_handed_over_tab_is_marked_before_its_label(self):
+        for extra, label in (({"title": "Review of the login change"}, "Review of the login change"), ({}, "a")):
+            with self.subTest(label=label):
+                self.fake_state.unlink(missing_ok=True)
+                (self.run_dir / "receipts.json").unlink(missing_ok=True)
+                receipt, herdr = self.hand_over_at_launch(**extra)
+                self.assertEqual(receipt["state"], "handed-over")
+                tab = receipt["attempts"][0]["tab"]
+                created = [c for c in herdr["calls"] if c[:2] == ["tab", "create"]]
+                self.assertEqual(len(created), 1)
+                self.assertTrue(tab, "the attempt keeps the tab it was started in")
+                self.assertEqual(herdr["renamed"], [[tab, "⚠ " + label]])
+
+    def test_a_failed_tab_mark_is_logged_once_and_changes_nothing_else(self):
+        receipt, _ = self.hand_over_at_launch()
+        self.fake_state.unlink()
+        (self.run_dir / "receipts.json").unlink()
+        self.env["FAKE_RENAME_ERROR"] = "1"
+        failed, herdr = self.hand_over_at_launch()
+        self.assertEqual(failed["state"], receipt["state"])
+        self.assertEqual(failed["attempts"][0]["why"], receipt["attempts"][0]["why"])
+        self.assertNotIn("renamed", herdr)
+        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
+        self.assertEqual(log.count("MARK-FAILED a: "), 1)
+        self.assertIn("still handed over", log)
+        self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
 
     def test_missing_brief_is_checked_again_before_a_retry(self):
         out = self.tmp / "out" / "a.md"
