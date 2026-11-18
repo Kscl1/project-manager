@@ -2789,6 +2789,22 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(total.endswith(THE_NOTE), f"the total line ends with the note: {total!r}")
         self.assertNotIn("cost", out.replace(THE_NOTE, ""), "no column is headed cost any more")
 
+    def test_status_keeps_a_space_between_a_long_job_id_and_its_state(self):
+        # An id longer than the old 16-character column ran into its state ("...dongusustarted").
+        long_id, gone_id = "x" * 40, "y" * 41
+        self.jobs(self.job(long_id, "ok"), self.job("a", "ok"))
+        state = {
+            long_id: {"state": "started", "attempts": []},
+            gone_id: {"state": "verified", "attempts": []},
+            "_herdr_workspace": "w1",
+        }
+        (self.run_dir / "receipts.json").write_text(json.dumps(state), encoding="utf-8")
+        lines = self.run_pm("--status").stdout.splitlines()
+        self.assertRegex(lines[0], r"^job {39}")
+        self.assertRegex(next(line for line in lines if line.startswith(long_id)), rf"^{long_id} +started ")
+        self.assertRegex(next(line for line in lines if line.startswith("a ")), r"^a {41}pending ", "one column")
+        self.assertRegex(next(line for line in lines if line.startswith(gone_id)), rf"^{gone_id} +verified ")
+
     def test_status_shows_a_dash_when_no_attempt_reported_usage(self):
         out = self.run_pm("--status").stdout
         self.assertRegex(out, r"(?m)^total +- +- +-$")

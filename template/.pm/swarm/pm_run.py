@@ -1706,7 +1706,10 @@ class Run:
             tokens, turns, cost = usage_cells(per_job.get(jid))
             return f"{tokens:>10}{turns:>10}{cost:>10}"
 
-        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
+        # As wide as the longest id plus a space, so a long id never runs into its state.
+        ids = [job["id"] for job in jobs] + [jid for jid in state if not jid.startswith("_")]
+        width = max([15, *map(len, ids)]) + 1
+        print(f"{'job':<{width}}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
         for job in jobs:
             s = state.get(job["id"], {"state": "pending", "attempts": []})
             a = s["attempts"][-1] if s["attempts"] else {}
@@ -1725,11 +1728,11 @@ class Run:
                 detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
             if s["state"] == "checking" and a.get("checking_since"):
                 detail += (", " if detail else "") + f"check running {time.time() - a['checking_since']:.0f} s"
-            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
+            print(f"{job['id']:<{width}}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
             if not jid.startswith("_") and jid not in ids:
-                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
+                print(f"{jid:<{width}}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
         self.print_totals(per_model)
 
     def failure_tally(self):
