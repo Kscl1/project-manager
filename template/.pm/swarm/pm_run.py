@@ -802,6 +802,79 @@ def log_time(entry):
     return None
 
 
+# What a worker does now by its Pi session log, as the stall warning says it.
+DOING = {
+    "tool": "a tool is running",
+    "retry": "the harness retries on provider errors",
+    "pending": "a request is pending at the provider",
+}
+PROGRESS_TAIL = 4 * 1024 * 1024  # a log first seen larger than this is read from its last 4 MB only
+
+
+def log_progress(job, attempt, repo, seen):
+    """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
+
+    "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
+    yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
+    context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
+    "doing" comes from the last message: "tool" (a toolUse with no result yet), "retry" (a failed call, with its
+    error message in "error"), "pending" (anything else: a request is out at the provider), or "unknown" when there
+    is no log (another harness, a log not found, a log that cannot be read).
+    `seen` is the caller's cache, one entry per attempt name. A log whose size and mtime have not changed since the
+    last look gives the last answer without opening the file; a grown one is read from where the last look ended.
+    """
+    try:
+        if job.get("harness", "pi") != "pi":
+            return {"at": None, "doing": "unknown", "error": None}
+        path = attempt.get("session_log")
+        if not path:
+            found = pi_log(job, attempt, repo)
+            if not found:
+                return {"at": None, "doing": "unknown", "error": None}
+            path = found[0]
+        path = str(path)
+        stat = os.stat(path)
+        last = dict(seen.get(attempt["name"]) or {})  # a copy: a read that fails half-way leaves the cache as it was
+        if not last or last["path"] != path or stat.st_size < last["size"]:  # a new or rewritten log
+            last = {"path": path, "size": -1, "mtime": None, "offset": None, "at": None, "kind": None, "error": None}
+        if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
+            start = last["offset"]
+            if start is None:
+                start = max(0, stat.st_size - PROGRESS_TAIL)
+            with open(path, "rb") as f:
+                f.seek(start)
+                chunk = f.read()
+            lines = chunk.split(b"\n")
+            if start and last["offset"] is None:
+                lines = lines[1:]  # a tail read starts inside a line
+            # Up to the last line break is read for good; a last line without one is read again next time.
+            last["offset"] = start + chunk.rfind(b"\n") + 1 if b"\n" in chunk else start
+            for line in lines:
+                try:
+                    entry = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue  # a partial write, or not JSON
+                message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
+                if not isinstance(message, dict):
+                    continue  # a context_edit, a session line, anything that is not a message
+                role, stop = message.get("role"), message.get("stopReason")
+                if role == "assistant" and stop == "error":
+                    last.update(kind="retry", error=" ".join(str(message.get("errorMessage") or "").split())[:160])
+                    continue
+                last.update(kind="tool" if role == "assistant" and stop == "toolUse" else "pending", error=None)
+                if role in ("assistant", "toolResult"):
+                    when = log_time(entry)
+                    if when is not None and (last["at"] is None or when > last["at"]):
+                        last["at"] = when
+            last.update(size=stat.st_size, mtime=stat.st_mtime)
+            seen[attempt["name"]] = last
+        prompted = attempt.get("prompted", attempt["started"])
+        at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
+        return {"at": at, "doing": last["kind"] or "pending", "error": last["error"]}
+    except Exception:  # noqa: BLE001 - a log that cannot be read is a gap in the evidence, never a broken tick
+        return {"at": None, "doing": "unknown", "error": None}
+
+
 def usage_of(job, attempt, repo, log=None):
     """What this attempt's Pi session log says it used, or None when there is no log or nothing in it.
 

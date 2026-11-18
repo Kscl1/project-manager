@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -2702,6 +2703,77 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
                 run.tick([job], state, {})
         self.assertEqual(len(self.herdr_state()["calls"]), before)
         self.assertIn("STALLED", log)
+
+
+T0 = 1_700_000_000  # a fixed clock for the progress tests
+
+
+def pi_line(kind, when):
+    """Pi session-log lines of the shapes real logs show: "result" (a tool's result), "tool" (a model call that asks
+    for a tool), "answer" (a finished model call), "error" (a failed model call and the context_edit Pi writes with
+    it, before it retries by itself)."""
+    stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    message = {
+        "result": {"role": "toolResult"},
+        "tool": {"role": "assistant", "stopReason": "toolUse"},
+        "answer": {"role": "assistant", "stopReason": "stop"},
+        "error": {"role": "assistant", "stopReason": "error", "errorMessage": "503 upstream  unavailable"},
+    }[kind]
+    entries = [{"type": "message", "timestamp": stamp, "message": message}]
+    if kind == "error":
+        entries.append({"type": "context_edit", "timestamp": stamp})
+    return "".join(json.dumps(entry) + "\n" for entry in entries)
+
+
+class LogProgressTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_progress_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.log = self.tmp / "session.jsonl"
+        self.log.write_text("", encoding="utf-8")
+        self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, "session_log": str(self.log)}
+        self.seen = {}
+
+    def write(self, *lines):
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+    def progress(self):
+        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen)
+
+    def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
+        self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
+        self.assertEqual(self.progress(), {"at": None, "doing": "pending", "error": None})
+        self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
+        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "pending", "error": None})
+        self.write(pi_line("tool", T0 + 40))
+        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+
+    def test_failed_calls_and_their_context_edits_are_not_progress(self):
+        self.write(pi_line("result", T0 + 20), pi_line("error", T0 + 30), pi_line("error", T0 + 40))
+        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"})
+
+    def test_no_log_is_unknown_and_never_raises(self):
+        unknown = {"at": None, "doing": "unknown", "error": None}
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}):
+            for job, attempt in (
+                ({"harness": "claude"}, self.attempt),  # no log pm_run knows
+                ({}, {"name": "worker", "started": T0}),  # not found
+                ({}, {**self.attempt, "session_log": str(self.tmp / "gone.jsonl")}),
+                ({}, {**self.attempt, "session_log": str(self.tmp)}),  # a folder: cannot be read
+            ):
+                with self.subTest(job=job, attempt=attempt):
+                    self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}), unknown)
+
+    def test_an_unchanged_log_is_not_read_again(self):
+        self.write(pi_line("result", T0 + 20))
+        first = self.progress()
+        size, before = self.log.stat().st_size, os.stat(self.log)
+        self.log.write_bytes(b"x" * (size - 1) + b"\n")  # same size; mtime set back below
+        os.utime(self.log, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(self.progress(), first, "same size and mtime: the last answer, not the file")
+        self.write(pi_line("tool", T0 + 50))
+        self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
 
 
 # A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
