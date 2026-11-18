@@ -969,8 +969,7 @@ class Run:
     # ---- Herdr: where and how a worker runs -------------------------------------------------------
     def workspace(self, state):
         """One Herdr workspace per run, labelled with the run directory's name. Its first pane stays an idle shell:
-        closing a workspace's last pane closes the workspace, so workers always get their own tab. A run that ends with
-        only handed-over tabs left open closes that idle pane, so the workspace holds just what needs a look."""
+        closing a workspace's last pane closes the workspace, so workers always get their own tab."""
         ws = state.get("_herdr_workspace")
         response = herdr("workspace", "list")
         if "error" in response:
@@ -991,7 +990,6 @@ class Run:
             sys.exit(f"Herdr server not running: {message}")
         ws = made["result"]["workspace"]["workspace_id"]
         state["_herdr_workspace"] = ws
-        state["_herdr_idle_pane"] = made["result"].get("root_pane", {}).get("pane_id")  # closed at the end, see main
         return ws
 
     def launch(self, job, attempt, state):
@@ -1927,11 +1925,6 @@ def main():
             handed = any(s["state"] in ("handed-over", "removed") for k, s in state.items() if not k.startswith("_"))
             if state.get("_herdr_workspace") and not unconfirmed and not handed:
                 herdr("workspace", "close", state["_herdr_workspace"])
-            elif state.get("_herdr_idle_pane") and not unconfirmed and handed:
-                # Only those tabs keep the workspace open: its idle shell is no use to anyone. A later --retry that
-                # closes the last of them closes the workspace with it, and the next launch makes a new one.
-                herdr("pane", "close", str(state.pop("_herdr_idle_pane")))
-                run.save(state)
             (run.root / "pm_run.lease").unlink(missing_ok=True)
             return
         time.sleep(TICK)

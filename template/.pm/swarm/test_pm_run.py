@@ -461,17 +461,16 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertTrue(tab, "the attempt keeps the tab it was started in")
                 self.assertEqual(herdr["renamed"], [[tab, "⚠ " + label]])
 
-    def test_a_run_left_with_handed_over_tabs_closes_its_idle_pane_and_keeps_them(self):
+    def test_a_run_left_with_handed_over_tabs_closes_no_pane(self):
+        # The receipts cannot tell whether the first shell is still idle (the owner may work in it), so it stays.
         receipt, herdr = self.hand_over_at_launch()
-        handed = receipt["attempts"][0]["pane"]
         (workspace,) = herdr["workspaces"]
-        self.assertEqual(workspace["panes"], [handed], "the idle shell is gone, the handed-over pane is kept")
+        self.assertEqual(workspace["panes"], [f"{workspace['workspace_id']}:p1", receipt["attempts"][0]["pane"]])
         self.assertEqual(herdr["closed"], [], "the workspace itself stays open")
-        closes = [c[2] for c in herdr["calls"] if c[:2] == ["pane", "close"]]
-        self.assertEqual(closes, [f"{workspace['workspace_id']}:p1"], "the idle first pane, and nothing else")
-        self.assertNotIn("_herdr_idle_pane", self.receipts(), "a closed pane is not closed again by a later loop")
+        self.assertEqual([c for c in herdr["calls"] if c[:2] == ["pane", "close"]], [])
+        self.assertFalse([k for k in self.receipts() if k.startswith("_herdr_") and k != "_herdr_workspace"])
 
-    def test_a_run_with_nothing_handed_over_closes_its_workspace_as_before(self):
+    def test_a_run_with_nothing_handed_over_closes_its_workspace(self):
         self.jobs(self.job("a", "ok"))
         self.run_pm()
         state, herdr = self.receipts(), self.herdr_state()
