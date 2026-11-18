@@ -89,7 +89,13 @@ if cmd == ["workspace", "create"]:
 if cmd == ["tab", "create"]:
     ws = next(w for w in state["workspaces"] if w["workspace_id"] == opt("--workspace"))
     ws["panes"].append(f"{ws['workspace_id']}:p{n}")
-    reply({"type": "tab_created", "tab": {"tab_id": f"{ws['workspace_id']}:t{n}"}, "root_pane": {"pane_id": ws["panes"][-1]}})
+    state.setdefault("tabs", []).append(f"{ws['workspace_id']}:t{n}")  # every tab id handed out, in order
+    reply({"type": "tab_created", "tab": {"tab_id": state["tabs"][-1]}, "root_pane": {"pane_id": ws["panes"][-1]}})
+if cmd == ["tab", "rename"]:
+    if os.environ.get("FAKE_RENAME_ERROR"):
+        fail("server_timeout", "rename timed out")
+    state.setdefault("renamed", []).append(args[2:])
+    reply({"type": "ok"})
 if cmd == ["agent", "start"]:
     name, behaviour = args[2], opt("--model")
     if os.environ.get("FAKE_TRUST"):
@@ -365,7 +371,7 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         settings = argv[argv.index("--settings") + 1]
         self.assertEqual(
             argv[argv.index("--") + 1 :],
-            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--settings", settings]
+            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--settings", settings]
             + ["--permission-mode", "acceptEdits"],
         )
         # The project's MCP servers start without the approval dialog that would swallow the brief, and Claude Code's
@@ -375,6 +381,24 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
             {"enableAllProjectMcpServers": True, "disableBundledSkills": True},
         )
         self.assertEqual(herdr["ran"], [[herdr["gone"][self.a1]["pane"], "$env:X=1"]])
+
+    def test_claude_code_is_named_after_the_title_and_pi_keeps_its_agent_name(self):
+        # Claude Code shows the name it is given; Pi's --name is how pi_log finds the attempt's session log.
+        title = "Review of the login change"
+        self.jobs(self.job("a", "ok", harness="claude", title=title), self.job("b", "ok", title=title))
+        self.run_pm()
+        gone = self.herdr_state()["gone"]
+        claude = gone[self.a1]["argv"]
+        self.assertEqual(claude[claude.index("--name") + 1], title)
+        self.assertEqual(claude.count("--name"), 1)
+        pi = gone[pm_run.agent_name("b", 1, self.run_dir.resolve())]["argv"]
+        self.assertEqual(pi[pi.index("--name") + 1], pm_run.agent_name("b", 1, self.run_dir.resolve()))
+
+    def test_agy_gets_no_name(self):
+        self.seed_reads("PS> agy --model ok", "> Type a message")
+        self.jobs(self.job("a", "ok", harness="agy", title="Review of the login change"))
+        self.run_pm()
+        self.assertNotIn("--name", self.herdr_state()["gone"][self.a1]["argv"])
 
     def test_pi_is_the_default_harness_and_runs_no_setup(self):
         self.jobs(self.job("a", "ok"))
@@ -416,6 +440,91 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         herdr = self.herdr_state()
         self.assertEqual(herdr["agents"][self.a1]["prompts"], [], "the brief must not land in the menu")
         self.assertTrue(herdr["workspaces"], "the run's workspace stays open with the handed-over tab")
+
+    def hand_over_at_launch(self, **extra):
+        """Run one agy job that is handed over at its first-run screen; return its receipt and the fake's state."""
+        self.seed_reads("PS> agy --model ok", "Welcome to Antigravity CLI!\n\nChoose your color scheme:\n  > terminal")
+        self.jobs(self.job("a", "ok", harness="agy", **extra))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return self.receipts()["a"], self.herdr_state()
+
+    def test_a_handed_over_tab_is_marked_before_its_label(self):
+        for extra, label in (({"title": "Review of the login change"}, "Review of the login change"), ({}, "a")):
+            with self.subTest(label=label):
+                self.fake_state.unlink(missing_ok=True)
+                (self.run_dir / "receipts.json").unlink(missing_ok=True)
+                receipt, herdr = self.hand_over_at_launch(**extra)
+                self.assertEqual(receipt["state"], "handed-over")
+                (tab,) = herdr["tabs"]  # the id the fake handed out, not only what the receipt says
+                self.assertEqual(receipt["attempts"][0]["tab"], tab, "the attempt keeps the tab it was started in")
+                self.assertEqual(receipt["attempts"][0]["label"], label)
+                self.assertEqual(herdr["renamed"], [[tab, "⚠ " + label]])
+
+    def launched(self, run, job, state):
+        """Start one more attempt of `job` through the fake Herdr, as a tick would; return the attempt."""
+        n = len(state.setdefault(job["id"], {"state": "started", "attempts": []})["attempts"]) + 1
+        attempt = {"name": pm_run.agent_name(job["id"], n, self.run_dir.resolve()), "started": time.time()}
+        state[job["id"]]["attempts"].append(attempt)
+        self.assertTrue(run.launch(job, attempt, state))
+        return attempt
+
+    def test_the_mark_goes_on_the_current_tab_with_the_label_it_was_launched_with(self):
+        # jobs.json is read again every tick: a title edited while the worker runs never labelled its tab.
+        run, state = pm_run.Run(self.run_dir), {}
+        run.repo = self.tmp
+        with patch.dict(os.environ, self.env), patch.object(pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])):
+            self.launched(run, self.job("a", "ok", title="First title"), state)
+            current = self.launched(run, self.job("a", "ok", title="Second title"), state)
+            run.hand_over(self.job("a", "ok", title="Edited after launch"), state["a"], "test")
+        herdr = self.herdr_state()
+        self.assertEqual(len(herdr["tabs"]), 2)
+        self.assertEqual(current["tab"], herdr["tabs"][1])
+        self.assertEqual(herdr["renamed"], [[herdr["tabs"][1], "⚠ Second title"]], "the earlier tab is untouched")
+
+    def test_an_attempt_without_a_recorded_tab_or_label_stays_unmarked(self):
+        run = pm_run.Run(self.run_dir)
+        for attempt in ({"pane": "w1:p2"}, {"pane": "w1:p2", "tab": "w1:t2"}):
+            with self.subTest(attempt=attempt), patch.object(pm_run, "herdr") as herdr:
+                run.mark_handed_over(self.job("a", "ok", title="Review"), attempt)
+                herdr.assert_not_called()
+
+    def test_the_tab_rename_waits_five_seconds_at_most(self):
+        run = pm_run.Run(self.run_dir)
+        with patch.object(pm_run, "herdr", return_value={"type": "ok"}) as herdr:
+            run.mark_handed_over(self.job("a", "ok"), {"tab": "w1:t2", "label": "a"})
+        herdr.assert_called_once_with("tab", "rename", "w1:t2", "⚠ a", timeout=5)
+
+    def test_a_run_left_with_handed_over_tabs_closes_no_pane(self):
+        # The receipts cannot tell whether the first shell is still idle (the owner may work in it), so it stays.
+        receipt, herdr = self.hand_over_at_launch()
+        (workspace,) = herdr["workspaces"]
+        self.assertEqual(workspace["panes"], [f"{workspace['workspace_id']}:p1", receipt["attempts"][0]["pane"]])
+        self.assertEqual(herdr["closed"], [], "the workspace itself stays open")
+        self.assertEqual([c for c in herdr["calls"] if c[:2] == ["pane", "close"]], [])
+        self.assertFalse([k for k in self.receipts() if k.startswith("_herdr_") and k != "_herdr_workspace"])
+
+    def test_a_run_with_nothing_handed_over_closes_its_workspace(self):
+        self.jobs(self.job("a", "ok"))
+        self.run_pm()
+        state, herdr = self.receipts(), self.herdr_state()
+        self.assertEqual(herdr["closed"], [state["_herdr_workspace"]])
+        closes = [c[2] for c in herdr["calls"] if c[:2] == ["pane", "close"]]
+        self.assertEqual(closes, [state["a"]["attempts"][0]["pane"]], "only the worker's pane, then the workspace")
+
+    def test_a_failed_tab_mark_is_logged_once_and_changes_nothing_else(self):
+        receipt, _ = self.hand_over_at_launch()
+        self.fake_state.unlink()
+        (self.run_dir / "receipts.json").unlink()
+        self.env["FAKE_RENAME_ERROR"] = "1"
+        failed, herdr = self.hand_over_at_launch()
+        self.assertEqual(failed["state"], receipt["state"])
+        self.assertEqual(failed["attempts"][0]["why"], receipt["attempts"][0]["why"])
+        self.assertNotIn("renamed", herdr)
+        log = (self.run_dir / "pm_run.log").read_text(encoding="utf-8")
+        self.assertEqual(log.count("MARK-FAILED a: "), 1)
+        self.assertIn("still handed over", log)
+        self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
 
     def test_missing_brief_is_checked_again_before_a_retry(self):
         out = self.tmp / "out" / "a.md"
@@ -874,6 +983,75 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 launch.assert_not_called()
                 self.assertEqual(state["a"]["state"], "failed")
                 self.assertIn("task must be a task ID (text)", state["a"]["why"])
+
+    def tab_labels(self):
+        """The --label of each `tab create` the fake Herdr saw, in order."""
+        calls = self.herdr_state()["calls"]
+        return [call[call.index("--label") + 1] for call in calls if call[:2] == ["tab", "create"]]
+
+    def test_a_job_title_labels_its_herdr_tab_and_the_id_stays_the_key(self):
+        # The owner reads the tab; a title outside ASCII (Turkish letters) must reach Herdr as it was written.
+        title = "Gözden geçirme: giriş değişikliği"
+        self.jobs(self.job("a", "ok", title=title), self.job("b", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.tab_labels(), [title, "b"], "without a title the tab shows the job id")
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "verified")
+        self.assertEqual(state["a"]["attempts"][0]["name"], self.a1, "the agent name still comes from the id")
+        self.assertIn("LAUNCH a attempt 1", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
+
+    def test_two_jobs_may_share_a_title(self):
+        # Only the tab shows a title, so a title equal to another job's title or id breaks nothing that is keyed.
+        self.jobs(self.job("a", "ok", title="b"), self.job("b", "ok", title="b"))
+        self.run_pm()
+        state = self.receipts()
+        self.assertEqual((state["a"]["state"], state["b"]["state"]), ("verified", "verified"))
+        self.assertEqual(self.tab_labels(), ["b", "b"])
+
+    def test_preflight_rejects_a_title_that_cannot_label_a_tab(self):
+        cases = (
+            (12, "title must be text"),
+            ("   ", "title is empty"),
+            ("Review of\nthe login change", r"title holds a line break or control character (\n)"),
+            ("Review\tof the login change", r"title holds a line break or control character (\t)"),
+            ("Review of the login change\u2028", r"title holds a line break or control character (\u2028)"),
+            ("x" * 61, "title is 61 code points long after trimming, at most 60 fit a tab (not display width)"),
+            # 31 "e" + combining acute pairs look like 31 letters but are 62 code points: the count is code points.
+            ("e\u0301" * 31, "title is 62 code points long after trimming, at most 60 fit a tab (not display width)"),
+            (
+                json.loads(r'"Review \ud800"'),
+                r"title holds a lone surrogate (\ud800), which a command line cannot carry",
+            ),
+        )
+        for title, why in cases:
+            with self.subTest(title=title):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", title=title), {}
+                run.repo = self.tmp
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertEqual(state["a"]["why"], why)
+                self.assertIn(f"PREFLIGHT a: {why}", run.log_path.read_text("utf-8"), "the line names the job")
+
+    def test_a_title_of_sixty_code_points_after_stripping_passes_preflight(self):
+        for title in ("x" * 60, "e\u0301" * 30, "  " + "ş" * 60 + " "):
+            with self.subTest(title=title):
+                job = self.job("a", "ok", title=title)
+                self.assertIsNone(pm_run.preflight(job, self.tmp))
+                self.assertEqual(pm_run.tab_label(job), title.strip())
+
+    def test_a_lone_surrogate_in_jobs_json_fails_preflight_and_the_run_goes_on(self):
+        # JSON may spell a code point UTF-8 cannot encode; it must never reach Herdr's command line.
+        self.jobs(self.job("a", "ok", title=json.loads(r'"Review \ud800"')), self.job("b", "ok"))
+        self.assertIn(r"\ud800", (self.run_dir / "jobs.json").read_text(encoding="utf-8"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.receipts()
+        self.assertEqual((state["a"]["state"], state["b"]["state"]), ("failed", "verified"))
+        self.assertIn("lone surrogate", state["a"]["why"])
+        self.assertEqual(self.tab_labels(), ["b"], "no tab is opened for the job with the bad title")
 
     def test_a_job_with_a_task_field_runs_as_before(self):
         self.jobs(self.job("a", "ok", task="REQ-12"))
@@ -2738,6 +2916,22 @@ class UsageTest(PmRunFixture, unittest.TestCase):
         total = next(line for line in lines if line.startswith("total"))
         self.assertTrue(total.endswith(THE_NOTE), f"the total line ends with the note: {total!r}")
         self.assertNotIn("cost", out.replace(THE_NOTE, ""), "no column is headed cost any more")
+
+    def test_status_keeps_a_space_between_a_long_job_id_and_its_state(self):
+        # An id longer than the old 16-character column ran into its state ("...dongusustarted").
+        long_id, gone_id = "x" * 40, "y" * 41
+        self.jobs(self.job(long_id, "ok"), self.job("a", "ok"))
+        state = {
+            long_id: {"state": "started", "attempts": []},
+            gone_id: {"state": "verified", "attempts": []},
+            "_herdr_workspace": "w1",
+        }
+        (self.run_dir / "receipts.json").write_text(json.dumps(state), encoding="utf-8")
+        lines = self.run_pm("--status").stdout.splitlines()
+        self.assertRegex(lines[0], r"^job {39}")
+        self.assertRegex(next(line for line in lines if line.startswith(long_id)), rf"^{long_id} +started ")
+        self.assertRegex(next(line for line in lines if line.startswith("a ")), r"^a {41}pending ", "one column")
+        self.assertRegex(next(line for line in lines if line.startswith(gone_id)), rf"^{gone_id} +verified ")
 
     def test_status_shows_a_dash_when_no_attempt_reported_usage(self):
         out = self.run_pm("--status").stdout

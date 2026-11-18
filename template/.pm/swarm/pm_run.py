@@ -30,6 +30,7 @@ RESUME, or the full brief again when no turn ran (no completion_seq advance and 
 A nudge counts as idle when the session log did not grow or the output file did not change since the previous one
 (a worker that answers every nudge without touching its output is idle too); after PM_RUN_MAX_NUDGES idle nudges
 in a row the job is **handed-over**: pm_run stops watching, leaves the session open in its Herdr tab and tells the lead.
+Every hand-over puts "⚠ " before the label the tab was launched with, so it stands out from live work.
 A settled worker whose Pi error message or last pane lines name a used-up quota or usage limit, or a sign-in that ran
 out ("Login expired", "Please run /login", a 401), is handed over at once, without a nudge: a resent brief would hit
 the same wall until the limit resets or the owner signs in again. A bare 429 (an upstream outage answers with it too)
@@ -58,8 +59,9 @@ same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
 exists as a file, the folder that will hold the report exists, `verify` and `setup` are one line of text with no
-control character except a tab, and every entry of `helpers` names a model, or model, harness and thinking. The check
-never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
+control character except a tab, every entry of `helpers` names a model, or model, harness and thinking, and a `title`
+is one line of text, not blank, with no control character or lone surrogate and at most 60 code points after trimming
+(not display width). The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it, and it never waits without a signal:
@@ -92,6 +94,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                                                             passes starts a new attempt instead)
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
+                       "title": "Review of the login change",  (optional: one line of at most 60 code points, the
+                                                label of the job's Herdr tab; without it the tab shows the id, which
+                                                stays the job's key everywhere else)
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
                        "task": "REQ-1",        (optional: the task this job works for; pm_state groups workers by it)
@@ -108,8 +113,8 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
-                       (harness "claude" starts Claude Code with --model and args, without its bundled skills
-                        (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                       (harness "claude" starts Claude Code with --model, --name <title or id> and args, without its
+                        bundled skills (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
@@ -149,6 +154,7 @@ import subprocess
 import sys
 import time
 import traceback
+import unicodedata
 from collections import Counter
 from datetime import datetime
 from hashlib import sha256
@@ -157,6 +163,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
+TITLE_MAX = 60  # code points of a job's trimmed title, the label of its Herdr tab
+HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
+RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
 API_NOTE = "(at API prices; plans and free models cost less)"
@@ -603,6 +612,35 @@ def control_mark(text):
     return None
 
 
+def title_fault(title):
+    """Why a job's `title` cannot label its Herdr tab, or None.
+
+    The title travels to Herdr on a command line, so it must be one line of text that UTF-8 can encode: no control
+    character and no lone surrogate (JSON "\\ud800" parses to one). Its length is counted in code points after
+    trimming, not in display width: "e" plus a combining accent is two, a wide letter is one. At most TITLE_MAX.
+    """
+    if not isinstance(title, str):
+        return "title must be text"
+    if not title.strip():
+        return "title is empty"
+    for char in title:
+        kind = unicodedata.category(char)
+        if kind in ("Cc", "Zl", "Zp"):  # control characters, tab and line breaks included
+            return f"title holds a line break or control character ({json.dumps(char)[1:-1]})"
+        if kind == "Cs":
+            return f"title holds a lone surrogate ({json.dumps(char)[1:-1]}), which a command line cannot carry"
+    length = len(title.strip())
+    if length > TITLE_MAX:
+        return f"title is {length} code points long after trimming, at most {TITLE_MAX} fit a tab (not display width)"
+    return None
+
+
+def tab_label(job):
+    """The job's Herdr tab label: its title, else its id. Only the tab shows the title; the id stays the key."""
+    title = job.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else job["id"]
+
+
 def caller():
     """Who is starting this run: the tool, and the Herdr pane it sits in. pm_state turns the pane into a job's name."""
     pane = os.environ.get("HERDR_PANE_ID")
@@ -644,6 +682,9 @@ def preflight(job, repo):
     task = job.get("task")
     if task is not None and not (isinstance(task, str) and task.strip()):
         return "task must be a task ID (text)"
+    fault = title_fault(job["title"]) if "title" in job else None
+    if fault:
+        return fault
     helpers = job.get("helpers")
     if helpers and not isinstance(helpers, list):
         return "helpers must be a list of model names or objects"
@@ -966,9 +1007,12 @@ class Run:
     def launch(self, job, attempt, state):
         """Open a worker tab and send the brief; True when a live session is ready to watch."""
         ws = self.workspace(state)
-        tab = herdr("tab", "create", "--workspace", ws, "--label", job["id"], "--cwd", str(self.repo), "--no-focus")
+        label = tab_label(job)
+        tab = herdr("tab", "create", "--workspace", ws, "--label", label, "--cwd", str(self.repo), "--no-focus")
         pane = tab.get("result", {}).get("root_pane", {}).get("pane_id")
         attempt["pane"] = pane
+        attempt["tab"] = tab.get("result", {}).get("tab", {}).get("tab_id")  # renamed if the job is handed over
+        attempt["label"] = label  # the mark is built from this, not from a title edited in jobs.json since
         if not pane:
             attempt["launch_error"] = tab.get("error", {}).get("message", "tab has no pane")
             return False
@@ -978,9 +1022,11 @@ class Run:
         harness = job.get("harness", "pi")
         agent_args = ["--kind", harness, "--pane", str(pane), "--", "--model", job["model"]]
         if harness == "pi":
+            # pi_log finds this attempt's session log by this name, so it stays the agent name, not the title.
             agent_args += ["--thinking", job.get("thinking", "high"), "--name", attempt["name"]]
         agent_args += NO_HELPERS[harness]
         if harness == "claude":
+            agent_args += ["--name", label]  # Claude Code's display name for the session; nothing reads it back
             # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
             # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
             settings = self.root / "claude-settings.json"
@@ -1356,7 +1402,7 @@ class Run:
                     job,
                     s,
                     f'first-run screen ("{a["first_run"]}"); brief not sent: finish the setup once in Herdr tab '
-                    f"{job['id']}, then rerun the job",
+                    f'"{tab_label(job)}", then rerun the job',
                 )
             else:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
@@ -1653,6 +1699,25 @@ class Run:
         a.update(why=why, ended=time.time())
         self.count_usage(job, a)
         self.log(f"HANDED-OVER {job['id']}: {why}; the session stays open in Herdr pane {a.get('pane')}, no relaunch")
+        self.mark_handed_over(job, a)
+
+    def mark_handed_over(self, job, a):
+        """Put HANDED_MARK before the label of a handed-over job's tab, so it stands out from live work.
+
+        A symbol, not a word, so it reads the same in every project language. Only the current attempt's tab is
+        renamed, and the mark goes before the label that tab was launched with: jobs.json is read again every tick, so
+        a title edited since then would put a label on the tab it never had. An attempt with no recorded tab or label
+        (receipts written by an older pm_run) stays unmarked. The rename is cosmetic, so it waits RENAME_S at most,
+        and a failed one costs one log line and nothing else. The tab closes with its pane when --retry closes the
+        worker, so nothing renames it back; a tab that lives on (a --stop of an ended job closes nothing) keeps the
+        mark while its session stays unwatched.
+        """
+        if not (a.get("tab") and a.get("label")):
+            return
+        renamed = herdr("tab", "rename", str(a["tab"]), HANDED_MARK + a["label"], timeout=RENAME_S)
+        if "error" in renamed:
+            message = " ".join(renamed["error"].get("message", "unknown error").split())
+            self.log(f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} keeps its label ({message}); still handed over")
 
     def fail_or_retry(self, job, s, why):
         a = s["attempts"][-1]
@@ -1678,7 +1743,10 @@ class Run:
             tokens, turns, cost = usage_cells(per_job.get(jid))
             return f"{tokens:>10}{turns:>10}{cost:>10}"
 
-        print(f"{'job':<16}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
+        # As wide as the longest id plus a space, so a long id never runs into its state.
+        ids = [job["id"] for job in jobs] + [jid for jid in state if not jid.startswith("_")]
+        width = max([15, *map(len, ids)]) + 1
+        print(f"{'job':<{width}}{'state':<18}{'tries':>6}{'tokens':>10}{'turns':>10}{'API est.':>10}  last attempt")
         for job in jobs:
             s = state.get(job["id"], {"state": "pending", "attempts": []})
             a = s["attempts"][-1] if s["attempts"] else {}
@@ -1697,11 +1765,11 @@ class Run:
                 detail += f", waiting until {time.strftime('%H:%M', time.localtime(a['wait_until']))}"
             if s["state"] == "checking" and a.get("checking_since"):
                 detail += (", " if detail else "") + f"check running {time.time() - a['checking_since']:.0f} s"
-            print(f"{job['id']:<16}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
+            print(f"{job['id']:<{width}}{s['state']:<18}{len(s['attempts']):>6}{used(job['id'])}  {detail}")
         ids = {job["id"] for job in jobs}
         for jid, s in state.items():
             if not jid.startswith("_") and jid not in ids:
-                print(f"{jid:<16}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
+                print(f"{jid:<{width}}{s['state'] + ' (not in jobs.json)':<18}{len(s['attempts']):>6}{used(jid)}")
         self.print_totals(per_model)
 
     def failure_tally(self):
