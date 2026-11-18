@@ -875,6 +875,56 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(state["a"]["state"], "failed")
                 self.assertIn("task must be a task ID (text)", state["a"]["why"])
 
+    def tab_labels(self):
+        """The --label of each `tab create` the fake Herdr saw, in order."""
+        calls = self.herdr_state()["calls"]
+        return [call[call.index("--label") + 1] for call in calls if call[:2] == ["tab", "create"]]
+
+    def test_a_job_title_labels_its_herdr_tab_and_the_id_stays_the_key(self):
+        # The owner reads the tab; a title outside ASCII (Turkish letters) must reach Herdr as it was written.
+        title = "Gözden geçirme: giriş değişikliği"
+        self.jobs(self.job("a", "ok", title=title), self.job("b", "ok"))
+        result = self.run_pm()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.tab_labels(), [title, "b"], "without a title the tab shows the job id")
+        state = self.receipts()
+        self.assertEqual(state["a"]["state"], "verified")
+        self.assertEqual(state["a"]["attempts"][0]["name"], self.a1, "the agent name still comes from the id")
+        self.assertIn("LAUNCH a attempt 1", (self.run_dir / "pm_run.log").read_text(encoding="utf-8"))
+
+    def test_two_jobs_may_share_a_title(self):
+        # Only the tab shows a title, so a title equal to another job's title or id breaks nothing that is keyed.
+        self.jobs(self.job("a", "ok", title="b"), self.job("b", "ok", title="b"))
+        self.run_pm()
+        state = self.receipts()
+        self.assertEqual((state["a"]["state"], state["b"]["state"]), ("verified", "verified"))
+        self.assertEqual(self.tab_labels(), ["b", "b"])
+
+    def test_preflight_rejects_a_title_that_cannot_label_a_tab(self):
+        cases = (
+            (12, "title must be text"),
+            ("   ", "title is empty"),
+            ("Review of\nthe login change", r"title holds a line break or control character (\n)"),
+            ("Review\tof the login change", r"title holds a line break or control character (\t)"),
+            ("Review of the login change\u2028", r"title holds a line break or control character (\u2028)"),
+            ("x" * 61, "title is 61 characters long, at most 60 fit a tab"),
+        )
+        for title, why in cases:
+            with self.subTest(title=title):
+                run, job, state = pm_run.Run(self.run_dir), self.job("a", "ok", title=title), {}
+                run.repo = self.tmp
+                with patch.object(run, "launch") as launch:
+                    run.tick([job], state, {})
+                launch.assert_not_called()
+                self.assertEqual(state["a"]["state"], "failed")
+                self.assertEqual(state["a"]["why"], why)
+                self.assertIn(f"PREFLIGHT a: {why}", run.log_path.read_text("utf-8"), "the line names the job")
+
+    def test_a_title_of_sixty_characters_after_stripping_passes_preflight(self):
+        job = self.job("a", "ok", title="  " + "ş" * 60 + " ")
+        self.assertIsNone(pm_run.preflight(job, self.tmp))
+        self.assertEqual(pm_run.tab_label(job), "ş" * 60)
+
     def test_a_job_with_a_task_field_runs_as_before(self):
         self.jobs(self.job("a", "ok", task="REQ-12"))
         self.run_pm()

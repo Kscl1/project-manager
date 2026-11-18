@@ -58,8 +58,8 @@ same totals.
 A dependency that failed, was blocked, stopped, handed-over, check-failed or is only artifact-present blocks its
 successors. Before each launch, and again before a `--retry` launches a job, the job itself is checked: every brief
 exists as a file, the folder that will hold the report exists, `verify` and `setup` are one line of text with no
-control character except a tab, and every entry of `helpers` names a model, or model, harness and thinking. The check
-never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
+control character except a tab, every entry of `helpers` names a model, or model, harness and thinking, and a `title`
+is one line of text, not blank, with no control character and at most 60 characters. The check never runs `verify`. A job that fails ends failed as PREFLIGHT, without starting a worker.
 After startup pm_run waits up to 60 s for Herdr's ready/idle state before sending the brief; if no state is reported,
 it uses PM_RUN_SETUP_S as the fallback. A known non-ready agent is not sent the brief at the ceiling.
 A worker that asks a question (Herdr state `blocked`) is never killed for it, and it never waits without a signal:
@@ -92,6 +92,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                                                             passes starts a new attempt instead)
 
 <run-dir>/jobs.json: [{"id", "model", "out", "briefs": [...], "after": [...], "verify": "cmd", "min_words": 1000,
+                       "title": "Review of the login change",  (optional: one line of at most 60 characters, the
+                                                label of the job's Herdr tab; without it the tab shows the id, which
+                                                stays the job's key everywhere else)
                        (verify runs through the system shell, cmd.exe on Windows: keep it a plain command, put logic in a script)
                        "bucket": "router", "thinking": "high",
                        "task": "REQ-1",        (optional: the task this job works for; pm_state groups workers by it)
@@ -149,6 +152,7 @@ import subprocess
 import sys
 import time
 import traceback
+import unicodedata
 from collections import Counter
 from datetime import datetime
 from hashlib import sha256
@@ -157,6 +161,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 MARKER = "<!-- done -->"
+TITLE_MAX = 60  # characters of a job's title, the label of its Herdr tab
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
 API_NOTE = "(at API prices; plans and free models cost less)"
@@ -603,6 +608,26 @@ def control_mark(text):
     return None
 
 
+def title_fault(title):
+    """Why a job's `title` cannot label its Herdr tab, or None: one line of text, at most 60 characters."""
+    if not isinstance(title, str):
+        return "title must be text"
+    if not title.strip():
+        return "title is empty"
+    for char in title:
+        if unicodedata.category(char) in ("Cc", "Zl", "Zp"):  # control characters, tab and line breaks included
+            return f"title holds a line break or control character ({json.dumps(char)[1:-1]})"
+    if len(title.strip()) > TITLE_MAX:
+        return f"title is {len(title.strip())} characters long, at most {TITLE_MAX} fit a tab"
+    return None
+
+
+def tab_label(job):
+    """The job's Herdr tab label: its title, else its id. Only the tab shows the title; the id stays the key."""
+    title = job.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else job["id"]
+
+
 def caller():
     """Who is starting this run: the tool, and the Herdr pane it sits in. pm_state turns the pane into a job's name."""
     pane = os.environ.get("HERDR_PANE_ID")
@@ -644,6 +669,8 @@ def preflight(job, repo):
     task = job.get("task")
     if task is not None and not (isinstance(task, str) and task.strip()):
         return "task must be a task ID (text)"
+    if "title" in job and title_fault(job["title"]):
+        return title_fault(job["title"])
     helpers = job.get("helpers")
     if helpers and not isinstance(helpers, list):
         return "helpers must be a list of model names or objects"
@@ -966,7 +993,8 @@ class Run:
     def launch(self, job, attempt, state):
         """Open a worker tab and send the brief; True when a live session is ready to watch."""
         ws = self.workspace(state)
-        tab = herdr("tab", "create", "--workspace", ws, "--label", job["id"], "--cwd", str(self.repo), "--no-focus")
+        label = tab_label(job)
+        tab = herdr("tab", "create", "--workspace", ws, "--label", label, "--cwd", str(self.repo), "--no-focus")
         pane = tab.get("result", {}).get("root_pane", {}).get("pane_id")
         attempt["pane"] = pane
         if not pane:
@@ -1356,7 +1384,7 @@ class Run:
                     job,
                     s,
                     f'first-run screen ("{a["first_run"]}"); brief not sent: finish the setup once in Herdr tab '
-                    f"{job['id']}, then rerun the job",
+                    f'"{tab_label(job)}", then rerun the job',
                 )
             else:
                 self.fail_or_retry(job, s, f"launch failed: {a.get('launch_error', 'prompt not sent')}")
