@@ -832,9 +832,10 @@ def log_progress(job, attempt, repo, seen):
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
     yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
     context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
-    "doing" comes from the last message: "tool" (a toolUse with no result yet), "retry" (a failed call, with its
-    error message in "error"), "pending" (anything else: a request is out at the provider), or "unknown" when there
-    is no log (another harness, a log not found, a log that cannot be read).
+    "doing" comes from the last message written after that prompt, by the model or a tool (a prompt or any other
+    role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
+    "error"), "pending" (anything else, or no such message: a request is out at the provider), or "unknown" when
+    there is no log (another harness, a log not found, a log that cannot be read).
     `seen` is the caller's cache, one entry per attempt name. A log whose size and mtime have not changed since the
     last look gives the last answer without opening the file; a grown one is read from where the last look ended.
     """
@@ -851,7 +852,8 @@ def log_progress(job, attempt, repo, seen):
         stat = os.stat(path)
         last = dict(seen.get(attempt["name"]) or {})  # a copy: a read that fails half-way leaves the cache as it was
         if not last or last["path"] != path or stat.st_size < last["size"]:  # a new or rewritten log
-            last = {"path": path, "size": -1, "mtime": None, "offset": None, "at": None, "kind": None, "error": None}
+            last = {"path": path, "size": -1, "mtime": None, "offset": None, "at": None}
+            last.update(kind=None, kind_at=None, error=None)  # the last message's kind, and when it was written
         if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
             start = last["offset"]
             if start is None:
@@ -873,20 +875,25 @@ def log_progress(job, attempt, repo, seen):
                 if not isinstance(message, dict):
                     continue  # a context_edit, a session line, anything that is not a message
                 role, stop = message.get("role"), message.get("stopReason")
+                if role not in ("assistant", "toolResult"):
+                    continue  # a prompt or a note: what the worker does stays what it was
+                when = log_time(entry)
+                kind_at = when if when is not None else stat.st_mtime  # no time of its own: written by this look
                 if role == "assistant" and stop == "error":
                     error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
-                    last.update(kind="retry", error=error)
+                    last.update(kind="retry", kind_at=kind_at, error=error)
                     continue
-                last.update(kind="tool" if role == "assistant" and stop == "toolUse" else "pending", error=None)
-                if role in ("assistant", "toolResult"):
-                    when = log_time(entry)
-                    if when is not None and (last["at"] is None or when > last["at"]):
-                        last["at"] = when
+                kind = "tool" if role == "assistant" and stop == "toolUse" else "pending"
+                last.update(kind=kind, kind_at=kind_at, error=None)
+                if when is not None and (last["at"] is None or when > last["at"]):
+                    last["at"] = when
             last.update(size=stat.st_size, mtime=stat.st_mtime)
             seen[attempt["name"]] = last
         prompted = attempt.get("prompted", attempt["started"])
         at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
-        return {"at": at, "doing": last["kind"] or "pending", "error": last["error"]}
+        if last["kind_at"] is None or last["kind_at"] < prompted:
+            return {"at": at, "doing": "pending", "error": None}  # nothing written since the prompt
+        return {"at": at, "doing": last["kind"], "error": last["error"]}
     except Exception:  # noqa: BLE001 - a log that cannot be read is a gap in the evidence, never a broken tick
         return {"at": None, "doing": "unknown", "error": None}
 

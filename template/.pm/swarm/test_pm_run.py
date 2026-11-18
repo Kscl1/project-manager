@@ -2711,9 +2711,10 @@ T0 = 1_700_000_000  # a fixed clock for the progress tests
 def pi_line(kind, when):
     """Pi session-log lines of the shapes real logs show: "result" (a tool's result), "tool" (a model call that asks
     for a tool), "answer" (a finished model call), "error" (a failed model call and the context_edit Pi writes with
-    it, before it retries by itself)."""
+    it, before it retries by itself), "prompt" (what the worker was sent)."""
     stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
     message = {
+        "prompt": {"role": "user"},
         "result": {"role": "toolResult"},
         "tool": {"role": "assistant", "stopReason": "toolUse"},
         "answer": {"role": "assistant", "stopReason": "stop"},
@@ -2746,7 +2747,7 @@ class LogProgressTest(unittest.TestCase):
         self.assertEqual(self.progress(), {"at": None, "doing": "pending", "error": None})
         self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
         self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "pending", "error": None})
-        self.write(pi_line("tool", T0 + 40))
+        self.write(pi_line("tool", T0 + 40), pi_line("prompt", T0 + 45))  # a prompt is not what the worker does
         self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
 
     def test_failed_calls_and_their_context_edits_are_not_progress(self):
@@ -2813,10 +2814,10 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
             f.write(line)
         os.utime(self.session, (now, now))
 
-    def tick_minutes(self, job, minutes, screens, write=None, start=0, others=()):
+    def tick_minutes(self, job, minutes, screens, write=None, start=0, others=(), nudges=0):
         """Tick once a simulated minute from minute `start` on; `write(now)` adds to the log before each tick.
         `others`: more (job, attempt) pairs, ticked after this one. Returns the run's log. The fake Herdr must never
-        have been prompted, stopped or closed by the stall."""
+        have been stopped or closed by the stall, nor prompted but by the `nudges` the test expects so far."""
         if not start:
             agents = {
                 attempt["name"]: {
@@ -2825,6 +2826,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                     "prompted": 0,
                     "pane": f"w1:p{n + 2}",
                     "completion_seq": 1,
+                    "out": each["out"],
                 }
                 for n, (each, attempt) in enumerate(((job, self.attempt), *others))
             }
@@ -2843,11 +2845,18 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 with patch.object(pm_run.time, "time", return_value=now):
                     self.run.tick(jobs, self.state, {})
                 self.snapshots.append(dict(self.attempt))
-        calls = self.herdr_state()["calls"]
-        for forbidden in (["agent", "prompt"], ["pane", "close"], ["agent", "stop"]):
-            self.assertNotIn(forbidden, [c[:2] for c in calls])
+        calls = [c[:2] for c in self.herdr_state()["calls"]]
+        self.assertEqual(calls.count(["agent", "prompt"]), nudges)
+        for forbidden in (["pane", "close"], ["agent", "stop"]):
+            self.assertNotIn(forbidden, calls)
         self.assertEqual(self.state["a"]["state"], "started")
         return self.run.log_path.read_text(encoding="utf-8") if self.run.log_path.exists() else ""
+
+    def behave(self, behaviour):
+        """From the next tick on, the fake worker behaves like this (see the module docstring)."""
+        state = self.herdr_state()
+        state["agents"]["worker"]["behaviour"] = behaviour
+        self.fake_state.write_text(json.dumps(state), encoding="utf-8")
 
     def renamed(self):
         return self.herdr_state().get("renamed", [])
@@ -2914,6 +2923,21 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(log.count("STALLED a:"), 1)
         self.assertFalse(self.attempt["stall"])
         self.assertEqual(self.renamed(), [MARKED, LAUNCHED])
+
+    def test_a_tool_called_before_a_nudge_does_not_keep_the_new_turn_from_a_stall(self):
+        self.start_log(pi_line("tool", T0 + 30))  # a tool call whose result never came
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 2, ["frozen"])  # working: the toolUse is read and kept
+        self.behave("nothing")  # the turn settles with no report and a quiet log, so pm_run nudges it
+        self.tick_minutes(job, 3, ["frozen"], start=3, nudges=1)
+        self.assertEqual(self.attempt["prompted"], T0 + 180)
+        self.behave("hang")
+        log = self.tick_minutes(job, 9, ["frozen"], start=4, nudges=1)  # the log stays as it was
+        self.assertEqual(log.count("RESUME a:"), 1)
+        self.assertNotIn("BUSY", log)
+        self.assertFalse(self.snapshots[7]["stall"])
+        self.assertTrue(self.snapshots[8]["stall"], "STALL_S after the nudge")
+        self.assertEqual(log.count("STALLED a: no progress for 5 min"), 1)
 
     def test_a_failed_stall_mark_costs_one_line_and_changes_nothing_else(self):
         self.env["FAKE_RENAME_ERROR"] = "1"
