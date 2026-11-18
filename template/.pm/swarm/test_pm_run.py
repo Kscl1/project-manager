@@ -93,7 +93,8 @@ if cmd == ["tab", "create"]:
     state.setdefault("tabs", []).append(f"{ws['workspace_id']}:t{n}")  # every tab id handed out, in order
     reply({"type": "tab_created", "tab": {"tab_id": state["tabs"][-1]}, "root_pane": {"pane_id": ws["panes"][-1]}})
 if cmd == ["tab", "rename"]:
-    if os.environ.get("FAKE_RENAME_ERROR"):
+    state["rename_tries"] = state.get("rename_tries", 0) + 1
+    if os.environ.get("FAKE_RENAME_ERROR") or state["rename_tries"] <= int(os.environ.get("FAKE_RENAME_FAILS", "0")):
         fail("server_timeout", "rename timed out")
     state.setdefault("renamed", []).append(args[2:])
     reply({"type": "ok"})
@@ -2875,6 +2876,7 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.renamed(), [MARKED])
         self.run.hand_over(self.job("a", "hang"), self.state["a"], "test")  # the hand-over mark wins
         self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
+        self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
 
     def test_a_running_tool_is_not_a_stall(self):
         self.start_log(pi_line("tool", T0 + 30))
@@ -2939,15 +2941,42 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertTrue(self.snapshots[8]["stall"], "STALL_S after the nudge")
         self.assertEqual(log.count("STALLED a: no progress for 5 min"), 1)
 
-    def test_a_failed_stall_mark_costs_one_line_and_changes_nothing_else(self):
-        self.env["FAKE_RENAME_ERROR"] = "1"
+    def test_a_stall_mark_that_failed_is_tried_again_at_the_next_watch(self):
+        self.env["FAKE_RENAME_FAILS"] = "1"
         self.start_log(pi_line("result", T0 + 30))
         log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
         self.assertEqual(log.count("MARK-FAILED a: "), 1)
+        self.assertIn("try 1 of 3, tried again at the next watch", log)
         self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertTrue(self.attempt["stall"])
-        self.assertNotIn("stall_marked", self.attempt, "no mark on the tab, so none to take off")
+        self.assertNotIn("stall_marked", self.snapshots[6], "the stall began, but no mark on the tab yet")
+        self.assertTrue(self.snapshots[7]["stall_marked"])
+        self.assertEqual(self.renamed(), [MARKED])
         self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
+
+    def test_a_mark_whose_removal_fails_stays_on_the_receipt_after_three_tries(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.env["FAKE_RENAME_ERROR"] = "1"
+        self.tick_minutes(job, 7, ["frozen"], write=lambda now: self.add_log(pi_line("result", now), now), start=7)
+        log = self.tick_minutes(job, 11, ["frozen"], start=8)
+        self.assertFalse(self.attempt["stall"])
+        self.assertEqual(log.count("MARK-FAILED a: Herdr tab w1:t2 keeps its stall mark"), 3)
+        self.assertIn("try 3 of 3, not tried again", log)
+        self.assertTrue(self.attempt["stall_marked"], "the mark is still on the tab")
+        self.assertEqual(self.renamed(), [MARKED])
+
+    def test_a_stalled_worker_that_asks_loses_the_stall_and_its_mark(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.behave("ask")
+        log = self.tick_minutes(job, 7, ["frozen"], start=7)
+        self.assertEqual(log.count("WAITING a:"), 1)
+        self.assertFalse(self.attempt["stall"])
+        self.assertNotIn("stall_cause", self.attempt)
+        self.assertNotIn("stall_marked", self.attempt)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED])
 
     def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
         # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.

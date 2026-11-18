@@ -141,7 +141,8 @@ failures are recorded when they happen, not recalled later. Give run directories
 the directory's own name.
 PM_RUN_STALL_S (300 seconds): a worker that makes no progress for this long is stalled. pm_run says so once per
 episode: a STALLED line, the receipt's stall flag and stall_cause (--status shows both), and a pause sign (STALL_MARK)
-before the label of its Herdr tab until it makes progress again. It never stops, prompts or hands over a worker for it.
+before the label of its Herdr tab until it makes progress again or asks a question. It never stops, prompts or hands
+over a worker for it.
 A Pi worker is judged by its session log, whatever its pane shows and whether Herdr calls its turn working or settled:
 progress is a tool's result or a model answer written after the last prompt, not the failed calls Pi retries by
 itself, and a tool that is still running is not a stall (one BUSY line at most). A harness without a log pm_run knows (Claude Code, agy),
@@ -172,6 +173,7 @@ MARKER = "<!-- done -->"
 TITLE_MAX = 60  # code points of a job's trimmed title, the label of its Herdr tab
 HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
 STALL_MARK = "⏸ "  # put before a stalled worker's tab label while the stall lasts; the hand-over mark replaces it
+MARK_TRIES = 3  # renames that may fail per stall episode in each direction (mark on, mark off) before pm_run gives up
 RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
@@ -1303,37 +1305,53 @@ class Run:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
                 cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
             attempt.update(stall=True, stall_cause=cause)
+            attempt.pop("mark_tries", None)  # a new episode: its mark gets its own tries
             self.log(
                 f"STALLED {job['id']}: no {what} for {round((now - since) / 60, 1):g} min; {said}; not stopped, "
                 "the caller decides"
             )
-            self.mark_stall(job, attempt, True)
         elif not stalled and attempt.get("stall"):
             attempt["stall"] = False
             attempt.pop("stall_cause", None)
-        if not attempt.get("stall") and attempt.get("stall_marked"):
-            self.mark_stall(job, attempt, False)  # also after a nudge, which restarts the stall clock
+        self.mark_stall(job, attempt)  # also after a nudge, which restarts the stall clock
 
-    def mark_stall(self, job, a, on):
-        """Put STALL_MARK before the label the tab was launched with (on), or put that label back (off).
+    def end_stall(self, job, a):
+        """A stalled worker that asks a question is not stalled: its episode ends and the mark comes off."""
+        if a.get("stall"):
+            a["stall"] = False
+            a.pop("stall_cause", None)
+        self.mark_stall(job, a)
+
+    def mark_stall(self, job, a):
+        """Make the tab show the episode: STALL_MARK before the label it was launched with while `stall` holds, that
+        label alone once it ends.
 
         The owner reads tabs, not logs. Like the hand-over mark: only the current attempt's tab, from its recorded
-        `label`; an attempt without `tab` or `label` is left alone; the rename waits RENAME_S at most and a failed one
-        costs one log line and nothing else (the episode and the job go on as they were). `stall_marked` says the
-        mark is on the tab, so the end of the episode, or a nudge that restarts the clock, takes it off once.
+        `label`; an attempt without `tab` or `label` is left alone; the rename waits RENAME_S at most. `stall_marked`
+        says the mark is on the tab and changes only with a rename that worked, so the receipt and the tab agree. A
+        failed rename costs one log line and is tried again at the next watch, MARK_TRIES times at most per episode in
+        each direction (the episode and the job go on as they were).
         """
-        if not (a.get("tab") and a.get("label")):
+        on = bool(a.get("stall"))
+        if not (a.get("tab") and a.get("label")) or on == bool(a.get("stall_marked")):
             return
-        a.pop("stall_marked", None)
+        way, tries = ("on" if on else "off"), a.setdefault("mark_tries", {})
+        if tries.get(way, 0) >= MARK_TRIES:
+            return
         renamed = herdr("tab", "rename", str(a["tab"]), (STALL_MARK if on else "") + a["label"], timeout=RENAME_S)
         if "error" in renamed:
+            tries[way] = tries.get(way, 0) + 1
             message = " ".join(renamed["error"].get("message", "unknown error").split())
             what = "gets no stall mark" if on else "keeps its stall mark"
+            then = "tried again at the next watch" if tries[way] < MARK_TRIES else "not tried again"
             self.log(
-                f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} {what} ({message}); the worker is watched as before"
+                f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} {what} ({message}; try {tries[way]} of {MARK_TRIES}, "
+                f"{then}); the worker is watched as before"
             )
         elif on:
             a["stall_marked"] = True
+        else:
+            a.pop("stall_marked", None)
 
     # ---- one scheduling pass --------------------------------------------------------------------------
     def tick(self, jobs, state, caps):
@@ -1395,6 +1413,7 @@ class Run:
                         f"WAITING {job['id']}: answer the worker in Herdr pane {a.get('pane')} "
                         f"(question {a['asks']} in this session)"
                     )
+                self.end_stall(job, a)
                 if self.stuck_on_screen(job, s, a, now):
                     continue
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
@@ -1876,6 +1895,8 @@ class Run:
         if "error" in renamed:
             message = " ".join(renamed["error"].get("message", "unknown error").split())
             self.log(f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} keeps its label ({message}); still handed over")
+        else:
+            a.pop("stall_marked", None)  # the hand-over mark replaced the stall mark
 
     def fail_or_retry(self, job, s, why):
         a = s["attempts"][-1]
