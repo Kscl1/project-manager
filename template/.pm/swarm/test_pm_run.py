@@ -337,7 +337,34 @@ class PmRunFixture:
         return json.loads((self.run_dir / "receipts.json").read_text(encoding="utf-8"))
 
     def herdr_state(self):
-        return json.loads(self.fake_state.read_text(encoding="utf-8"))
+        """The fake Herdr's state. A fake call may be writing it right now (it writes in place), so a half-written
+        or held file is read again for a few seconds before the error counts."""
+        deadline = time.time() + 5
+        while True:
+            try:
+                return json.loads(self.fake_state.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                if time.time() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+    def wait_until(self, condition, what, ceiling=60):
+        """Poll `condition` until it holds; a generous ceiling only, so a slow machine waits longer, never fails.
+        A file read half-way through a write counts as not yet."""
+        deadline = time.time() + ceiling
+        while True:
+            try:
+                if condition():
+                    return
+            except (OSError, ValueError, KeyError, IndexError):
+                pass
+            self.assertLess(time.time(), deadline, f"never: {what}")
+            time.sleep(0.05)
+
+    def stop_pm(self, proc):
+        """End a loop started with start_pm once the test has seen what it waits for."""
+        proc.kill()
+        proc.wait()
 
 
 class PmRunTest(PmRunFixture, unittest.TestCase):
@@ -1353,8 +1380,15 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_query_error_keeps_worker_unknown_even_past_hard_timeout(self):
         self.env.update(FAKE_GET_ERROR="9999", PM_RUN_HARD_S="0")
         self.jobs(self.job("a", "ok"))
-        with self.assertRaises(subprocess.TimeoutExpired):
-            self.run_pm(timeout=4)
+        proc = self.start_pm()
+
+        def ticks_past_the_limit():
+            # Several failed queries, all past the zero hard limit, and the receipt saved after them.
+            gets = sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"])
+            return gets > 4 and self.receipts()["a"]["attempts"][0].get("herdr") == "unknown"
+
+        self.wait_until(ticks_past_the_limit, "several unknown ticks past the hard limit")
+        self.stop_pm(proc)
         attempt = self.receipts()["a"]["attempts"][0]
         self.assertEqual(self.receipts()["a"]["state"], "started")
         self.assertEqual(attempt["herdr"], "unknown")
@@ -1431,8 +1465,17 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_worker_asking_a_question_waits_and_is_never_killed(self):
         self.env["PM_RUN_HARD_S"] = "1"
         self.jobs(self.job("a", "ask"))
-        with self.assertRaises(subprocess.TimeoutExpired):
-            self.run_pm(timeout=5)
+        proc = self.start_pm()
+        self.wait_for_log("WAITING a")
+        started = self.receipts()["a"]["attempts"][0]["started"]
+        self.wait_until(lambda: time.time() > started + 2, "the hard limit is past")
+        gets = sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"])
+        # More ticks after the hard limit, so a kill at the limit would have happened by now.
+        self.wait_until(
+            lambda: sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"]) > gets + 3,
+            "three more ticks past the hard limit",
+        )
+        self.stop_pm(proc)
         state = self.receipts()
         self.assertEqual(state["a"]["state"], "started")
         self.assertIn("asked", state["a"]["attempts"][0])
@@ -3138,7 +3181,7 @@ class HerdrSafetyTest(unittest.TestCase):
             env={**os.environ, "PM_RUN_STALL_S": "12"},
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=60,  # a ceiling for a slow start, not the thing tested
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "12.0")
@@ -3159,7 +3202,7 @@ class HerdrSafetyTest(unittest.TestCase):
             env=env,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=60,  # the bound is proven by the message below, not by this ceiling
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("timed out after 0.1 s", json.loads(result.stdout)["error"]["message"])
