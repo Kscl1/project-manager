@@ -825,10 +825,11 @@ DOING = {
     "retry": "the harness retries on provider errors",
     "pending": "a request is pending at the provider",
 }
-PROGRESS_TAIL = 4 * 1024 * 1024  # a log first seen larger than this is read from its last 4 MB only
+PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
+LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
 
 
-def log_progress(job, attempt, repo, seen):
+def log_progress(job, attempt, repo, seen, now):
     """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
 
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
@@ -838,37 +839,41 @@ def log_progress(job, attempt, repo, seen):
     role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
     "error"), "pending" (anything else, or no such message: a request is out at the provider), or "unknown" when
     there is no log (another harness, a log not found, a log that cannot be read).
-    `seen` is the caller's cache, one entry per attempt name. A log whose size and mtime have not changed since the
-    last look gives the last answer without opening the file; a grown one is read from where the last look ended.
+    `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
+    looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
+    answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
+    most, and only up to its last line break (the rest is read whole at a later look). A log that shrank or is
+    another file under the same name (its identity changed) is read anew.
     """
     try:
         if job.get("harness", "pi") != "pi":
             return {"at": None, "doing": "unknown", "error": None}
-        path = attempt.get("session_log")
+        name, path = attempt["name"], attempt.get("session_log")
         if not path:
+            looked = (seen.get(name) or {}).get("looked")
+            if looked is not None and 0 <= now - looked < LOOKUP_S:
+                return {"at": None, "doing": "unknown", "error": None}
+            seen[name] = {"looked": now}
             found = pi_log(job, attempt, repo)
             if not found:
                 return {"at": None, "doing": "unknown", "error": None}
             path = found[0]
         path = str(path)
         stat = os.stat(path)
-        last = dict(seen.get(attempt["name"]) or {})  # a copy: a read that fails half-way leaves the cache as it was
-        if not last or last["path"] != path or stat.st_size < last["size"]:  # a new or rewritten log
-            last = {"path": path, "size": -1, "mtime": None, "offset": None, "at": None}
+        identity = (stat.st_dev, stat.st_ino)
+        last = dict(seen.get(name) or {})  # a copy: a read that fails half-way leaves the cache as it was
+        if last.get("path") != path or last.get("identity") != identity or stat.st_size < last["size"]:
+            last = {"path": path, "identity": identity, "size": -1, "mtime": None, "offset": 0, "at": None}
             last.update(kind=None, kind_at=None, error=None)  # the last message's kind, and when it was written
         if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
-            start = last["offset"]
-            if start is None:
-                start = max(0, stat.st_size - PROGRESS_TAIL)
+            start = max(last["offset"], stat.st_size - PROGRESS_TAIL)
             with open(path, "rb") as f:
                 f.seek(start)
-                chunk = f.read()
-            lines = chunk.split(b"\n")
-            if start and last["offset"] is None:
-                lines = lines[1:]  # a tail read starts inside a line
-            # Up to the last line break is read for good; a last line without one is read again next time.
-            last["offset"] = start + chunk.rfind(b"\n") + 1 if b"\n" in chunk else start
-            for line in lines:
+                chunk = f.read(PROGRESS_TAIL)
+            end = chunk.rfind(b"\n") + 1  # only lines that end in a line break; the rest is read at a later look
+            begin = chunk.find(b"\n") + 1 if start > last["offset"] else 0  # a read that skipped ahead starts mid-line
+            last["offset"] = start + end
+            for line in chunk[begin:end].split(b"\n"):
                 try:
                     entry = json.loads(line)
                 except (ValueError, UnicodeError):
@@ -1294,7 +1299,7 @@ class Run:
         Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
         provider).
         """
-        progress = log_progress(job, attempt, self.repo, self.progress)
+        progress = log_progress(job, attempt, self.repo, self.progress, now)
         if progress["doing"] == "unknown":
             if content is None:
                 return  # failed reads neither alter the episode nor warn

@@ -2740,8 +2740,8 @@ class LogProgressTest(unittest.TestCase):
         with self.log.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
 
-    def progress(self):
-        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen)
+    def progress(self, now=T0 + 1000):
+        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen, now)
 
     def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
         self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
@@ -2765,7 +2765,7 @@ class LogProgressTest(unittest.TestCase):
                 ({}, {**self.attempt, "session_log": str(self.tmp)}),  # a folder: cannot be read
             ):
                 with self.subTest(job=job, attempt=attempt):
-                    self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}), unknown)
+                    self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}, T0), unknown)
 
     def test_an_unchanged_log_is_not_read_again(self):
         self.write(pi_line("result", T0 + 20))
@@ -2776,6 +2776,34 @@ class LogProgressTest(unittest.TestCase):
         self.assertEqual(self.progress(), first, "same size and mtime: the last answer, not the file")
         self.write(pi_line("tool", T0 + 50))
         self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
+
+    def test_a_log_not_found_is_looked_for_once_a_minute(self):
+        self.attempt.pop("session_log")
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}), patch.object(
+            pm_run, "pi_log", wraps=pm_run.pi_log
+        ) as lookup:
+            for now in (T0, T0 + 30, T0 + 59, T0 + 60):
+                self.assertEqual(self.progress(now)["doing"], "unknown")
+        self.assertEqual(lookup.call_count, 2, "at T0 and at T0 + 60")
+
+    def test_a_record_split_across_two_looks_is_read_once_and_whole(self):
+        line = pi_line("tool", T0 + 40)
+        with patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
+            self.write(pi_line("result", T0 + 20), line[:30])
+            self.assertEqual(self.progress()["doing"], "pending")
+            self.write(line[30:-1])  # the whole record, still without its line break
+            self.assertEqual(self.progress()["doing"], "pending")
+            self.write("\n")
+            self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+        self.assertEqual(sum(b"toolUse" in c.args[0] for c in parsed.call_args_list), 1)
+
+    def test_a_log_replaced_by_another_file_is_read_anew(self):
+        self.write(pi_line("tool", T0 + 40))
+        self.assertEqual(self.progress()["doing"], "tool")
+        other = self.tmp / "other.jsonl"
+        other.write_text(pi_line("error", T0 + 50), encoding="utf-8")  # longer than the first log
+        os.replace(other, self.log)
+        self.assertEqual(self.progress(), {"at": None, "doing": "retry", "error": "503 upstream unavailable"})
 
 
 MARKED, LAUNCHED = ["w1:t2", "⏸ Review"], ["w1:t2", "Review"]  # the stall tests' tab, marked and as launched
