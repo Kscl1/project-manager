@@ -2921,23 +2921,18 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         failures = self.tmp / ".pm" / "local" / "failures.log"
         self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
 
-    def test_a_request_pending_after_a_tool_result_is_a_stall(self):
-        self.start_log(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
-        log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
+    def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
+        self.start_log(pi_line("tool", T0), pi_line("result", T0))
+        job = self.job("a", "hang")
+        log = self.tick_minutes(job, 6, ["frozen"])
         self.assertEqual(log.count("STALLED a:"), 1)
         cause = "Pi's log says no model answer has been written since the last tool result"
         self.assertEqual(self.attempt["stall_cause"], cause)
         self.assertEqual(self.renamed(), [MARKED])
         with patch("builtins.print") as printed:
-            self.run.status([self.job("a", "hang")], self.state)
+            self.run.status([job], self.state)
         shown = "\n".join(call.args[0] for call in printed.call_args_list)
         self.assertIn(f"stall=True, stall_cause={cause}", shown)
-
-    def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
-        self.start_log(pi_line("result", T0 + 30))
-        job = self.job("a", "hang")
-        self.tick_minutes(job, 6, ["frozen"])
-        self.assertTrue(self.attempt["stall"])
         log = self.tick_minutes(
             job, 7, ["frozen"], write=lambda now: self.add_log(pi_line("result", now), now), start=7
         )
@@ -3020,20 +3015,8 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
 
     def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
         # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
-        self.start_log()
-        log = self.tick_minutes(
-            self.job("a", "nothing"), 8, ["Retrying"], write=lambda now: self.add_log(pi_line("error", now), now)
-        )
-        self.assertEqual(log.count("HOLD a:"), 1)
-        self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertFalse(self.snapshots[4]["stall"])
-        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
-        self.assertIn("retries on provider errors", self.attempt["stall_cause"])
-        self.assertEqual(self.renamed(), [MARKED])
-        self.assertNotIn(["agent", "read"], [c[:2] for c in self.herdr_state()["calls"]], "the log decides alone")
-
-    def test_an_error_text_no_utf8_file_takes_still_warns_marks_and_the_tick_goes_on(self):
-        # JSON can carry a lone surrogate. A settled turn, so both log readers meet it: the HOLD line and the stall.
+        # Its error text holds a lone surrogate, which JSON can carry and no UTF-8 file takes: both log readers meet
+        # it (the HOLD line and the stall), and the tick still goes on to job b.
         self.start_log()
         bad = lambda now: pi_line("error", now).replace("503 upstream  unavailable", "bad \\ud800 text")  # noqa: E731
         other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
@@ -3041,14 +3024,19 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         log = self.tick_minutes(
             self.job("a", "nothing"),
             8,
-            ["frozen"],
+            ["Retrying"],
             write=lambda now: self.add_log(bad(now), now),
             others=[(self.job("b", "hang", harness="claude"), other)],
         )
+        self.assertEqual(log.count("HOLD a:"), 1)
         self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn('(last error: "bad ? text")', log)
+        self.assertIn('retries on provider errors (last error: "bad ? text")', log)
+        self.assertFalse(self.snapshots[4]["stall"])
+        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
         self.assertEqual(self.renamed(), [MARKED])
-        self.assertEqual(self.herdr_state()["calls"].count(["agent", "get", "other"]), 9, "every tick reached b")
+        calls = self.herdr_state()["calls"]
+        self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
+        self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
 
     def test_without_a_log_the_pane_decides(self):
         for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
