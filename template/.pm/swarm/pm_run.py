@@ -139,9 +139,16 @@ without a check, a question, a stall...) is also appended, one line with date an
 <repo>/.pm/local/failures.log, shared by all runs of that repo root (each git worktree has its own), so
 failures are recorded when they happen, not recalled later. Give run directories unique names: the line keeps only
 the directory's own name.
-PM_RUN_STALL_S (300 seconds): warn the caller once per inactivity episode; never stop or prompt the worker.
-Working panes are also checked for suspected repeating output. Warnings reach stdout and pm_run.log; the receipt keeps stall/loop flags.
-Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new stall warning.
+PM_RUN_STALL_S (300 seconds): a worker that makes no progress for this long is stalled. pm_run says so once per
+episode: a STALLED line, the receipt's stall flag and stall_cause (--status shows both), and a pause sign (STALL_MARK)
+before the label of its Herdr tab until it makes progress again or asks a question. It never stops, prompts or hands
+over a worker for it.
+A Pi worker is judged by its session log, whatever its pane shows and whether Herdr calls its turn working or settled:
+progress is a tool's result or a model answer written after the last prompt, not the failed calls Pi retries by
+itself, and a tool that is still running is not a stall (one BUSY line at most). A harness without a log pm_run knows (Claude Code, agy),
+or a Pi log not found, is still judged by its pane: no change of its content for that long. A nudge restarts the clock.
+Working panes are also checked for suspected repeating output (LOOP; the receipt keeps the loop flag).
+Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new pane-judged stall.
 Pi diagnostics: PM_RUN_PI_SESSIONS overrides ~/.pi/agent/sessions; log lookup is best-effort, not completion evidence.
 """
 
@@ -165,6 +172,8 @@ from urllib.request import urlopen
 MARKER = "<!-- done -->"
 TITLE_MAX = 60  # code points of a job's trimmed title, the label of its Herdr tab
 HANDED_MARK = "⚠ "  # put before a handed-over job's tab label: a symbol reads the same in every language
+STALL_MARK = "⏸ "  # put before a stalled worker's tab label while the stall lasts; the hand-over mark replaces it
+MARK_TRIES = 3  # renames that may fail per stall episode in each direction (mark on, mark off) before pm_run gives up
 RENAME_S = 5  # seconds the cosmetic hand-over rename may take, so it never holds a tick for HERDR_TIMEOUT
 # Money in a table is what the tokens would cost at API prices, never a bill: most workers run on flat plans or free
 # models. Printed once, on the total line, not on every row.
@@ -780,11 +789,19 @@ def turn_end(job, attempt, repo):
         return "session log not found for this attempt (bounded Pi log lookup)"
     messages = [e.get("message") for e in found[1] if e.get("type") == "message"]
     last = next((m for m in reversed(messages) if isinstance(m, dict) and m.get("role") == "assistant"), {})
-    attempt["stopReason"] = last.get("stopReason")
-    attempt["errorMessage"] = last.get("errorMessage")
-    if last.get("stopReason") == "error":
-        return f"provider error: {last.get('errorMessage') or 'no error message in session log'}"
-    return f"Pi stopReason: {last.get('stopReason') or 'not found in session log sample'}"
+    attempt["stopReason"] = log_text(last.get("stopReason"))
+    attempt["errorMessage"] = log_text(last.get("errorMessage"))
+    if attempt["stopReason"] == "error":
+        return f"provider error: {attempt['errorMessage'] or 'no error message in session log'}"
+    return f"Pi stopReason: {attempt['stopReason'] or 'not found in session log sample'}"
+
+
+def log_text(value):
+    """A string read from a Pi log, safe to write as UTF-8; anything else as it was.
+
+    JSON can hold a lone surrogate (half of an escaped character pair), and no UTF-8 file takes one: each becomes "?".
+    """
+    return value.encode("utf-8", "replace").decode("utf-8") if isinstance(value, str) else value
 
 
 def log_time(entry):
@@ -800,6 +817,97 @@ def log_time(entry):
         if isinstance(value, (int, float)):
             return value / 1000 if value > 1e11 else float(value)  # Pi keeps message times in milliseconds
     return None
+
+
+# What a worker does now by its Pi session log, as the stall warning says it.
+DOING = {
+    "tool": "a tool is running",
+    "retry": "the harness retries on provider errors",
+    # Not "a request is pending": the log cannot tell a request that hangs from a long think.
+    "prompt": "no model answer has been written since the last prompt",
+    "result": "no model answer has been written since the last tool result",
+    "answer": "no model answer has been written since the last one ended a turn",
+}
+PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
+LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
+
+
+def log_progress(job, attempt, repo, seen, now):
+    """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
+
+    "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
+    yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
+    context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
+    An entry time later than `now` counts as `now`.
+    "doing" comes from the last message written after that prompt, by the model or a tool (a prompt or any other
+    role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
+    "error"), "result" (a tool's result), "answer" (any other model answer, one that ended a turn), "prompt" (no
+    such message), or "unknown" when there is no log (another harness, a log not found, a log that cannot be read).
+    `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
+    looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
+    answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
+    most, and only up to its last line break (the rest is read whole at a later look). A log that shrank or is
+    another file under the same name (its identity changed) is read anew.
+    """
+    try:
+        if job.get("harness", "pi") != "pi":
+            return {"at": None, "doing": "unknown", "error": None}
+        name, path = attempt["name"], attempt.get("session_log")
+        if not path:
+            looked = (seen.get(name) or {}).get("looked")
+            if looked is not None and 0 <= now - looked < LOOKUP_S:
+                return {"at": None, "doing": "unknown", "error": None}
+            seen[name] = {"looked": now}
+            found = pi_log(job, attempt, repo)
+            if not found:
+                return {"at": None, "doing": "unknown", "error": None}
+            path = found[0]
+        path = str(path)
+        stat = os.stat(path)
+        identity = (stat.st_dev, stat.st_ino)
+        last = dict(seen.get(name) or {})  # a copy: a read that fails half-way leaves the cache as it was
+        if last.get("path") != path or last.get("identity") != identity or stat.st_size < last["size"]:
+            last = {"path": path, "identity": identity, "size": -1, "mtime": None, "offset": 0, "at": None}
+            last.update(kind=None, kind_at=None, error=None)  # the last message's kind, and when it was written
+        if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
+            start = max(last["offset"], stat.st_size - PROGRESS_TAIL)
+            with open(path, "rb") as f:
+                f.seek(start)
+                chunk = f.read(PROGRESS_TAIL)
+            end = chunk.rfind(b"\n") + 1  # only lines that end in a line break; the rest is read at a later look
+            begin = chunk.find(b"\n") + 1 if start > last["offset"] else 0  # a read that skipped ahead starts mid-line
+            last["offset"] = start + end
+            for line in chunk[begin:end].split(b"\n"):
+                try:
+                    entry = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue  # a partial write, or not JSON
+                message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
+                if not isinstance(message, dict):
+                    continue  # a context_edit, a session line, anything that is not a message
+                role, stop = message.get("role"), message.get("stopReason")
+                if role not in ("assistant", "toolResult"):
+                    continue  # a prompt or a note: what the worker does stays what it was
+                when = log_time(entry)
+                when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
+                kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
+                if role == "assistant" and stop == "error":
+                    error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
+                    last.update(kind="retry", kind_at=kind_at, error=error)
+                    continue
+                kind = "result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"
+                last.update(kind=kind, kind_at=kind_at, error=None)
+                if when is not None and (last["at"] is None or when > last["at"]):
+                    last["at"] = when
+            last.update(size=stat.st_size, mtime=stat.st_mtime)
+            seen[attempt["name"]] = last
+        prompted = attempt.get("prompted", attempt["started"])
+        at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
+        if last["kind_at"] is None or last["kind_at"] < prompted:
+            return {"at": at, "doing": "prompt", "error": None}  # nothing written since the prompt
+        return {"at": at, "doing": last["kind"], "error": last["error"]}
+    except Exception:  # noqa: BLE001 - a log that cannot be read is a gap in the evidence, never a broken tick
+        return {"at": None, "doing": "unknown", "error": None}
 
 
 def usage_of(job, attempt, repo, log=None):
@@ -878,6 +986,8 @@ class Run:
         self.bad = {}  # file name -> the parse error last logged for it
         self.failures_warned = False  # the shared failure log could not be written; said once
         self.checks = {}  # job id -> the Popen of its background check (state "checking")
+        self.progress = {}  # attempt name -> what log_progress last read from its Pi session log
+        self.sample = None  # the pane content pane_quiet last read in this tick, or None
 
     def log(self, text):
         line = f"{time.strftime('%H:%M:%S')} {text}"
@@ -1133,51 +1243,149 @@ class Run:
     def reset_observation(self, attempt):
         attempt.update(seen_hash=None, seen_at=attempt["prompted"], stall=False, loop=False, loop_line=None)
         attempt.update(settled_hash=None, settled_at=None)
+        attempt.pop("stall_cause", None)  # the stall clock restarts at the prompt, by the log too (log_progress)
+        attempt.pop("stall_since", None)
 
     def pane_quiet(self, attempt, now):
         """Seconds the pane's content has stayed the same while the turn looks settled; None when it cannot be read.
         Herdr showed live turns as settled on 18 Oct (Claude Code mid-turn, Pi with its own agent folder), and
         without a session log nothing else tells such a turn from a finished one."""
+        self.sample = None  # the pane content this read gave, for the stall rule of a held turn (check_stall)
         text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
         if not isinstance(text, str):
             return None
-        digest = sha256(pane_content(text).encode("utf-8")).hexdigest()
+        self.sample = pane_content(text)
+        digest = sha256(self.sample.encode("utf-8")).hexdigest()
         if digest != attempt.get("settled_hash"):
             attempt.update(settled_hash=digest, settled_at=now)
         return now - attempt["settled_at"]
 
-    def warn_pane(self, job, attempt, now):
-        # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
-        text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
-        if not isinstance(text, str):
-            return  # failed reads neither alter the episode nor warn
-        content = pane_content(text)
+    def pane_seen(self, attempt, content, now):
+        """Note the pane content the stall rule judges by when there is no log; True when it changed since."""
         digest = sha256(content.encode("utf-8")).hexdigest()
         previous = attempt.get("seen_hash")
         changed = previous is not None and digest != previous
         if changed:
-            attempt.update(seen_at=now, stall=False)
+            attempt["seen_at"] = now
         attempt.setdefault("seen_at", attempt.get("prompted", attempt["started"]))
         attempt.setdefault("stall", False)
         attempt.setdefault("loop", False)
-        lines = [line for line in content.splitlines() if line.strip()][-30:]
-        line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
-        repeated = line if count >= 15 else None
-        if repeated is None:
-            attempt["loop"] = False
-        elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
-            attempt["loop"] = True
+        attempt["seen_hash"] = digest
+        return changed
+
+    def watch_working(self, job, attempt, now):
+        """The watch of a turn Herdr reports working: one pane read, the repeat check (LOOP), then the stall rule."""
+        # "visible": Herdr refuses "recent" while a Pi agent works (alternate screen), checked 9 Oct.
+        text = herdr("agent", "read", attempt["name"], "--source", "visible", plain=True)
+        content = pane_content(text) if isinstance(text, str) else None
+        if content is not None:
+            changed = self.pane_seen(attempt, content, now)
+            lines = [line for line in content.splitlines() if line.strip()][-30:]
+            line, count = Counter(lines).most_common(1)[0] if lines else (None, 0)
+            repeated = line if count >= 15 else None
+            if repeated is None:
+                attempt["loop"] = False
+            elif changed and repeated == attempt.get("loop_line") and not attempt["loop"]:
+                attempt["loop"] = True
+                self.log(
+                    f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
+                    f"({count} of the last 30 lines); not stopped, the caller decides"
+                )
+            attempt["loop_line"] = repeated
+        self.check_stall(job, attempt, now, content)
+
+    def check_stall(self, job, attempt, now, content, probe=True):
+        """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
+
+        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
+        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
+        a log (another harness, a log not found) the pane decides as before: `content`, which the caller read and
+        noted (pane_seen), unchanged for STALL_S; None when it could not be read. Progress, or a pane change for the
+        pane rule, ends the episode. The worker is never stopped or prompted. It reads no pane itself. It runs while
+        Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
+        provider).
+        """
+        progress = log_progress(job, attempt, self.repo, self.progress, now)
+        if progress["doing"] == "unknown":
+            if content is None:
+                return  # failed reads neither alter the episode nor warn
+            since, what = attempt["seen_at"], "new output"
+            stalled = now - since >= STALL_S
+        else:
+            attempt.setdefault("stall", False)  # a held turn judged by its log alone has no pane to note
+            since, what = progress["at"] or attempt.get("prompted", attempt["started"]), "progress"
+            stalled = progress["doing"] != "tool" and now - since >= STALL_S
+            if progress["doing"] == "tool" and now - since >= STALL_S and attempt.get("busy_since") != since:
+                attempt["busy_since"] = since  # once per tool run: a long build or test run is work, not a stall
+                self.log(
+                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but Pi's log shows a "
+                    "tool still running; not a stall"
+                )
+            if attempt.get("stall") and attempt.setdefault("stall_since", since) < since:
+                # Progress since the episode began ends it, even when this look comes over STALL_S after that
+                # progress; a stall after it is a new episode, warned again. An episode the pane began (a log found
+                # late) goes on, measured from here.
+                attempt["stall"] = False
+        if stalled and not attempt.get("stall"):
+            if progress["doing"] == "unknown":
+                found = stall_cause(job if probe else {**job, "probe": None}, content)  # once: it may probe
+                cause, said = f"pane: {found}", f"likely {found}"
+            else:
+                error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
+                cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
+            attempt.update(stall=True, stall_cause=cause)
+            if what == "progress":
+                attempt["stall_since"] = since  # the last progress the episode is measured from
+            attempt.pop("mark_tries", None)  # a new episode: its mark gets its own tries
             self.log(
-                f'LOOP {job["id"]}: suspected loop, new output keeps repeating "{line[:60]}" '
-                f"({count} of the last 30 lines); not stopped, the caller decides"
+                f"STALLED {job['id']}: no {what} for {round((now - since) / 60, 1):g} min; {said}; not stopped, "
+                "the caller decides"
             )
-        attempt.update(seen_hash=digest, loop_line=repeated)
-        if now - attempt["seen_at"] >= STALL_S and not attempt["stall"]:
-            attempt["stall"] = True
+        elif not stalled and attempt.get("stall"):
+            attempt["stall"] = False
+        if not attempt.get("stall"):
+            attempt.pop("stall_cause", None)
+            attempt.pop("stall_since", None)
+        self.mark_stall(job, attempt)  # also after a nudge, which restarts the stall clock
+
+    def end_stall(self, job, a):
+        """A stalled worker that asks a question is not stalled: its episode ends and the mark comes off."""
+        if a.get("stall"):
+            a["stall"] = False
+            a.pop("stall_cause", None)
+            a.pop("stall_since", None)
+        self.mark_stall(job, a)
+
+    def mark_stall(self, job, a):
+        """Make the tab show the episode: STALL_MARK before the label it was launched with while `stall` holds, that
+        label alone once it ends.
+
+        The owner reads tabs, not logs. Like the hand-over mark: only the current attempt's tab, from its recorded
+        `label`; an attempt without `tab` or `label` is left alone; the rename waits RENAME_S at most. `stall_marked`
+        says the mark is on the tab and changes only with a rename that worked, so the receipt and the tab agree. A
+        failed rename costs one log line and is tried again at the next watch, MARK_TRIES times at most per episode in
+        each direction (the episode and the job go on as they were).
+        """
+        on = bool(a.get("stall"))
+        if not (a.get("tab") and a.get("label")) or on == bool(a.get("stall_marked")):
+            return
+        way, tries = ("on" if on else "off"), a.setdefault("mark_tries", {})
+        if tries.get(way, 0) >= MARK_TRIES:
+            return
+        renamed = herdr("tab", "rename", str(a["tab"]), (STALL_MARK if on else "") + a["label"], timeout=RENAME_S)
+        if "error" in renamed:
+            tries[way] = tries.get(way, 0) + 1
+            message = " ".join(renamed["error"].get("message", "unknown error").split())
+            what = "gets no stall mark" if on else "keeps its stall mark"
+            then = "tried again at the next watch" if tries[way] < MARK_TRIES else "not tried again"
             self.log(
-                f"STALLED {job['id']}: no new output for {round((now - attempt['seen_at']) / 60, 1):g} min; "
-                f"likely {stall_cause(job, content)}; not stopped, the caller decides"
+                f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} {what} ({message}; try {tries[way]} of {MARK_TRIES}, "
+                f"{then}); the worker is watched as before"
             )
+        elif on:
+            a["stall_marked"] = True
+        else:
+            a.pop("stall_marked", None)
 
     # ---- one scheduling pass --------------------------------------------------------------------------
     def tick(self, jobs, state, caps):
@@ -1239,6 +1447,7 @@ class Run:
                         f"WAITING {job['id']}: answer the worker in Herdr pane {a.get('pane')} "
                         f"(question {a['asks']} in this session)"
                     )
+                self.end_stall(job, a)
                 if self.stuck_on_screen(job, s, a, now):
                     continue
                 busy[job.get("bucket", "default")] = busy.get(job.get("bucket", "default"), 0) + 1
@@ -1248,7 +1457,7 @@ class Run:
             a.pop("asked_question", None)
             if status == "working":
                 a["worked"] = True
-                self.warn_pane(job, a, now)
+                self.watch_working(job, a, now)
             settled = status in SETTLED and now - a.get("prompted", a["started"]) > SETTLE_S
             if status is None or settled:
                 if status is None:
@@ -1279,7 +1488,7 @@ class Run:
                     self.fail_or_retry(job, s, f"worker is gone and {why}")
                     continue
                 size, quiet = session_log(a, now)
-                source, watched = "Pi wrote its log", "Pi's log"
+                source, watched, self.sample = "Pi wrote its log", "Pi's log", None
                 if quiet is None:
                     quiet, source, watched = self.pane_quiet(a, now), "its pane last changed", "the pane"
                 if quiet is not None and quiet < QUIET_S and not self.hold_over(a, now):
@@ -1291,6 +1500,11 @@ class Run:
                             else "pm_run nudges it in the same session"
                         )
                         self.log(f"HOLD {job['id']}: turn looks settled but {source} {quiet:.0f} s ago; {why}; {then}")
+                    # A log that keeps growing holds the nudge, but only progress in it holds off a stall warning.
+                    # Without a log the pane sample pane_quiet just read is judged; a log-backed hold reads no pane.
+                    if self.sample is not None:
+                        self.pane_seen(a, self.sample, now)
+                    self.check_stall(job, a, now, self.sample, probe=False)
                 elif a.get("wait_until", 0) > now:
                     pass  # waiting out a short quota reset (QUOTA-WAIT); the nudge comes after it
                 elif self.stop_hand_over(job, s, a, why, now):
@@ -1718,6 +1932,8 @@ class Run:
         if "error" in renamed:
             message = " ".join(renamed["error"].get("message", "unknown error").split())
             self.log(f"MARK-FAILED {job['id']}: Herdr tab {a['tab']} keeps its label ({message}); still handed over")
+        else:
+            a.pop("stall_marked", None)  # the hand-over mark replaced the stall mark
 
     def fail_or_retry(self, job, s, why):
         a = s["attempts"][-1]
@@ -1752,7 +1968,7 @@ class Run:
             a = s["attempts"][-1] if s["attempts"] else {}
             detail = ", ".join(
                 f"{k}={a[k]}"
-                for k in ("pane", "model", "herdr", "stall", "loop", "brief_changed", "verify_rc", "why")
+                for k in ("pane", "model", "herdr", "stall", "stall_cause", "loop", "brief_changed", "verify_rc", "why")
                 if a.get(k) is not None
             )
             if s.get("why"):

@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -92,7 +93,8 @@ if cmd == ["tab", "create"]:
     state.setdefault("tabs", []).append(f"{ws['workspace_id']}:t{n}")  # every tab id handed out, in order
     reply({"type": "tab_created", "tab": {"tab_id": state["tabs"][-1]}, "root_pane": {"pane_id": ws["panes"][-1]}})
 if cmd == ["tab", "rename"]:
-    if os.environ.get("FAKE_RENAME_ERROR"):
+    state["rename_tries"] = state.get("rename_tries", 0) + 1
+    if os.environ.get("FAKE_RENAME_ERROR") or state["rename_tries"] <= int(os.environ.get("FAKE_RENAME_FAILS", "0")):
         fail("server_timeout", "rename timed out")
     state.setdefault("renamed", []).append(args[2:])
     reply({"type": "ok"})
@@ -337,7 +339,34 @@ class PmRunFixture:
         return json.loads((self.run_dir / "receipts.json").read_text(encoding="utf-8"))
 
     def herdr_state(self):
-        return json.loads(self.fake_state.read_text(encoding="utf-8"))
+        """The fake Herdr's state. A fake call may be writing it right now (it writes in place), so a half-written
+        or held file is read again for a few seconds before the error counts."""
+        deadline = time.time() + 5
+        while True:
+            try:
+                return json.loads(self.fake_state.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                if time.time() >= deadline:
+                    raise
+                time.sleep(0.05)
+
+    def wait_until(self, condition, what, ceiling=60):
+        """Poll `condition` until it holds; a generous ceiling only, so a slow machine waits longer, never fails.
+        A file read half-way through a write counts as not yet."""
+        deadline = time.time() + ceiling
+        while True:
+            try:
+                if condition():
+                    return
+            except (OSError, ValueError, KeyError, IndexError):
+                pass
+            self.assertLess(time.time(), deadline, f"never: {what}")
+            time.sleep(0.05)
+
+    def stop_pm(self, proc):
+        """End a loop started with start_pm once the test has seen what it waits for."""
+        proc.kill()
+        proc.wait()
 
 
 class PmRunTest(PmRunFixture, unittest.TestCase):
@@ -1353,8 +1382,15 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_query_error_keeps_worker_unknown_even_past_hard_timeout(self):
         self.env.update(FAKE_GET_ERROR="9999", PM_RUN_HARD_S="0")
         self.jobs(self.job("a", "ok"))
-        with self.assertRaises(subprocess.TimeoutExpired):
-            self.run_pm(timeout=4)
+        proc = self.start_pm()
+
+        def ticks_past_the_limit():
+            # Several failed queries, all past the zero hard limit, and the receipt saved after them.
+            gets = sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"])
+            return gets > 4 and self.receipts()["a"]["attempts"][0].get("herdr") == "unknown"
+
+        self.wait_until(ticks_past_the_limit, "several unknown ticks past the hard limit")
+        self.stop_pm(proc)
         attempt = self.receipts()["a"]["attempts"][0]
         self.assertEqual(self.receipts()["a"]["state"], "started")
         self.assertEqual(attempt["herdr"], "unknown")
@@ -1431,8 +1467,17 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
     def test_worker_asking_a_question_waits_and_is_never_killed(self):
         self.env["PM_RUN_HARD_S"] = "1"
         self.jobs(self.job("a", "ask"))
-        with self.assertRaises(subprocess.TimeoutExpired):
-            self.run_pm(timeout=5)
+        proc = self.start_pm()
+        self.wait_for_log("WAITING a")
+        started = self.receipts()["a"]["attempts"][0]["started"]
+        self.wait_until(lambda: time.time() > started + 2, "the hard limit is past")
+        gets = sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"])
+        # More ticks after the hard limit, so a kill at the limit would have happened by now.
+        self.wait_until(
+            lambda: sum(c[:2] == ["agent", "get"] for c in self.herdr_state()["calls"]) > gets + 3,
+            "three more ticks past the hard limit",
+        )
+        self.stop_pm(proc)
         state = self.receipts()
         self.assertEqual(state["a"]["state"], "started")
         self.assertIn("asked", state["a"]["attempts"][0])
@@ -1483,7 +1528,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
 
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
-        (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
+        # Stamped ahead of now: the lease counts as live for three ticks only, and a slow start must not outlast it.
+        (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time() + 60}")
         result = self.run_pm(timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("holds", result.stderr + result.stdout)
@@ -2661,6 +2707,350 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
         self.assertIn("STALLED", log)
 
 
+T0 = 1_700_000_000  # a fixed clock for the progress tests
+
+
+def pi_line(kind, when):
+    """Pi session-log lines of the shapes real logs show: "result" (a tool's result), "tool" (a model call that asks
+    for a tool), "answer" (a finished model call), "error" (a failed model call and the context_edit Pi writes with
+    it, before it retries by itself), "prompt" (what the worker was sent)."""
+    stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    message = {
+        "prompt": {"role": "user"},
+        "result": {"role": "toolResult"},
+        "tool": {"role": "assistant", "stopReason": "toolUse"},
+        "answer": {"role": "assistant", "stopReason": "stop"},
+        "error": {"role": "assistant", "stopReason": "error", "errorMessage": "503 upstream  unavailable"},
+    }[kind]
+    entries = [{"type": "message", "timestamp": stamp, "message": message}]
+    if kind == "error":
+        entries.append({"type": "context_edit", "timestamp": stamp})
+    return "".join(json.dumps(entry) + "\n" for entry in entries)
+
+
+class LogProgressTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_progress_"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.log = self.tmp / "session.jsonl"
+        self.log.write_text("", encoding="utf-8")
+        self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, "session_log": str(self.log)}
+        self.seen = {}
+
+    def write(self, *lines):
+        with self.log.open("a", encoding="utf-8") as f:
+            f.write("".join(lines))
+
+    def progress(self, now=T0 + 1000):
+        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen, now)
+
+    def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
+        self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
+        self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
+        self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
+        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
+        self.write(pi_line("tool", T0 + 40), pi_line("prompt", T0 + 45))  # a prompt is not what the worker does
+        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+
+    def test_failed_calls_and_their_context_edits_are_not_progress(self):
+        self.write(pi_line("result", T0 + 20), pi_line("error", T0 + 30), pi_line("error", T0 + 40))
+        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"})
+
+    def test_no_log_is_unknown_and_never_raises(self):
+        unknown = {"at": None, "doing": "unknown", "error": None}
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}):
+            for job, attempt in (
+                ({"harness": "claude"}, self.attempt),  # no log pm_run knows
+                ({}, {"name": "worker", "started": T0}),  # not found
+                ({}, {**self.attempt, "session_log": str(self.tmp / "gone.jsonl")}),
+                ({}, {**self.attempt, "session_log": str(self.tmp)}),  # a folder: cannot be read
+            ):
+                with self.subTest(job=job, attempt=attempt):
+                    self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}, T0), unknown)
+
+    def test_an_unchanged_log_is_not_read_again(self):
+        self.write(pi_line("result", T0 + 20))
+        first = self.progress()
+        size, before = self.log.stat().st_size, os.stat(self.log)
+        self.log.write_bytes(b"x" * (size - 1) + b"\n")  # same size; mtime set back below
+        os.utime(self.log, ns=(before.st_atime_ns, before.st_mtime_ns))
+        self.assertEqual(self.progress(), first, "same size and mtime: the last answer, not the file")
+        self.write(pi_line("tool", T0 + 50))
+        self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
+
+    def test_a_log_not_found_is_looked_for_once_a_minute(self):
+        self.attempt.pop("session_log")
+        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}), patch.object(
+            pm_run, "pi_log", wraps=pm_run.pi_log
+        ) as lookup:
+            for now in (T0, T0 + 30, T0 + 59, T0 + 60):
+                self.assertEqual(self.progress(now)["doing"], "unknown")
+        self.assertEqual(lookup.call_count, 2, "at T0 and at T0 + 60")
+
+    def test_a_record_split_across_two_looks_is_read_once_and_whole(self):
+        line = pi_line("tool", T0 + 40)
+        with patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
+            self.write(pi_line("result", T0 + 20), line[:30])
+            self.assertEqual(self.progress()["doing"], "result")
+            self.write(line[30:-1])  # the whole record, still without its line break
+            self.assertEqual(self.progress()["doing"], "result")
+            self.write("\n")
+            self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+        self.assertEqual(sum(b"toolUse" in c.args[0] for c in parsed.call_args_list), 1)
+
+    def test_an_entry_time_later_than_now_counts_as_now(self):
+        self.write(pi_line("result", T0 + 5000))  # a clock ahead of ours
+        self.assertEqual(self.progress(T0 + 100), {"at": T0 + 100, "doing": "result", "error": None})
+        self.assertEqual(self.progress(T0 + 500)["at"], T0 + 100, "so a stall can be measured from it")
+
+    def test_a_log_replaced_by_another_file_is_read_anew(self):
+        self.write(pi_line("tool", T0 + 40))
+        self.assertEqual(self.progress()["doing"], "tool")
+        other = self.tmp / "other.jsonl"
+        other.write_text(pi_line("error", T0 + 50), encoding="utf-8")  # longer than the first log
+        os.replace(other, self.log)
+        self.assertEqual(self.progress(), {"at": None, "doing": "retry", "error": "503 upstream unavailable"})
+
+
+MARKED, LAUNCHED = ["w1:t2", "⏸ Review"], ["w1:t2", "Review"]  # the stall tests' tab, marked and as launched
+
+
+class StallRuleTest(PmRunFixture, unittest.TestCase):
+    """The stall rule through the real tick: a fake Herdr, a Pi session log the test writes, a clock it sets."""
+
+    def setUp(self):
+        super().setUp()
+        # The fake Herdr for the whole test, so no call can reach a real one, also outside a tick.
+        for patcher in (
+            patch.dict(os.environ, self.env),
+            patch.object(pm_run, "HERDR_CMD", json.loads(self.env["PM_RUN_HERDR"])),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.run = pm_run.Run(self.run_dir)
+        self.run.repo = self.tmp
+        self.attempt = {"name": "worker", "started": T0, "prompted": T0, "seq0": 0, "tab": "w1:t2", "label": "Review"}
+        self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
+        self.snapshots = []
+
+    def start_log(self, *lines):
+        """This attempt's Pi session log, where pi_log looks for it."""
+        folder = self.tmp / "sessions" / ("--" + re.sub(r"[/\\:]", "-", str(self.tmp).lstrip("/\\")) + "--")
+        folder.mkdir(parents=True, exist_ok=True)
+        self.session = folder / "worker.jsonl"
+        stamp = datetime.fromtimestamp(T0 + 1, timezone.utc).isoformat().replace("+00:00", "Z")
+        header = [{"type": "session", "timestamp": stamp}, {"type": "session_info", "name": "worker"}]
+        self.session.write_text("".join(json.dumps(e) + "\n" for e in header) + "".join(lines), encoding="utf-8")
+        os.utime(self.session, (T0 + 1, T0 + 1))
+
+    def add_log(self, line, now):
+        """Append to the log as Pi would at `now`: the file's mtime is on the test's clock too."""
+        with self.session.open("a", encoding="utf-8") as f:
+            f.write(line)
+        os.utime(self.session, (now, now))
+
+    def tick_minutes(self, job, minutes, screens, write=None, start=0, others=(), nudges=0):
+        """Tick once a simulated minute from minute `start` on; `write(now)` adds to the log before each tick.
+        `others`: more (job, attempt) pairs, ticked after this one. Returns the run's log. The fake Herdr must never
+        have been stopped or closed by the stall, nor prompted but by the `nudges` the test expects so far."""
+        if not start:
+            agents = {
+                attempt["name"]: {
+                    "behaviour": each["model"],
+                    "prompts": ["brief"],
+                    "prompted": 0,
+                    "pane": f"w1:p{n + 2}",
+                    "completion_seq": 1,
+                    "out": each["out"],
+                }
+                for n, (each, attempt) in enumerate(((job, self.attempt), *others))
+            }
+            self.fake_state.write_text(
+                json.dumps({"n": 0, "reads": screens, "workspaces": [], "gone": {}, "agents": agents}),
+                encoding="utf-8",
+            )
+        jobs = [job, *(each for each, _ in others)]
+        with patch.dict(os.environ, self.env), patch.object(pm_run, "STALL_S", 300), patch.object(
+            pm_run, "HARD_S", 10000
+        ), patch.object(pm_run, "QUIET_S", 90), patch.object(pm_run, "SETTLE_S", 20):
+            for minute in range(start, minutes + 1):
+                now = T0 + 60 * minute
+                if write:
+                    write(now)
+                with patch.object(pm_run.time, "time", return_value=now):
+                    self.run.tick(jobs, self.state, {})
+                self.snapshots.append(dict(self.attempt))
+        calls = [c[:2] for c in self.herdr_state()["calls"]]
+        self.assertEqual(calls.count(["agent", "prompt"]), nudges)
+        for forbidden in (["pane", "close"], ["agent", "stop"]):
+            self.assertNotIn(forbidden, calls)
+        self.assertEqual(self.state["a"]["state"], "started")
+        return self.run.log_path.read_text(encoding="utf-8") if self.run.log_path.exists() else ""
+
+    def behave(self, behaviour):
+        """From the next tick on, the fake worker behaves like this (see the module docstring)."""
+        state = self.herdr_state()
+        state["agents"]["worker"]["behaviour"] = behaviour
+        self.fake_state.write_text(json.dumps(state), encoding="utf-8")
+
+    def renamed(self):
+        return self.herdr_state().get("renamed", [])
+
+    def test_retries_alone_are_a_stall_whatever_the_pane_shows(self):
+        self.start_log()
+        screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
+        log = self.tick_minutes(
+            self.job("a", "hang"), 8, screens, write=lambda now: self.add_log(pi_line("error", now), now)
+        )
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertIn("STALLED a: no progress for 5 min; Pi's log says the harness retries on provider errors", log)
+        self.assertIn('(last error: "503 upstream unavailable")', log)
+        self.assertTrue(self.attempt["stall"])
+        self.assertIn("retries on provider errors", self.attempt["stall_cause"])
+        self.assertEqual(self.renamed(), [MARKED])
+        self.run.hand_over(self.job("a", "hang"), self.state["a"], "test")  # the hand-over mark wins
+        self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
+        self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
+
+    def test_a_running_tool_is_not_a_stall(self):
+        self.start_log(pi_line("tool", T0 + 30))
+        log = self.tick_minutes(self.job("a", "hang"), 12, ["frozen"])
+        self.assertNotIn("STALLED", log)
+        self.assertFalse(self.attempt["stall"])
+        self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
+        self.assertEqual(self.renamed(), [])
+        failures = self.tmp / ".pm" / "local" / "failures.log"
+        self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
+
+    def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
+        self.start_log(pi_line("tool", T0), pi_line("result", T0))
+        job = self.job("a", "hang")
+        log = self.tick_minutes(job, 6, ["frozen"])
+        self.assertEqual(log.count("STALLED a:"), 1)
+        cause = "Pi's log says no model answer has been written since the last tool result"
+        self.assertEqual(self.attempt["stall_cause"], cause)
+        self.assertEqual(self.renamed(), [MARKED])
+        with patch("builtins.print") as printed:
+            self.run.status([job], self.state)
+        shown = "\n".join(call.args[0] for call in printed.call_args_list)
+        self.assertIn(f"stall=True, stall_cause={cause}", shown)
+        log = self.tick_minutes(
+            job, 7, ["frozen"], write=lambda now: self.add_log(pi_line("result", now), now), start=7
+        )
+        self.assertFalse(self.attempt["stall"])
+        self.assertNotIn("stall_cause", self.attempt)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED], "the launched label is back")
+        log = self.tick_minutes(job, 13, ["frozen"], start=8)
+        self.assertEqual(log.count("STALLED a:"), 2)
+        self.assertTrue(self.attempt["stall"])
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED, MARKED])
+        # Progress at minute 14, and the next look only at minute 20, over STALL_S after it: a new episode all the same.
+        self.add_log(pi_line("result", T0 + 14 * 60), T0 + 14 * 60)
+        log = self.tick_minutes(job, 20, ["frozen"], start=20)
+        self.assertEqual(log.count("STALLED a:"), 3)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED, MARKED], "the mark stays on")
+
+    def test_a_nudge_restarts_the_stall_clock_and_takes_the_mark_off(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.attempt["prompted"] = T0 + 7 * 60  # what a nudge does, before it resets the observation
+        self.run.reset_observation(self.attempt)
+        log = self.tick_minutes(job, 10, ["frozen"], start=7)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertFalse(self.attempt["stall"])
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED])
+
+    def test_a_tool_called_before_a_nudge_does_not_keep_the_new_turn_from_a_stall(self):
+        self.start_log(pi_line("tool", T0 + 30))  # a tool call whose result never came
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 2, ["frozen"])  # working: the toolUse is read and kept
+        self.behave("nothing")  # the turn settles with no report and a quiet log, so pm_run nudges it
+        self.tick_minutes(job, 3, ["frozen"], start=3, nudges=1)
+        self.assertEqual(self.attempt["prompted"], T0 + 180)
+        self.behave("hang")
+        log = self.tick_minutes(job, 9, ["frozen"], start=4, nudges=1)  # the log stays as it was
+        self.assertEqual(log.count("RESUME a:"), 1)
+        self.assertNotIn("BUSY", log)
+        self.assertFalse(self.snapshots[7]["stall"])
+        self.assertTrue(self.snapshots[8]["stall"], "STALL_S after the nudge")
+        said = "STALLED a: no progress for 5 min; Pi's log says no model answer has been written since the last prompt"
+        self.assertEqual(log.count(said), 1)
+
+    def test_a_stall_mark_that_failed_is_tried_again_at_the_next_watch(self):
+        self.env["FAKE_RENAME_FAILS"] = "1"
+        self.start_log(pi_line("result", T0))
+        log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
+        self.assertEqual(log.count("MARK-FAILED a: "), 1)
+        self.assertIn("try 1 of 3, tried again at the next watch", log)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertNotIn("stall_marked", self.snapshots[5], "the stall began, but no mark on the tab yet")
+        self.assertTrue(self.snapshots[6]["stall_marked"])
+        self.assertEqual(self.renamed(), [MARKED])
+        self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
+
+    def test_a_mark_whose_removal_fails_stays_on_the_receipt_after_three_tries(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.env["FAKE_RENAME_ERROR"] = "1"
+        self.tick_minutes(job, 7, ["frozen"], write=lambda now: self.add_log(pi_line("result", now), now), start=7)
+        log = self.tick_minutes(job, 11, ["frozen"], start=8)
+        self.assertFalse(self.attempt["stall"])
+        self.assertEqual(log.count("MARK-FAILED a: Herdr tab w1:t2 keeps its stall mark"), 3)
+        self.assertIn("try 3 of 3, not tried again", log)
+        self.assertTrue(self.attempt["stall_marked"], "the mark is still on the tab")
+        self.assertEqual(self.renamed(), [MARKED])
+
+    def test_a_stalled_worker_that_asks_loses_the_stall_and_its_mark(self):
+        self.start_log(pi_line("result", T0 + 30))
+        job = self.job("a", "hang")
+        self.tick_minutes(job, 6, ["frozen"])
+        self.behave("ask")
+        log = self.tick_minutes(job, 7, ["frozen"], start=7)
+        self.assertEqual(log.count("WAITING a:"), 1)
+        self.assertFalse(self.attempt["stall"])
+        self.assertNotIn("stall_cause", self.attempt)
+        self.assertNotIn("stall_marked", self.attempt)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED])
+
+    def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
+        # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
+        # Its error text holds a lone surrogate, which JSON can carry and no UTF-8 file takes: both log readers meet
+        # it (the HOLD line and the stall), and the tick still goes on to job b.
+        self.start_log()
+        bad = lambda now: pi_line("error", now).replace("503 upstream  unavailable", "bad \\ud800 text")  # noqa: E731
+        other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
+        self.state["b"] = {"state": "started", "attempts": [other]}
+        log = self.tick_minutes(
+            self.job("a", "nothing"),
+            8,
+            ["Retrying"],
+            write=lambda now: self.add_log(bad(now), now),
+            others=[(self.job("b", "hang", harness="claude"), other)],
+        )
+        self.assertEqual(log.count("HOLD a:"), 1)
+        self.assertEqual(log.count("STALLED a:"), 1)
+        self.assertIn('retries on provider errors (last error: "bad ? text")', log)
+        self.assertFalse(self.snapshots[4]["stall"])
+        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
+        self.assertEqual(self.renamed(), [MARKED])
+        calls = self.herdr_state()["calls"]
+        self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
+        self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
+
+    def test_without_a_log_the_pane_decides(self):
+        for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
+            with self.subTest(screens=screens[:2]):
+                self.run.log_path.unlink(missing_ok=True)
+                self.attempt = {"name": "worker", "started": T0, "prompted": T0, "tab": "w1:t2", "label": "Review"}
+                self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
+                log = self.tick_minutes(self.job("a", "hang", harness="claude"), 8, screens)
+                self.assertEqual(log.count("STALLED a: no new output for 5 min"), stalls)
+                self.assertEqual(self.attempt["stall"], bool(stalls))
+                self.assertEqual(self.renamed(), [MARKED] * stalls)
+
+
 # A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
 USAGE = {
     "input": 100,
@@ -3138,7 +3528,7 @@ class HerdrSafetyTest(unittest.TestCase):
             env={**os.environ, "PM_RUN_STALL_S": "12"},
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=60,  # a ceiling for a slow start, not the thing tested
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "12.0")
@@ -3159,7 +3549,7 @@ class HerdrSafetyTest(unittest.TestCase):
             env=env,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=60,  # the bound is proven by the message below, not by this ceiling
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("timed out after 0.1 s", json.loads(result.stdout)["error"]["message"])
