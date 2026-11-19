@@ -823,7 +823,10 @@ def log_time(entry):
 DOING = {
     "tool": "a tool is running",
     "retry": "the harness retries on provider errors",
-    "pending": "a request is pending at the provider",
+    # Not "a request is pending": the log cannot tell a request that hangs from a long think.
+    "prompt": "no model answer has been written since the last prompt",
+    "result": "no model answer has been written since the last tool result",
+    "answer": "no model answer has been written since the last one ended a turn",
 }
 PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
 LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
@@ -835,10 +838,11 @@ def log_progress(job, attempt, repo, seen, now):
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
     yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
     context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
+    An entry time later than `now` counts as `now`.
     "doing" comes from the last message written after that prompt, by the model or a tool (a prompt or any other
     role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
-    "error"), "pending" (anything else, or no such message: a request is out at the provider), or "unknown" when
-    there is no log (another harness, a log not found, a log that cannot be read).
+    "error"), "result" (a tool's result), "answer" (any other model answer, one that ended a turn), "prompt" (no
+    such message), or "unknown" when there is no log (another harness, a log not found, a log that cannot be read).
     `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
     looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
     answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
@@ -885,12 +889,13 @@ def log_progress(job, attempt, repo, seen, now):
                 if role not in ("assistant", "toolResult"):
                     continue  # a prompt or a note: what the worker does stays what it was
                 when = log_time(entry)
-                kind_at = when if when is not None else stat.st_mtime  # no time of its own: written by this look
+                when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
+                kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
                 if role == "assistant" and stop == "error":
                     error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
                     last.update(kind="retry", kind_at=kind_at, error=error)
                     continue
-                kind = "tool" if role == "assistant" and stop == "toolUse" else "pending"
+                kind = "result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"
                 last.update(kind=kind, kind_at=kind_at, error=None)
                 if when is not None and (last["at"] is None or when > last["at"]):
                     last["at"] = when
@@ -899,7 +904,7 @@ def log_progress(job, attempt, repo, seen, now):
         prompted = attempt.get("prompted", attempt["started"])
         at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
         if last["kind_at"] is None or last["kind_at"] < prompted:
-            return {"at": at, "doing": "pending", "error": None}  # nothing written since the prompt
+            return {"at": at, "doing": "prompt", "error": None}  # nothing written since the prompt
         return {"at": at, "doing": last["kind"], "error": last["error"]}
     except Exception:  # noqa: BLE001 - a log that cannot be read is a gap in the evidence, never a broken tick
         return {"at": None, "doing": "unknown", "error": None}
@@ -1239,6 +1244,7 @@ class Run:
         attempt.update(seen_hash=None, seen_at=attempt["prompted"], stall=False, loop=False, loop_line=None)
         attempt.update(settled_hash=None, settled_at=None)
         attempt.pop("stall_cause", None)  # the stall clock restarts at the prompt, by the log too (log_progress)
+        attempt.pop("stall_since", None)
 
     def pane_quiet(self, attempt, now):
         """Seconds the pane's content has stayed the same while the turn looks settled; None when it cannot be read.
@@ -1315,6 +1321,11 @@ class Run:
                     f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but Pi's log shows a "
                     "tool still running; not a stall"
                 )
+            if attempt.get("stall") and attempt.setdefault("stall_since", since) < since:
+                # Progress since the episode began ends it, even when this look comes over STALL_S after that
+                # progress; a stall after it is a new episode, warned again. An episode the pane began (a log found
+                # late) goes on, measured from here.
+                attempt["stall"] = False
         if stalled and not attempt.get("stall"):
             if progress["doing"] == "unknown":
                 found = stall_cause(job if probe else {**job, "probe": None}, content)  # once: it may probe
@@ -1323,6 +1334,8 @@ class Run:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
                 cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
             attempt.update(stall=True, stall_cause=cause)
+            if what == "progress":
+                attempt["stall_since"] = since  # the last progress the episode is measured from
             attempt.pop("mark_tries", None)  # a new episode: its mark gets its own tries
             self.log(
                 f"STALLED {job['id']}: no {what} for {round((now - since) / 60, 1):g} min; {said}; not stopped, "
@@ -1330,7 +1343,9 @@ class Run:
             )
         elif not stalled and attempt.get("stall"):
             attempt["stall"] = False
+        if not attempt.get("stall"):
             attempt.pop("stall_cause", None)
+            attempt.pop("stall_since", None)
         self.mark_stall(job, attempt)  # also after a nudge, which restarts the stall clock
 
     def end_stall(self, job, a):
@@ -1338,6 +1353,7 @@ class Run:
         if a.get("stall"):
             a["stall"] = False
             a.pop("stall_cause", None)
+            a.pop("stall_since", None)
         self.mark_stall(job, a)
 
     def mark_stall(self, job, a):

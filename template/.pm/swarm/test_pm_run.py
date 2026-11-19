@@ -2745,9 +2745,9 @@ class LogProgressTest(unittest.TestCase):
 
     def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
         self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
-        self.assertEqual(self.progress(), {"at": None, "doing": "pending", "error": None})
+        self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
         self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
-        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "pending", "error": None})
+        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
         self.write(pi_line("tool", T0 + 40), pi_line("prompt", T0 + 45))  # a prompt is not what the worker does
         self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
 
@@ -2790,12 +2790,17 @@ class LogProgressTest(unittest.TestCase):
         line = pi_line("tool", T0 + 40)
         with patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
             self.write(pi_line("result", T0 + 20), line[:30])
-            self.assertEqual(self.progress()["doing"], "pending")
+            self.assertEqual(self.progress()["doing"], "result")
             self.write(line[30:-1])  # the whole record, still without its line break
-            self.assertEqual(self.progress()["doing"], "pending")
+            self.assertEqual(self.progress()["doing"], "result")
             self.write("\n")
             self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
         self.assertEqual(sum(b"toolUse" in c.args[0] for c in parsed.call_args_list), 1)
+
+    def test_an_entry_time_later_than_now_counts_as_now(self):
+        self.write(pi_line("result", T0 + 5000))  # a clock ahead of ours
+        self.assertEqual(self.progress(T0 + 100), {"at": T0 + 100, "doing": "result", "error": None})
+        self.assertEqual(self.progress(T0 + 500)["at"], T0 + 100, "so a stall can be measured from it")
 
     def test_a_log_replaced_by_another_file_is_read_anew(self):
         self.write(pi_line("tool", T0 + 40))
@@ -2920,12 +2925,13 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.start_log(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
         log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
         self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn("a request is pending at the provider", self.attempt["stall_cause"])
+        cause = "Pi's log says no model answer has been written since the last tool result"
+        self.assertEqual(self.attempt["stall_cause"], cause)
         self.assertEqual(self.renamed(), [MARKED])
         with patch("builtins.print") as printed:
             self.run.status([self.job("a", "hang")], self.state)
         shown = "\n".join(call.args[0] for call in printed.call_args_list)
-        self.assertIn("stall=True, stall_cause=Pi's log says a request is pending at the provider", shown)
+        self.assertIn(f"stall=True, stall_cause={cause}", shown)
 
     def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
         self.start_log(pi_line("result", T0 + 30))
@@ -2942,6 +2948,11 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(log.count("STALLED a:"), 2)
         self.assertTrue(self.attempt["stall"])
         self.assertEqual(self.renamed(), [MARKED, LAUNCHED, MARKED])
+        # Progress at minute 14, and the next look only at minute 20, over STALL_S after it: a new episode all the same.
+        self.add_log(pi_line("result", T0 + 14 * 60), T0 + 14 * 60)
+        log = self.tick_minutes(job, 20, ["frozen"], start=20)
+        self.assertEqual(log.count("STALLED a:"), 3)
+        self.assertEqual(self.renamed(), [MARKED, LAUNCHED, MARKED], "the mark stays on")
 
     def test_a_nudge_restarts_the_stall_clock_and_takes_the_mark_off(self):
         self.start_log(pi_line("result", T0 + 30))
@@ -2967,17 +2978,18 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
         self.assertNotIn("BUSY", log)
         self.assertFalse(self.snapshots[7]["stall"])
         self.assertTrue(self.snapshots[8]["stall"], "STALL_S after the nudge")
-        self.assertEqual(log.count("STALLED a: no progress for 5 min"), 1)
+        said = "STALLED a: no progress for 5 min; Pi's log says no model answer has been written since the last prompt"
+        self.assertEqual(log.count(said), 1)
 
     def test_a_stall_mark_that_failed_is_tried_again_at_the_next_watch(self):
         self.env["FAKE_RENAME_FAILS"] = "1"
-        self.start_log(pi_line("result", T0 + 30))
+        self.start_log(pi_line("result", T0))
         log = self.tick_minutes(self.job("a", "hang"), 8, ["frozen"])
         self.assertEqual(log.count("MARK-FAILED a: "), 1)
         self.assertIn("try 1 of 3, tried again at the next watch", log)
         self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertNotIn("stall_marked", self.snapshots[6], "the stall began, but no mark on the tab yet")
-        self.assertTrue(self.snapshots[7]["stall_marked"])
+        self.assertNotIn("stall_marked", self.snapshots[5], "the stall began, but no mark on the tab yet")
+        self.assertTrue(self.snapshots[6]["stall_marked"])
         self.assertEqual(self.renamed(), [MARKED])
         self.assertNotIn("MARK-FAILED", (self.tmp / ".pm" / "local" / "failures.log").read_text(encoding="utf-8"))
 
