@@ -1528,7 +1528,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
 
     def test_second_scheduler_refuses_to_run(self):
         self.jobs(self.job("a", "ok"))
-        (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time()}")
+        # Stamped ahead of now: the lease counts as live for three ticks only, and a slow start must not outlast it.
+        (self.run_dir / "pm_run.lease").write_text(f"{os.getpid()} {time.time() + 60}")
         result = self.run_pm(timeout=30)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("holds", result.stderr + result.stdout)
