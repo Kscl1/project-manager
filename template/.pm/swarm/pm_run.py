@@ -875,6 +875,58 @@ PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was wr
 LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
 
 
+def pi_kind(entry):
+    """What a Pi log line says the worker did, as (kind, error, tool ids), or None for a prompt or a note."""
+    message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
+    if not isinstance(message, dict):
+        return None  # a context_edit, a session line, anything that is not a message
+    role, stop = message.get("role"), message.get("stopReason")
+    if role not in ("assistant", "toolResult"):
+        return None
+    if role == "assistant" and stop == "error":
+        return "retry", log_text(" ".join(str(message.get("errorMessage") or "").split())[:160]), ()
+    return ("result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"), None, ()
+
+
+def claude_kind(entry):
+    """What a Claude Code transcript line says the worker did, as (kind, error, tool ids), or None.
+
+    Claude Code writes one entry per content block. "tool": an assistant entry with a tool_use block (its ids);
+    "result": a user entry with a tool_result block (the ids it answers); "retry": a failed API call the harness
+    retries by itself, or the error it writes when those retries gave up (the error is the status and the message);
+    "answer": any other assistant entry. A prompt, and the entries written again at every flush (title, mode, cost
+    and the like), are None: a file that grows with those is no progress.
+    """
+    if not isinstance(entry, dict):
+        return None
+    kind, message = entry.get("type"), entry.get("message") if isinstance(entry.get("message"), dict) else {}
+    content = message.get("content")
+    blocks = [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+    if (
+        kind == "system"
+        and entry.get("subtype") == "api_error"
+        or kind == "assistant"
+        and entry.get("isApiErrorMessage")
+    ):
+        if kind == "system":
+            error = entry.get("error") if isinstance(entry.get("error"), dict) else {}
+            status, text = error.get("status"), error.get("message")
+        else:
+            status = entry.get("apiErrorStatus")
+            text = " ".join(str(block.get("text") or "") for block in blocks if block.get("type") == "text")
+            text = text or entry.get("error")
+        said = " ".join(str(part) for part in (status, text) if part not in (None, ""))
+        return "retry", log_text(" ".join(said.split())[:160]), ()
+    if kind == "assistant":
+        calls = [block for block in blocks if block.get("type") == "tool_use"]
+        ids = tuple(call["id"] for call in calls if isinstance(call.get("id"), str))
+        return ("tool", None, ids) if calls else ("answer", None, ())
+    if kind == "user":
+        ids = tuple(block.get("tool_use_id") for block in blocks if block.get("type") == "tool_result")
+        return ("result", None, ids) if ids else None  # without a tool_result block it is a prompt
+    return None
+
+
 def log_progress(job, attempt, repo, seen, now):
     """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
 
@@ -893,18 +945,19 @@ def log_progress(job, attempt, repo, seen, now):
     another file under the same name (its identity changed) is read anew.
     """
     try:
-        if job.get("harness", "pi") != "pi":
+        claude = job.get("harness") == "claude"
+        if not claude and job.get("harness", "pi") != "pi":
             return {"at": None, "doing": "unknown", "error": None}
-        name, path = attempt["name"], attempt.get("session_log")
+        name, path = attempt["name"], attempt.get("transcript" if claude else "session_log")
         if not path:
             looked = (seen.get(name) or {}).get("looked")
             if looked is not None and 0 <= now - looked < LOOKUP_S:
                 return {"at": None, "doing": "unknown", "error": None}
             seen[name] = {"looked": now}
-            found = pi_log(job, attempt, repo)
+            found = claude_transcript(job, attempt) if claude else pi_log(job, attempt, repo)
             if not found:
                 return {"at": None, "doing": "unknown", "error": None}
-            path = found[0]
+            path = found if claude else found[0]
         path = str(path)
         stat = os.stat(path)
         identity = (stat.st_dev, stat.st_ino)
@@ -912,6 +965,7 @@ def log_progress(job, attempt, repo, seen, now):
         if last.get("path") != path or last.get("identity") != identity or stat.st_size < last["size"]:
             last = {"path": path, "identity": identity, "size": -1, "mtime": None, "offset": 0, "at": None}
             last.update(kind=None, kind_at=None, error=None)  # the last message's kind, and when it was written
+        last["tools"] = dict(last.get("tools") or {})  # Claude Code's tool calls with no result yet: id -> written
         if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
             start = max(last["offset"], stat.st_size - PROGRESS_TAIL)
             with open(path, "rb") as f:
@@ -925,27 +979,29 @@ def log_progress(job, attempt, repo, seen, now):
                     entry = json.loads(line)
                 except (ValueError, UnicodeError):
                     continue  # a partial write, or not JSON
-                message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
-                if not isinstance(message, dict):
-                    continue  # a context_edit, a session line, anything that is not a message
-                role, stop = message.get("role"), message.get("stopReason")
-                if role not in ("assistant", "toolResult"):
+                found = claude_kind(entry) if claude else pi_kind(entry)
+                if found is None:
                     continue  # a prompt or a note: what the worker does stays what it was
+                kind, error, tools = found
                 when = log_time(entry)
                 when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
                 kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
-                if role == "assistant" and stop == "error":
-                    error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
-                    last.update(kind="retry", kind_at=kind_at, error=error)
+                last.update(kind=kind, kind_at=kind_at, error=error)
+                if kind == "retry":
                     continue
-                kind = "result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"
-                last.update(kind=kind, kind_at=kind_at, error=None)
+                for tool in tools:  # a call opens its id, its result closes it
+                    if kind == "tool":
+                        last["tools"][tool] = kind_at
+                    else:
+                        last["tools"].pop(tool, None)
                 if when is not None and (last["at"] is None or when > last["at"]):
                     last["at"] = when
             last.update(size=stat.st_size, mtime=stat.st_mtime)
             seen[attempt["name"]] = last
         prompted = attempt.get("prompted", attempt["started"])
         at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
+        if any(written >= prompted for written in last["tools"].values()):
+            return {"at": at, "doing": "tool", "error": None}  # two tools may run at once: one result leaves one
         if last["kind_at"] is None or last["kind_at"] < prompted:
             return {"at": at, "doing": "prompt", "error": None}  # nothing written since the prompt
         return {"at": at, "doing": last["kind"], "error": last["error"]}

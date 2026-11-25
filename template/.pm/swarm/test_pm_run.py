@@ -2748,8 +2748,10 @@ SESSION = "0b5e6a1c-1d2e-4f3a-8b4c-5d6e7f8a9b0c"  # the session id pm_run gave a
 def pi_line(kind, when):
     """Pi session-log lines of the shapes real logs show: "result" (a tool's result), "tool" (a model call that asks
     for a tool), "answer" (a finished model call), "error" (a failed model call and the context_edit Pi writes with
-    it, before it retries by itself), "prompt" (what the worker was sent)."""
+    it, before it retries by itself), "prompt" (what the worker was sent), "note" (a line that is not a message)."""
     stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    if kind == "note":
+        return json.dumps({"type": "session_info", "timestamp": stamp, "name": "worker"}) + "\n"
     message = {
         "prompt": {"role": "user"},
         "result": {"role": "toolResult"},
@@ -2763,36 +2765,111 @@ def pi_line(kind, when):
     return "".join(json.dumps(entry) + "\n" for entry in entries)
 
 
+def claude_line(kind, when, tool="toolu_1"):
+    """Claude Code transcript lines of the shapes real transcripts show, one entry per content block, for the kinds
+    pi_line knows: "error" is a failed API call Claude Code retries by itself, "note" the entries it writes again at
+    every flush; `tool` is the id that ties a tool call to its result."""
+    stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    entries = {
+        "prompt": [{"type": "user", "message": {"content": "Go on."}}],
+        "result": [{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tool}]}}],
+        "tool": [
+            {"type": "assistant", "message": {"id": "msg_2", "content": [{"type": "tool_use", "id": tool}]}},
+        ],
+        "answer": [  # one answer, two blocks: two entries with the same message id
+            {"type": "assistant", "message": {"id": "msg_1", "content": [{"type": "thinking", "thinking": ""}]}},
+            {"type": "assistant", "message": {"id": "msg_1", "content": [{"type": "text", "text": "Done."}]}},
+        ],
+        "error": [
+            {"type": "system", "subtype": "api_error", "level": "error", "retryAttempt": 3, "maxRetries": 10}
+            | {"retryInMs": 8000, "error": {"status": 503, "message": "upstream  unavailable"}}
+        ],
+        "note": [
+            {"type": note}
+            for note in ("custom-title", "agent-name", "mode", "permission-mode", "last-prompt", "cost-state")
+        ],
+    }[kind]
+    return "".join(json.dumps({**entry, "timestamp": stamp}) + "\n" for entry in entries)
+
+
 class LogProgressTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_progress_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.log = self.tmp / "session.jsonl"
         self.log.write_text("", encoding="utf-8")
+        self.job = {}
         self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, "session_log": str(self.log)}
         self.seen = {}
         patcher = patch.dict(os.environ, {"PM_RUN_CLAUDE_PROJECTS": str(self.tmp / "claude-projects")})
         patcher.start()  # never the real ~/.claude folders
         self.addCleanup(patcher.stop)
 
+    def each_harness(self):
+        """The line-builder of each harness in turn, on an empty log that its attempt reads; proofs that hold for both
+        run once per harness."""
+        for line, job, key in ((pi_line, {}, "session_log"), (claude_line, {"harness": "claude"}, "transcript")):
+            self.log.write_text("", encoding="utf-8")
+            self.job, self.seen = job, {}
+            self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, key: str(self.log)}
+            yield line
+
     def write(self, *lines):
         with self.log.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
 
     def progress(self, now=T0 + 1000):
-        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen, now)
+        return pm_run.log_progress(self.job, self.attempt, self.tmp, self.seen, now)
 
     def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
-        self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
-        self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
-        self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
-        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
-        self.write(pi_line("tool", T0 + 40), pi_line("prompt", T0 + 45))  # a prompt is not what the worker does
-        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("answer", T0 + 5))  # an answer to an earlier prompt
+                self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
+                self.write(line("tool", T0 + 20), line("result", T0 + 30))
+                self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
+                self.write(line("answer", T0 + 35))
+                self.assertEqual(self.progress(), {"at": T0 + 35, "doing": "answer", "error": None})
+                self.write(line("tool", T0 + 40), line("prompt", T0 + 45))  # a prompt is not what the worker does
+                self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
 
     def test_failed_calls_and_their_context_edits_are_not_progress(self):
-        self.write(pi_line("result", T0 + 20), pi_line("error", T0 + 30), pi_line("error", T0 + 40))
-        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"})
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("result", T0 + 20), line("error", T0 + 30), line("error", T0 + 40))
+                self.assertEqual(
+                    self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"}
+                )
+
+    def test_entries_that_are_not_progress_change_nothing(self):
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("answer", T0 + 20))
+                self.write(*(line("note", T0 + 60 * n) for n in range(1, 10)))  # the file grows every flush
+                self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "answer", "error": None})
+
+    def test_a_tool_called_before_the_last_prompt_is_not_running(self):
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("tool", T0 + 20))  # its result never came
+                self.attempt["prompted"] = T0 + 30  # a nudge
+                self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
+
+    def test_one_result_of_two_running_tools_leaves_the_other_running(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        self.write(claude_line("tool", T0 + 20, "toolu_1"), claude_line("tool", T0 + 21, "toolu_2"))
+        self.write(claude_line("result", T0 + 30, "toolu_2"))
+        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "tool", "error": None})
+        self.write(claude_line("result", T0 + 40, "toolu_1"))
+        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "result", "error": None})
+
+    def test_retries_that_gave_up_are_not_progress(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        gave_up = {"type": "assistant", "isApiErrorMessage": True, "apiErrorStatus": 529, "error": "overloaded"}
+        gave_up["timestamp"] = datetime.fromtimestamp(T0 + 40, timezone.utc).isoformat()
+        gave_up["message"] = {"content": [{"type": "text", "text": "API  Error"}]}
+        self.write(claude_line("answer", T0 + 20), json.dumps(gave_up) + "\n")
+        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "529 API Error"})
 
     def test_no_log_is_unknown_and_never_raises(self):
         unknown = {"at": None, "doing": "unknown", "error": None}
@@ -2852,24 +2929,27 @@ class LogProgressTest(unittest.TestCase):
         self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
 
     def test_a_log_not_found_is_looked_for_once_a_minute(self):
-        self.attempt.pop("session_log")
-        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}), patch.object(
-            pm_run, "pi_log", wraps=pm_run.pi_log
-        ) as lookup:
-            for now in (T0, T0 + 30, T0 + 59, T0 + 60):
-                self.assertEqual(self.progress(now)["doing"], "unknown")
-        self.assertEqual(lookup.call_count, 2, "at T0 and at T0 + 60")
+        for line, lookup in zip(self.each_harness(), ("pi_log", "claude_transcript")):
+            with self.subTest(line.__name__), patch.dict(
+                os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}
+            ), patch.object(pm_run, lookup, wraps=getattr(pm_run, lookup)) as looked:
+                self.attempt = {"name": "worker", "started": T0, "session_id": SESSION}
+                for now in (T0, T0 + 30, T0 + 59, T0 + 60):
+                    self.assertEqual(self.progress(now)["doing"], "unknown")
+                self.assertEqual(looked.call_count, 2, "at T0 and at T0 + 60")
 
     def test_a_record_split_across_two_looks_is_read_once_and_whole(self):
-        line = pi_line("tool", T0 + 40)
-        with patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
-            self.write(pi_line("result", T0 + 20), line[:30])
-            self.assertEqual(self.progress()["doing"], "result")
-            self.write(line[30:-1])  # the whole record, still without its line break
-            self.assertEqual(self.progress()["doing"], "result")
-            self.write("\n")
-            self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
-        self.assertEqual(sum(b"toolUse" in c.args[0] for c in parsed.call_args_list), 1)
+        for line in self.each_harness():
+            with self.subTest(line.__name__), patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
+                tool = line("tool", T0 + 40)
+                self.write(line("result", T0 + 20), tool[:30])
+                self.assertEqual(self.progress()["doing"], "result")
+                self.write(tool[30:-1])  # the whole record, still without its line break
+                self.assertEqual(self.progress()["doing"], "result")
+                self.write("\n")
+                self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+                record = tool.strip().encode()  # the file is written in text mode: \r\n on Windows
+                self.assertEqual(sum(c.args[0].strip() == record for c in parsed.call_args_list), 1)
 
     def test_an_entry_time_later_than_now_counts_as_now(self):
         self.write(pi_line("result", T0 + 5000))  # a clock ahead of ours
