@@ -2982,12 +2982,34 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.run = pm_run.Run(self.run_dir)
         self.run.repo = self.tmp
+        self.fresh("pi")
+
+    def fresh(self, harness):
+        """A new run and attempt whose worker runs on `harness`; returns that harness's line-builder."""
+        self.run = pm_run.Run(self.run_dir)
+        self.run.repo = self.tmp
+        self.run.log_path.unlink(missing_ok=True)
+        self.harness, self.snapshots = harness, []
         self.attempt = {"name": "worker", "started": T0, "prompted": T0, "seq0": 0, "tab": "w1:t2", "label": "Review"}
         self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
-        self.snapshots = []
+        return claude_line if harness == "claude" else pi_line
+
+    def harnesses(self):
+        """Each harness in turn, with a fresh run, for the proofs that hold for both: (its line-builder, how its log
+        is named in the run's log)."""
+        for harness, source in (("pi", "Pi's log"), ("claude", "Claude Code's transcript")):
+            yield self.fresh(harness), source
 
     def start_log(self, *lines):
-        """This attempt's Pi session log, where pi_log looks for it."""
+        """This attempt's log where pm_run looks for it: Pi's session log, or Claude Code's transcript of the session
+        id pm_run gave the attempt, in a folder that is not named after the repo."""
+        if self.harness == "claude":
+            self.attempt["session_id"] = SESSION
+            self.session = self.tmp / "claude-projects" / "C--elsewhere" / f"{SESSION}.jsonl"
+            self.session.parent.mkdir(parents=True, exist_ok=True)
+            self.session.write_text("".join(lines), encoding="utf-8")
+            os.utime(self.session, (T0 + 1, T0 + 1))
+            return
         folder = self.tmp / "sessions" / ("--" + re.sub(r"[/\\:]", "-", str(self.tmp).lstrip("/\\")) + "--")
         folder.mkdir(parents=True, exist_ok=True)
         self.session = folder / "worker.jsonl"
@@ -3049,31 +3071,50 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
     def renamed(self):
         return self.herdr_state().get("renamed", [])
 
+    def worker(self, behaviour):
+        """Job a, run on the harness of the current attempt."""
+        return self.job("a", behaviour, harness=self.harness)
+
     def test_retries_alone_are_a_stall_whatever_the_pane_shows(self):
-        self.start_log()
-        screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
-        log = self.tick_minutes(
-            self.job("a", "hang"), 8, screens, write=lambda now: self.add_log(pi_line("error", now), now)
-        )
-        self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn("STALLED a: no progress for 5 min; Pi's log says the harness retries on provider errors", log)
-        self.assertIn('(last error: "503 upstream unavailable")', log)
-        self.assertTrue(self.attempt["stall"])
-        self.assertIn("retries on provider errors", self.attempt["stall_cause"])
-        self.assertEqual(self.renamed(), [MARKED])
-        self.run.hand_over(self.job("a", "hang"), self.state["a"], "test")  # the hand-over mark wins
-        self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
-        self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()
+                screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
+                log = self.tick_minutes(
+                    self.worker("hang"), 8, screens, write=lambda now: self.add_log(line("error", now), now)
+                )
+                self.assertEqual(log.count("STALLED a:"), 1)
+                said = f"STALLED a: no progress for 5 min; {source} says the harness retries on provider errors"
+                self.assertIn(said, log)
+                self.assertIn('(last error: "503 upstream unavailable")', log)
+                self.assertTrue(self.attempt["stall"])
+                self.assertIn("retries on provider errors", self.attempt["stall_cause"])
+                self.assertEqual(self.renamed(), [MARKED])
+                self.run.hand_over(self.worker("hang"), self.state["a"], "test")  # the hand-over mark wins
+                self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
+                self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
+
+    def test_a_prompt_with_no_answer_is_a_stall(self):
+        for _, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()  # nothing since the brief, while the pane changes every tick
+                log = self.tick_minutes(self.worker("hang"), 6, [f"Thinking {n}" for n in range(30)])
+                said = f"STALLED a: no progress for 5 min; {source} says no model answer has been written since the "
+                self.assertEqual(log.count(said + "last prompt"), 1)
+                self.assertEqual(self.renamed(), [MARKED])
 
     def test_a_running_tool_is_not_a_stall(self):
-        self.start_log(pi_line("tool", T0 + 30))
-        log = self.tick_minutes(self.job("a", "hang"), 12, ["frozen"])
-        self.assertNotIn("STALLED", log)
-        self.assertFalse(self.attempt["stall"])
-        self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
-        self.assertEqual(self.renamed(), [])
-        failures = self.tmp / ".pm" / "local" / "failures.log"
-        self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log(line("tool", T0 + 30))
+                log = self.tick_minutes(self.worker("hang"), 12, ["frozen"])
+                self.assertNotIn("STALLED", log)
+                self.assertFalse(self.attempt["stall"])
+                self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
+                self.assertIn(f"but {source} shows a tool still running; not a stall", log)
+                self.assertEqual(self.renamed(), [])
+                failures = self.tmp / ".pm" / "local" / "failures.log"
+                self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
 
     def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
         self.start_log(pi_line("tool", T0), pi_line("result", T0))
@@ -3170,38 +3211,47 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
     def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
         # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
         # Its error text holds a lone surrogate, which JSON can carry and no UTF-8 file takes: both log readers meet
-        # it (the HOLD line and the stall), and the tick still goes on to job b.
-        self.start_log()
-        bad = lambda now: pi_line("error", now).replace("503 upstream  unavailable", "bad \\ud800 text")  # noqa: E731
-        other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
-        self.state["b"] = {"state": "started", "attempts": [other]}
-        log = self.tick_minutes(
-            self.job("a", "nothing"),
-            8,
-            ["Retrying"],
-            write=lambda now: self.add_log(bad(now), now),
-            others=[(self.job("b", "hang", harness="claude"), other)],
-        )
-        self.assertEqual(log.count("HOLD a:"), 1)
-        self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn('retries on provider errors (last error: "bad ? text")', log)
-        self.assertFalse(self.snapshots[4]["stall"])
-        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
-        self.assertEqual(self.renamed(), [MARKED])
-        calls = self.herdr_state()["calls"]
-        self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
-        self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
+        # it (the HOLD line and the stall), and the tick still goes on to job b. Claude Code's nudge waits on its pane
+        # (Pi's on its log), which changes every tick here; its stall is still judged by its transcript.
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()
+                bad = lambda now: line("error", now).replace("upstream  unavailable", "bad \\ud800 text")  # noqa: E731
+                other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
+                self.state["b"] = {"state": "started", "attempts": [other]}
+                log = self.tick_minutes(
+                    self.worker("nothing"),
+                    8,
+                    [f"Retrying {n}" for n in range(30)],
+                    write=lambda now: self.add_log(bad(now), now),
+                    others=[(self.job("b", "hang", harness="claude"), other)],
+                )
+                self.assertEqual(log.count("HOLD a:"), 1)
+                self.assertEqual(log.count("STALLED a:"), 1)
+                self.assertIn(
+                    f'{source} says the harness retries on provider errors (last error: "503 bad ? text")', log
+                )
+                self.assertFalse(self.snapshots[4]["stall"])
+                self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
+                self.assertEqual(self.renamed(), [MARKED])
+                calls = self.herdr_state()["calls"]
+                if self.harness == "pi":
+                    self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
+                self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
 
     def test_without_a_log_the_pane_decides(self):
+        # A Claude Code attempt whose transcript is not found: the pane rule, and one line that says so.
         for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
             with self.subTest(screens=screens[:2]):
-                self.run.log_path.unlink(missing_ok=True)
-                self.attempt = {"name": "worker", "started": T0, "prompted": T0, "tab": "w1:t2", "label": "Review"}
-                self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
-                log = self.tick_minutes(self.job("a", "hang", harness="claude"), 8, screens)
+                self.fresh("claude")
+                self.attempt["session_id"] = SESSION  # no such file under PM_RUN_CLAUDE_PROJECTS
+                log = self.tick_minutes(self.worker("hang"), 8, screens)
                 self.assertEqual(log.count("STALLED a: no new output for 5 min"), stalls)
                 self.assertEqual(self.attempt["stall"], bool(stalls))
                 self.assertEqual(self.renamed(), [MARKED] * stalls)
+                self.assertEqual(log.count("TRANSCRIPT a: not found; judged by its pane"), 1)
+                failures = self.tmp / ".pm" / "local" / "failures.log"
+                self.assertNotIn("TRANSCRIPT", failures.read_text("utf-8") if failures.exists() else "")
 
 
 # A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.

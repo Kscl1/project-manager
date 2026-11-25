@@ -1408,11 +1408,16 @@ class Run:
         provider).
         """
         progress = log_progress(job, attempt, self.repo, self.progress, now)
+        source = "Claude Code's transcript" if job.get("harness") == "claude" else "Pi's log"
         if progress["doing"] == "unknown":
             if content is None:
                 return  # failed reads neither alter the episode nor warn
             since, what = attempt["seen_at"], "new output"
             stalled = now - since >= STALL_S
+            prompted = attempt.get("prompted", attempt["started"])
+            if job.get("harness") == "claude" and now - prompted > STALL_S and not attempt.get("transcript_missing"):
+                attempt["transcript_missing"] = True  # once per attempt: the pane rule is the weaker one
+                self.log(f"TRANSCRIPT {job['id']}: not found; judged by its pane")
         else:
             attempt.setdefault("stall", False)  # a held turn judged by its log alone has no pane to note
             since, what = progress["at"] or attempt.get("prompted", attempt["started"]), "progress"
@@ -1420,7 +1425,7 @@ class Run:
             if progress["doing"] == "tool" and now - since >= STALL_S and attempt.get("busy_since") != since:
                 attempt["busy_since"] = since  # once per tool run: a long build or test run is work, not a stall
                 self.log(
-                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but Pi's log shows a "
+                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but {source} shows a "
                     "tool still running; not a stall"
                 )
             if attempt.get("stall") and attempt.setdefault("stall_since", since) < since:
@@ -1434,7 +1439,7 @@ class Run:
                 cause, said = f"pane: {found}", f"likely {found}"
             else:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
-                cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
+                cause = said = f"{source} says {DOING[progress['doing']]}{error}"
             attempt.update(stall=True, stall_cause=cause)
             if what == "progress":
                 attempt["stall_since"] = since  # the last progress the episode is measured from
