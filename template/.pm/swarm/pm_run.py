@@ -50,7 +50,7 @@ Each ended attempt keeps what it used: the attempt's `usage` holds "input", "out
 the attempt's Pi session log wrote after the attempt started; a message without cost.total makes cost_usd null, and a
 log that is not found leaves usage out altogether (never a guess). Usage is counted in tokens and turns, and money is
 only what those tokens would cost at API prices (the column is headed "API est."), because most workers run on flat
-plans or free models. Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+plans or free models. Tokens and cost are not read from a Claude Code transcript.
 An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an attempt:
 its job row, its model row and the grand total keep the known sum and end in `+?`, and one line under the totals
 says what that means, so a partial sum is never read as the whole.
@@ -113,8 +113,10 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
-                       (harness "claude" starts Claude Code with --model, --name <title or id> and args, without its
-                        bundled skills (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                       (harness "claude" starts Claude Code with --model, --name <title or id>, --session-id <a new
+                        uuid per attempt> and args, without its bundled skills (CLAUDE_SETTINGS); its args may not
+                        choose the session (--session-id, --resume, -r, --continue, -c, --fork-session fail
+                        PREFLIGHT); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
@@ -143,10 +145,13 @@ PM_RUN_STALL_S (300 seconds): a worker that makes no progress for this long is s
 episode: a STALLED line, the receipt's stall flag and stall_cause (--status shows both), and a pause sign (STALL_MARK)
 before the label of its Herdr tab until it makes progress again or asks a question. It never stops, prompts or hands
 over a worker for it.
-A Pi worker is judged by its session log, whatever its pane shows and whether Herdr calls its turn working or settled:
-progress is a tool's result or a model answer written after the last prompt, not the failed calls Pi retries by
-itself, and a tool that is still running is not a stall (one BUSY line at most). A harness without a log pm_run knows (Claude Code, agy),
-or a Pi log not found, is still judged by its pane: no change of its content for that long. A nudge restarts the clock.
+A Pi worker is judged by its session log and a Claude Code worker by its transcript, whatever its pane shows and
+whether Herdr calls its turn working or settled: progress is a tool's result or a model answer written after the last
+prompt, not the failed calls the harness retries by itself, and a tool that is still running is not a stall (one BUSY
+line at most). The transcript is the file named after the session id pm_run starts each Claude Code attempt on, looked
+for by that name under $CLAUDE_CONFIG_DIR/projects and every ~/.claude*/projects (PM_RUN_CLAUDE_PROJECTS, a path list,
+replaces those roots). A harness without a known log (agy), or a log not found, is still judged by its pane: no change
+of its content for that long; a Claude Code worker judged so is named once (TRANSCRIPT). A nudge restarts the clock.
 Working panes are also checked for suspected repeating output (LOOP; the receipt keeps the loop flag).
 Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new pane-judged stall.
 Pi diagnostics: PM_RUN_PI_SESSIONS overrides ~/.pi/agent/sessions; log lookup is best-effort, not completion evidence.
@@ -840,7 +845,7 @@ def turn_end(job, attempt, repo):
 
 
 def log_text(value):
-    """A string read from a Pi log, safe to write as UTF-8; anything else as it was.
+    """A string read from a worker's log, safe to write as UTF-8; anything else as it was.
 
     JSON can hold a lone surrogate (half of an escaped character pair), and no UTF-8 file takes one: each becomes "?".
     """
@@ -848,7 +853,7 @@ def log_text(value):
 
 
 def log_time(entry):
-    """Epoch seconds of a Pi log line, from its own timestamp or its message's (ms); None when it has neither."""
+    """Epoch seconds of a log line, from its own timestamp or its message's (Pi, ms); None when it has neither."""
     stamp = entry.get("timestamp")
     if isinstance(stamp, str):
         try:
@@ -862,7 +867,7 @@ def log_time(entry):
     return None
 
 
-# What a worker does now by its Pi session log, as the stall warning says it.
+# What a worker does now by its log (Pi's session log, Claude Code's transcript), as the stall warning says it.
 DOING = {
     "tool": "a tool is running",
     "retry": "the harness retries on provider errors",
@@ -872,7 +877,7 @@ DOING = {
     "answer": "no model answer has been written since the last one ended a turn",
 }
 PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
-LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
+LOOKUP_S = 60  # while an attempt's log is not found, it is looked for once a minute at most
 
 
 def pi_kind(entry):
@@ -928,16 +933,19 @@ def claude_kind(entry):
 
 
 def log_progress(job, attempt, repo, seen, now):
-    """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
+    """What this attempt's log says about its progress: {"at", "doing", "error"}; never raises.
 
+    The log is Pi's session log (pi_log) or Claude Code's transcript (claude_transcript, by the session id pm_run
+    gave the attempt); each line is read by that harness's classifier (pi_kind, claude_kind).
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
-    yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
-    context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
-    An entry time later than `now` counts as `now`.
-    "doing" comes from the last message written after that prompt, by the model or a tool (a prompt or any other
-    role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
-    "error"), "result" (a tool's result), "answer" (any other model answer, one that ended a turn), "prompt" (no
-    such message), or "unknown" when there is no log (another harness, a log not found, a log that cannot be read).
+    yet): a tool call, a tool's result, or a model answer. A failed model call the harness retries by itself (with
+    Pi's context_edit beside it), and the entries Claude Code writes again at every flush, are not progress, so a
+    log that only grows with those is not either. An entry time later than `now` counts as `now`.
+    "doing" comes from the last such entry written after that prompt (a prompt or any other entry changes nothing):
+    "tool" (a tool call with no result yet; for Claude Code, while any call written after the prompt has none),
+    "retry" (a failed call, with its error in "error"), "result" (a tool's result), "answer" (any other model answer),
+    "prompt" (no such entry), or "unknown" when there is no log (a harness without one, a log not found, a log that
+    cannot be read).
     `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
     looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
     answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
@@ -1399,10 +1407,12 @@ class Run:
     def check_stall(self, job, attempt, now, content, probe=True):
         """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
 
-        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
-        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
-        a log (another harness, a log not found) the pane decides as before: `content`, which the caller read and
-        noted (pane_seen), unchanged for STALL_S; None when it could not be read. Progress, or a pane change for the
+        With a log (Pi's session log, Claude Code's transcript) the log decides, whatever the pane shows: no progress
+        (log_progress) for STALL_S while the harness retries or a request is pending is a stall; a running tool is not
+        (one routine BUSY line at most). The lines name the log they read. Without a log (a harness without one, a log
+        not found) the pane decides as before: `content`, which the caller read and noted (pane_seen), unchanged for
+        STALL_S; None when it could not be read. A Claude Code attempt judged so for over STALL_S since its prompt is
+        named once (TRANSCRIPT), since its transcript should be there. Progress, or a pane change for the
         pane rule, ends the episode. The worker is never stopped or prompted. It reads no pane itself. It runs while
         Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
         provider).
