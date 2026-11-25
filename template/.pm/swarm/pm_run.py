@@ -162,6 +162,7 @@ import sys
 import time
 import traceback
 import unicodedata
+import uuid
 from collections import Counter
 from datetime import datetime
 from hashlib import sha256
@@ -265,6 +266,8 @@ NO_HELPERS = {
     "claude": ["--disallowedTools", "Agent,Workflow"],
     "agy": [],  # no switch for its sub-agents; the brief forbids them
 }
+# Claude Code flags that choose the session; pm_run chooses it (--session-id), so a job's args may not.
+SESSION_FLAGS = ("--session-id", "--resume", "-r", "--continue", "-c", "--fork-session")
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
 # no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms,
 # or say that agy may trust this folder: a retry shows the same screen again.
@@ -700,6 +703,13 @@ def preflight(job, repo):
     for n, helper in enumerate(helpers or [], 1):
         if not isinstance(helper, str) and not complete_helper(helper):
             return f"helper {n} needs model, harness and thinking, or a plain model name"
+    if job.get("harness") == "claude":
+        own = [arg for arg in job.get("args") or [] if isinstance(arg, str) and arg.split("=")[0] in SESSION_FLAGS]
+        if own:
+            return (
+                f"args hold {own[0]}, but pm_run starts each Claude Code attempt in a session of its own, "
+                "to read its transcript; remove it"
+            )
     return None
 
 
@@ -1137,6 +1147,9 @@ class Run:
         agent_args += NO_HELPERS[harness]
         if harness == "claude":
             agent_args += ["--name", label]  # Claude Code's display name for the session; nothing reads it back
+            # Each attempt its own session, so its transcript is the file named after this id (claude_transcript).
+            attempt["session_id"] = str(uuid.uuid4())
+            agent_args += ["--session-id", attempt["session_id"]]
             # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
             # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
             settings = self.root / "claude-settings.json"

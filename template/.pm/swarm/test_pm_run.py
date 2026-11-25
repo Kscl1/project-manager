@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -398,11 +399,14 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         argv = herdr["gone"][self.a1]["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "claude")
         settings = argv[argv.index("--settings") + 1]
+        session = argv[argv.index("--session-id") + 1]
         self.assertEqual(
             argv[argv.index("--") + 1 :],
-            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--settings", settings]
-            + ["--permission-mode", "acceptEdits"],
+            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--session-id", session]
+            + ["--settings", settings, "--permission-mode", "acceptEdits"],
         )
+        self.assertEqual(uuid.UUID(session).version, 4)
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["session_id"], session, "the receipt keeps the id")
         # The project's MCP servers start without the approval dialog that would swallow the brief, and Claude Code's
         # bundled skills are off. No allow rules: Claude Code's own read-only check is stricter than a prefix.
         self.assertEqual(
@@ -439,6 +443,21 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.receipts()["a"]["attempts"][0]["model"], "ok")
         self.assertNotIn("ran", herdr)
         self.assertIn("Write only that file. ", herdr["gone"][self.a1]["prompts"][0])
+        self.assertNotIn("--session-id", argv)
+        self.assertNotIn("session_id", self.receipts()["a"]["attempts"][0])
+
+    def test_each_claude_code_attempt_starts_a_session_of_its_own(self):
+        self.jobs(self.job("a", "vanish", harness="claude"))  # gone mid-turn, so pm_run starts a second attempt
+        self.run_pm()
+        attempts = self.receipts()["a"]["attempts"]
+        self.assertEqual(len(attempts), 2)
+        gone = self.herdr_state()["gone"]
+        ids = [
+            gone[attempt["name"]]["argv"][gone[attempt["name"]]["argv"].index("--session-id") + 1]
+            for attempt in attempts
+        ]
+        self.assertEqual(ids, [attempt["session_id"] for attempt in attempts])
+        self.assertNotEqual(ids[0], ids[1])
 
     def seed_reads(self, *screens):
         empty = {"n": 0, "workspaces": [], "agents": {}, "gone": {}, "closed": []}
@@ -1012,6 +1031,17 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 launch.assert_not_called()
                 self.assertEqual(state["a"]["state"], "failed")
                 self.assertIn("task must be a task ID (text)", state["a"]["why"])
+
+    def test_preflight_refuses_a_claude_job_that_brings_its_own_session(self):
+        for flag in ("--session-id", "--resume=abc", "-r", "--continue", "-c", "--fork-session"):
+            with self.subTest(flag=flag):
+                why = pm_run.preflight(self.job("a", "ok", harness="claude", args=[flag]), self.tmp)
+                self.assertEqual(
+                    why,
+                    f"args hold {flag}, but pm_run starts each Claude Code attempt in a session of its own, to read "
+                    "its transcript; remove it",
+                )
+        self.assertIsNone(pm_run.preflight(self.job("a", "ok", args=["-c"]), self.tmp), "Pi's flags are its own")
 
     def tab_labels(self):
         """The --label of each `tab create` the fake Herdr saw, in order."""
