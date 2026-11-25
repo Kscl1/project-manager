@@ -789,6 +789,39 @@ def pi_log(job, attempt, repo):
     return None
 
 
+def claude_transcript(job, attempt):
+    """This attempt's Claude Code transcript, the file named after its session id, or None; never raises.
+
+    Claude Code writes it to <config folder>/projects/<a folder named after the start directory>/<id>.jsonl. A setup
+    line may move the config folder (CLAUDE_CONFIG_DIR) or the start directory, so the file is looked for by its name
+    under every root, never rebuilt: the folders in PM_RUN_CLAUDE_PROJECTS when it is set, else $CLAUDE_CONFIG_DIR's
+    and every ~/.claude*'s `projects`. A file older than the attempt does not count. The path is kept in the
+    attempt's "transcript", never in "session_log", which is Pi's (the nudge and the usage sum read that).
+    """
+    try:
+        session = attempt.get("session_id")
+        if job.get("harness") != "claude" or not re.fullmatch(r"[0-9a-f-]{36}", str(session)):
+            return None
+        listed = os.environ.get("PM_RUN_CLAUDE_PROJECTS")
+        if listed is not None:
+            roots = [Path(folder) for folder in listed.split(os.pathsep) if folder]
+        else:
+            config = os.environ.get("CLAUDE_CONFIG_DIR")
+            roots = [Path(config) / "projects"] if config else []
+            roots += sorted(Path.home().glob(".claude*/projects"))
+        for root in dict.fromkeys(roots):
+            try:
+                for path in root.glob(f"*/{session}.jsonl"):
+                    if path.stat().st_mtime >= attempt["started"]:
+                        attempt["transcript"] = str(path)
+                        return path
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001 - a lookup that fails is a gap in the evidence, never a broken tick
+        return None
+    return None
+
+
 def turn_end(job, attempt, repo):
     """The last assistant message of this attempt's Pi session log: its stop reason or provider error."""
     if job.get("harness", "pi") != "pi":

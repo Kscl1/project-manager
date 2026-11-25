@@ -273,7 +273,11 @@ class PmRunFixture:
             "PM_RUN_HERDR_TIMEOUT": "30",
             "PM_RUN_VERIFY_S": "600",
             "PM_RUN_PI_SESSIONS": str(self.tmp / "sessions"),
+            "PM_RUN_CLAUDE_PROJECTS": str(self.tmp / "claude-projects"),  # never the real ~/.claude folders
         }
+        patcher = patch.dict(os.environ, {"PM_RUN_CLAUDE_PROJECTS": self.env["PM_RUN_CLAUDE_PROJECTS"]})
+        patcher.start()  # also for the runs a test makes in its own process
+        self.addCleanup(patcher.stop)
 
     @property
     def a1(self):
@@ -2738,6 +2742,7 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
 
 
 T0 = 1_700_000_000  # a fixed clock for the progress tests
+SESSION = "0b5e6a1c-1d2e-4f3a-8b4c-5d6e7f8a9b0c"  # the session id pm_run gave a Claude Code attempt
 
 
 def pi_line(kind, when):
@@ -2766,6 +2771,9 @@ class LogProgressTest(unittest.TestCase):
         self.log.write_text("", encoding="utf-8")
         self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, "session_log": str(self.log)}
         self.seen = {}
+        patcher = patch.dict(os.environ, {"PM_RUN_CLAUDE_PROJECTS": str(self.tmp / "claude-projects")})
+        patcher.start()  # never the real ~/.claude folders
+        self.addCleanup(patcher.stop)
 
     def write(self, *lines):
         with self.log.open("a", encoding="utf-8") as f:
@@ -2790,13 +2798,48 @@ class LogProgressTest(unittest.TestCase):
         unknown = {"at": None, "doing": "unknown", "error": None}
         with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}):
             for job, attempt in (
-                ({"harness": "claude"}, self.attempt),  # no log pm_run knows
+                ({"harness": "claude"}, {"name": "worker", "started": T0, "session_id": SESSION}),  # no transcript
+                ({"harness": "agy"}, self.attempt),  # no log pm_run knows
                 ({}, {"name": "worker", "started": T0}),  # not found
                 ({}, {**self.attempt, "session_log": str(self.tmp / "gone.jsonl")}),
                 ({}, {**self.attempt, "session_log": str(self.tmp)}),  # a folder: cannot be read
             ):
                 with self.subTest(job=job, attempt=attempt):
                     self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}, T0), unknown)
+
+    def transcript(self, root, when=T0 + 1):
+        """An empty Claude Code transcript of SESSION under `root`, in a folder not named after the repo."""
+        path = root / "C--somewhere-else" / f"{SESSION}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        os.utime(path, (when, when))
+        return path
+
+    def test_a_transcript_is_found_by_its_session_id_under_any_root(self):
+        home, profile = self.tmp / "home", self.tmp / "profile"
+        (home / ".claude" / "projects").mkdir(parents=True)  # the default profile, without this session
+        listed = os.pathsep.join([str(self.tmp / "first"), str(self.tmp / "second")])
+        for env, root in (
+            ({"PM_RUN_CLAUDE_PROJECTS": listed}, self.tmp / "second"),
+            ({"CLAUDE_CONFIG_DIR": str(profile)}, profile / "projects"),
+            ({}, home / ".claude-gpt" / "projects"),  # a second profile a setup line points to
+        ):
+            with self.subTest(root=root), patch.dict(os.environ, env), patch.object(
+                pm_run.Path, "home", return_value=home
+            ):
+                for key in {"PM_RUN_CLAUDE_PROJECTS", "CLAUDE_CONFIG_DIR"} - set(env):
+                    os.environ.pop(key, None)
+                path, attempt = self.transcript(root), {"name": "worker", "started": T0, "session_id": SESSION}
+                self.assertEqual(pm_run.claude_transcript({"harness": "claude"}, attempt), path)
+                self.assertEqual(attempt["transcript"], str(path))
+                self.assertNotIn("session_log", attempt, "Pi's key: the nudge and the usage sum read it")
+                path.unlink()
+
+    def test_a_transcript_older_than_the_attempt_does_not_count(self):
+        self.transcript(self.tmp / "claude-projects", when=T0 - 1)  # a session that ended before this attempt
+        attempt = {"name": "worker", "started": T0, "session_id": SESSION}
+        self.assertIsNone(pm_run.claude_transcript({"harness": "claude"}, attempt))
+        self.assertNotIn("transcript", attempt)
 
     def test_an_unchanged_log_is_not_read_again(self):
         self.write(pi_line("result", T0 + 20))
