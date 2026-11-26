@@ -950,7 +950,8 @@ def log_progress(job, attempt, repo, seen, now):
     `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
     looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
     answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
-    most, and only up to its last line break (the rest is read whole at a later look). A log that shrank or is
+    most, and only up to its last line break (the rest is read whole at a later look); a read that skips ahead
+    forgets the tool calls still open, since their results may be in the part it skipped. A log that shrank or is
     another file under the same name (its identity changed) is read anew.
     """
     try:
@@ -977,6 +978,10 @@ def log_progress(job, attempt, repo, seen, now):
         last["tools"] = dict(last.get("tools") or {})  # Claude Code's tool calls with no result yet: id -> written
         if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
             start = max(last["offset"], stat.st_size - PROGRESS_TAIL)
+            if start > last["offset"]:  # a read that skips ahead: the part not read may hold the open calls' results
+                last["tools"] = {}
+                if claude and last["kind"] == "tool":
+                    last["kind"] = "answer"  # a call is still a model answer; whether it runs is no longer known
             with open(path, "rb") as f:
                 f.seek(start)
                 chunk = f.read(PROGRESS_TAIL)

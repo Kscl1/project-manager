@@ -2883,6 +2883,15 @@ class LogProgressTest(unittest.TestCase):
             self.write(call.replace('"msg_2"', f'"msg_{n}"'))
             self.assertEqual(self.progress(), {"at": T0 + 10 * n, "doing": "answer", "error": None})
 
+    def test_a_read_that_skips_ahead_forgets_the_open_calls(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        with patch.object(pm_run, "PROGRESS_TAIL", 400):
+            self.write(claude_line("tool", T0 + 20))
+            self.assertEqual(self.progress()["doing"], "tool")
+            self.write(claude_line("result", T0 + 30), claude_line("note", T0 + 40), claude_line("note", T0 + 50))
+            self.assertGreater(self.log.stat().st_size - self.seen["w"]["offset"], 400, "the result is not read")
+            self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "answer", "error": None})
+
     def test_retries_that_gave_up_are_not_progress(self):
         self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
         gave_up = {"type": "assistant", "isApiErrorMessage": True, "apiErrorStatus": 529, "error": "overloaded"}
