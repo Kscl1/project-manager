@@ -875,7 +875,10 @@ DOING = {
     "prompt": "no model answer has been written since the last prompt",
     "result": "no model answer has been written since the last tool result",
     "answer": "no model answer has been written since the last one ended a turn",
+    "gave_up": "the harness gave up after provider errors",  # Claude Code's error entry once its retries end
 }
+# Claude Code writes an entry per block, and a thinking block ends no turn: only what the transcript shows.
+CLAUDE_DOING = {**DOING, "answer": "nothing has been written since the model's last answer"}
 PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
 LOOKUP_S = 60  # while an attempt's log is not found, it is looked for once a minute at most
 
@@ -899,8 +902,8 @@ def claude_kind(entry):
     Claude Code writes one entry per content block. "tool": an assistant entry with a tool_use block whose id is a
     nonempty string (those ids; one with no such id is an "answer"); "result": a user entry with a tool_result block
     (the ids it answers, those that are nonempty strings); "retry": a failed API call the harness
-    retries by itself, or the error it writes when those retries gave up (the error is the status and the message);
-    "answer": any other assistant entry. A prompt, and the entries written again at every flush (title, mode, cost
+    retries by itself; "gave_up": the assistant entry it writes when those retries gave up (for both, the error is
+    the status and the message); "answer": any other assistant entry. A prompt, and the entries written again at every flush (title, mode, cost
     and the like), are None: a file that grows with those is no progress.
     """
     if not isinstance(entry, dict):
@@ -922,7 +925,7 @@ def claude_kind(entry):
             text = " ".join(str(block.get("text") or "") for block in blocks if block.get("type") == "text")
             text = text or entry.get("error")
         said = " ".join(str(part) for part in (status, text) if part not in (None, ""))
-        return "retry", log_text(" ".join(said.split())[:160]), ()
+        return ("retry" if kind == "system" else "gave_up"), log_text(" ".join(said.split())[:160]), ()
     key, wanted = ("id", "tool_use") if kind == "assistant" else ("tool_use_id", "tool_result")
     ids = tuple(b[key] for b in blocks if b.get("type") == wanted and isinstance(b.get(key), str) and b[key])
     if kind == "assistant":
@@ -939,14 +942,15 @@ def log_progress(job, attempt, repo, seen, now):
     gave the attempt); each line is read by that harness's classifier (pi_kind, claude_kind).
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
     yet): a tool call, a tool's result, or a model answer. A failed model call the harness retries by itself (with
-    Pi's context_edit beside it), and the entries Claude Code writes again at every flush, are not progress, so a
-    log that only grows with those is not either. An entry time later than `now` counts as `now`.
+    Pi's context_edit beside it), the error Claude Code writes when its retries gave up, and the entries it writes
+    again at every flush, are not progress, so a log that only grows with those is not either. An entry time later
+    than `now` counts as `now`.
     "doing" comes from the last such entry written after that prompt (a prompt or any other entry changes nothing):
     "tool" (a tool call with no result yet; for Claude Code, while any call written after the prompt has none and
     the model has not answered again since: an assistant entry of another message id ends the calls still open),
-    "retry" (a failed call, with its error in "error"), "result" (a tool's result), "answer" (any other model answer),
-    "prompt" (no such entry), or "unknown" when there is no log (a harness without one, a log not found, a log that
-    cannot be read).
+    "retry" (a failed call, with its error in "error"), "gave_up" (Claude Code's retries gave up; its error too),
+    "result" (a tool's result), "answer" (any other model answer), "prompt" (no such entry), or "unknown" when
+    there is no log (a harness without one, a log not found, a log that cannot be read).
     `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
     looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
     answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
@@ -1005,7 +1009,7 @@ def log_progress(job, attempt, repo, seen, now):
                 when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
                 kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
                 last.update(kind=kind, kind_at=kind_at, error=error)
-                if kind == "retry":
+                if kind in ("retry", "gave_up"):
                     continue
                 for tool in tools:  # a call opens its id, its result closes it
                     if kind == "tool":
@@ -1418,8 +1422,8 @@ class Run:
         """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
 
         With a log (Pi's session log, Claude Code's transcript) the log decides, whatever the pane shows: no progress
-        (log_progress) for STALL_S while the harness retries or a request is pending is a stall; a running tool is not
-        (one routine BUSY line at most). The lines name the log they read. Without a log (a harness without one, a log
+        (log_progress) for STALL_S while the harness retries or gave up or a request is pending is a stall; a running
+        tool is not (one routine BUSY line at most). The lines name the log they read. Without a log (a harness without one, a log
         not found) the pane decides as before: `content`, which the caller read and noted (pane_seen), unchanged for
         STALL_S; None when it could not be read. A Claude Code attempt judged so for over STALL_S since its prompt is
         named once (TRANSCRIPT), since its transcript should be there. Progress, or a pane change for the
@@ -1459,7 +1463,8 @@ class Run:
                 cause, said = f"pane: {found}", f"likely {found}"
             else:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
-                cause = said = f"{source} says {DOING[progress['doing']]}{error}"
+                doing = (CLAUDE_DOING if job.get("harness") == "claude" else DOING)[progress["doing"]]
+                cause = said = f"{source} says {doing}{error}"
             attempt.update(stall=True, stall_cause=cause)
             if what == "progress":
                 attempt["stall_since"] = since  # the last progress the episode is measured from

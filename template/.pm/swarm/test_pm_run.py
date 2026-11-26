@@ -2898,7 +2898,8 @@ class LogProgressTest(unittest.TestCase):
         gave_up["timestamp"] = datetime.fromtimestamp(T0 + 40, timezone.utc).isoformat()
         gave_up["message"] = {"content": [{"type": "text", "text": "API  Error"}]}
         self.write(claude_line("answer", T0 + 20), json.dumps(gave_up) + "\n")
-        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "529 API Error"})
+        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "gave_up", "error": "529 API Error"})
+        self.assertEqual(pm_run.CLAUDE_DOING["gave_up"], "the harness gave up after provider errors")
 
     def test_no_log_is_unknown_and_never_raises(self):
         unknown = {"at": None, "doing": "unknown", "error": None}
@@ -3123,14 +3124,22 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
                 self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
 
-    def test_a_prompt_with_no_answer_is_a_stall(self):
-        for _, source in self.harnesses():
+    def test_a_prompt_or_an_answer_with_nothing_after_it_is_a_stall(self):
+        after = {  # Claude Code writes an entry per block: a thinking block is an answer that ends no turn
+            "pi": "Pi's log says no model answer has been written since the last one ended a turn",
+            "claude": "Claude Code's transcript says nothing has been written since the model's last answer",
+        }
+        for line, source in self.harnesses():
             with self.subTest(self.harness):
                 self.start_log()  # nothing since the brief, while the pane changes every tick
                 log = self.tick_minutes(self.worker("hang"), 6, [f"Thinking {n}" for n in range(30)])
                 said = f"STALLED a: no progress for 5 min; {source} says no model answer has been written since the "
                 self.assertEqual(log.count(said + "last prompt"), 1)
                 self.assertEqual(self.renamed(), [MARKED])
+                self.fresh(self.harness)
+                self.start_log(line("answer", T0 + 30))
+                log = self.tick_minutes(self.worker("hang"), 6, [f"Thinking {n}" for n in range(30)])
+                self.assertEqual(log.count(f"STALLED a: no progress for 5 min; {after[self.harness]}"), 1)
 
     def test_a_running_tool_is_not_a_stall(self):
         for line, source in self.harnesses():
