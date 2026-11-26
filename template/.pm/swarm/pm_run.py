@@ -942,7 +942,8 @@ def log_progress(job, attempt, repo, seen, now):
     Pi's context_edit beside it), and the entries Claude Code writes again at every flush, are not progress, so a
     log that only grows with those is not either. An entry time later than `now` counts as `now`.
     "doing" comes from the last such entry written after that prompt (a prompt or any other entry changes nothing):
-    "tool" (a tool call with no result yet; for Claude Code, while any call written after the prompt has none),
+    "tool" (a tool call with no result yet; for Claude Code, while any call written after the prompt has none and
+    the model has not answered again since: an assistant entry of another message id ends the calls still open),
     "retry" (a failed call, with its error in "error"), "result" (a tool's result), "answer" (any other model answer),
     "prompt" (no such entry), or "unknown" when there is no log (a harness without one, a log not found, a log that
     cannot be read).
@@ -991,6 +992,10 @@ def log_progress(job, attempt, repo, seen, now):
                 if found is None:
                     continue  # a prompt or a note: what the worker does stays what it was
                 kind, error, tools = found
+                message = entry.get("message") if claude and kind in ("tool", "answer") else None
+                said_in = message.get("id") if isinstance(message, dict) else None
+                if isinstance(said_in, str) and said_in and said_in != last.get("tools_in"):
+                    last["tools"] = {}  # the model answered again: a call with no result by now never gets one
                 when = log_time(entry)
                 when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
                 kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
@@ -999,7 +1004,7 @@ def log_progress(job, attempt, repo, seen, now):
                     continue
                 for tool in tools:  # a call opens its id, its result closes it
                     if kind == "tool":
-                        last["tools"][tool] = kind_at
+                        last["tools"][tool], last["tools_in"] = kind_at, said_in  # and the message that made it
                     else:
                         last["tools"].pop(tool, None)
                 if when is not None and (last["at"] is None or when > last["at"]):

@@ -2855,13 +2855,20 @@ class LogProgressTest(unittest.TestCase):
                 self.attempt["prompted"] = T0 + 30  # a nudge
                 self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
 
-    def test_one_result_of_two_running_tools_leaves_the_other_running(self):
+    def test_one_result_of_two_running_tools_leaves_the_other_running_until_the_model_answers_again(self):
         self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
         self.write(claude_line("tool", T0 + 20, "toolu_1"), claude_line("tool", T0 + 21, "toolu_2"))
         self.write(claude_line("result", T0 + 30, "toolu_2"))
         self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "tool", "error": None})
-        self.write(claude_line("result", T0 + 40, "toolu_1"))
-        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "result", "error": None})
+        sibling = json.loads(claude_line("answer", T0 + 31).splitlines()[0])
+        sibling["message"]["id"] = "msg_2"  # a block of the message that called both tools
+        no_id = {**sibling, "message": {"content": [{"type": "text", "text": "Hm."}]}}
+        self.write(json.dumps(sibling) + "\n", json.dumps(no_id) + "\n")
+        self.assertEqual(self.progress(), {"at": T0 + 31, "doing": "tool", "error": None})
+        self.write(claude_line("answer", T0 + 40))  # the next message: toolu_1 never gets its result
+        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "answer", "error": None})
+        self.write(claude_line("result", T0 + 50, "toolu_1"))
+        self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "result", "error": None})
 
     def test_retries_that_gave_up_are_not_progress(self):
         self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
