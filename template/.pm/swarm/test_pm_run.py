@@ -3278,16 +3278,18 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
                 self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
 
     def test_without_a_log_the_pane_decides(self):
-        # A Claude Code attempt whose transcript is not found: the pane rule, and one line that says so.
-        for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
+        # A Claude Code attempt whose transcript is not found: the pane rule, and one line that says so, also while
+        # its pane cannot be read.
+        unread = [{"error": "read failed"}]
+        for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0), (unread, 0)):
             with self.subTest(screens=screens[:2]):
                 self.fresh("claude")
                 self.attempt["session_id"] = SESSION  # no such file under PM_RUN_CLAUDE_PROJECTS
                 log = self.tick_minutes(self.worker("hang"), 8, screens)
                 self.assertEqual(log.count("STALLED a: no new output for 5 min"), stalls)
-                self.assertEqual(self.attempt["stall"], bool(stalls))
+                self.assertEqual(self.attempt.get("stall", False), bool(stalls))  # a pane never read notes none
                 self.assertEqual(self.renamed(), [MARKED] * stalls)
-                self.assertEqual(log.count("TRANSCRIPT a: not found; judged by its pane"), 1)
+                self.assertEqual(log.count("TRANSCRIPT a: no transcript could be read; judged by its pane"), 1)
                 failures = self.tmp / ".pm" / "local" / "failures.log"
                 self.assertNotIn("TRANSCRIPT", failures.read_text("utf-8") if failures.exists() else "")
 

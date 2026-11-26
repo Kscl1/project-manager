@@ -1425,8 +1425,9 @@ class Run:
         (log_progress) for STALL_S while the harness retries or gave up or a request is pending is a stall; a running
         tool is not (one routine BUSY line at most). The lines name the log they read. Without a log (a harness without one, a log
         not found) the pane decides as before: `content`, which the caller read and noted (pane_seen), unchanged for
-        STALL_S; None when it could not be read. A Claude Code attempt judged so for over STALL_S since its prompt is
-        named once (TRANSCRIPT), since its transcript should be there. Progress, or a pane change for the
+        STALL_S; None when it could not be read. A Claude Code attempt without a transcript read for over STALL_S
+        since its prompt is named once (TRANSCRIPT), whether its pane could be read or not, since its transcript should
+        be there (a file not found and one that cannot be read give the same verdict). Progress, or a pane change for the
         pane rule, ends the episode. The worker is never stopped or prompted. It reads no pane itself. It runs while
         Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
         provider).
@@ -1434,14 +1435,14 @@ class Run:
         progress = log_progress(job, attempt, self.repo, self.progress, now)
         source = "Claude Code's transcript" if job.get("harness") == "claude" else "Pi's log"
         if progress["doing"] == "unknown":
+            prompted = attempt.get("prompted", attempt["started"])
+            if job.get("harness") == "claude" and now - prompted > STALL_S and not attempt.get("transcript_missing"):
+                attempt["transcript_missing"] = True  # once per attempt: the pane rule is the weaker one
+                self.log(f"TRANSCRIPT {job['id']}: no transcript could be read; judged by its pane")
             if content is None:
                 return  # failed reads neither alter the episode nor warn
             since, what = attempt["seen_at"], "new output"
             stalled = now - since >= STALL_S
-            prompted = attempt.get("prompted", attempt["started"])
-            if job.get("harness") == "claude" and now - prompted > STALL_S and not attempt.get("transcript_missing"):
-                attempt["transcript_missing"] = True  # once per attempt: the pane rule is the weaker one
-                self.log(f"TRANSCRIPT {job['id']}: not found; judged by its pane")
         else:
             attempt.setdefault("stall", False)  # a held turn judged by its log alone has no pane to note
             since, what = progress["at"] or attempt.get("prompted", attempt["started"]), "progress"
