@@ -50,7 +50,7 @@ Each ended attempt keeps what it used: the attempt's `usage` holds "input", "out
 the attempt's Pi session log wrote after the attempt started; a message without cost.total makes cost_usd null, and a
 log that is not found leaves usage out altogether (never a guess). Usage is counted in tokens and turns, and money is
 only what those tokens would cost at API prices (the column is headed "API est."), because most workers run on flat
-plans or free models. Claude Code's log is not read: it carries no cost and pm_run does not know the file for a job.
+plans or free models. Tokens and cost are not read from a Claude Code transcript.
 An attempt that reported no usage at all (no log found, or a harness that reports none) still counts as an attempt:
 its job row, its model row and the grand total keep the known sum and end in `+?`, and one line under the totals
 says what that means, so a partial sum is never read as the whole.
@@ -113,8 +113,11 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                        "stop": true,           (set by --stop; the job then stays ended until --retry clears it)
                        "retry": 1}]            (set by --retry: above the receipt's count, the loop starts the job
                                                 again)
-                       (harness "claude" starts Claude Code with --model, --name <title or id> and args, without its
-                        bundled skills (CLAUDE_SETTINGS); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                       (harness "claude" starts Claude Code with --model, --name <title or id>, --session-id <a new
+                        uuid per attempt> and args, without its bundled skills (CLAUDE_SETTINGS); its args may not
+                        choose the session (--session-id, --resume, -r, --continue, -c, --fork-session, --from-pr,
+                        --teleport fail PREFLIGHT, alone or with =value; a short flag with its value attached, such
+                        as -rID, is not caught); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
@@ -143,10 +146,13 @@ PM_RUN_STALL_S (300 seconds): a worker that makes no progress for this long is s
 episode: a STALLED line, the receipt's stall flag and stall_cause (--status shows both), and a pause sign (STALL_MARK)
 before the label of its Herdr tab until it makes progress again or asks a question. It never stops, prompts or hands
 over a worker for it.
-A Pi worker is judged by its session log, whatever its pane shows and whether Herdr calls its turn working or settled:
-progress is a tool's result or a model answer written after the last prompt, not the failed calls Pi retries by
-itself, and a tool that is still running is not a stall (one BUSY line at most). A harness without a log pm_run knows (Claude Code, agy),
-or a Pi log not found, is still judged by its pane: no change of its content for that long. A nudge restarts the clock.
+A Pi worker is judged by its session log and a Claude Code worker by its transcript, whatever its pane shows and
+whether Herdr calls its turn working or settled: progress is a tool's result or a model answer written after the last
+prompt, not the failed calls the harness retries by itself, and a tool that is still running is not a stall (one BUSY
+line at most). The transcript is the file named after the session id pm_run starts each Claude Code attempt on, looked
+for by that name under $CLAUDE_CONFIG_DIR/projects and every ~/.claude*/projects (PM_RUN_CLAUDE_PROJECTS, a path list,
+replaces those roots). A harness without a known log (agy), or a log not found, is still judged by its pane: no change
+of its content for that long; a Claude Code worker judged so is named once (TRANSCRIPT). A nudge restarts the clock.
 Working panes are also checked for suspected repeating output (LOOP; the receipt keeps the loop flag).
 Delivery can lag the threshold by one tick plus Herdr/probe timeouts; probes run only for a new pane-judged stall.
 Pi diagnostics: PM_RUN_PI_SESSIONS overrides ~/.pi/agent/sessions; log lookup is best-effort, not completion evidence.
@@ -162,6 +168,7 @@ import sys
 import time
 import traceback
 import unicodedata
+import uuid
 from collections import Counter
 from datetime import datetime
 from hashlib import sha256
@@ -265,6 +272,8 @@ NO_HELPERS = {
     "claude": ["--disallowedTools", "Agent,Workflow"],
     "agy": [],  # no switch for its sub-agents; the brief forbids them
 }
+# Claude Code flags that choose the session; pm_run chooses it (--session-id), so a job's args may not.
+SESSION_FLAGS = ("--session-id", "--resume", "-r", "--continue", "-c", "--fork-session", "--from-pr", "--teleport")
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
 # no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms,
 # or say that agy may trust this folder: a retry shows the same screen again.
@@ -700,6 +709,13 @@ def preflight(job, repo):
     for n, helper in enumerate(helpers or [], 1):
         if not isinstance(helper, str) and not complete_helper(helper):
             return f"helper {n} needs model, harness and thinking, or a plain model name"
+    if job.get("harness") == "claude":
+        own = [arg for arg in job.get("args") or [] if isinstance(arg, str) and arg.split("=")[0] in SESSION_FLAGS]
+        if own:
+            return (
+                f"args hold {own[0]}, but pm_run starts each Claude Code attempt in a session of its own, "
+                "to read its transcript; remove it"
+            )
     return None
 
 
@@ -779,6 +795,39 @@ def pi_log(job, attempt, repo):
     return None
 
 
+def claude_transcript(job, attempt):
+    """This attempt's Claude Code transcript, the file named after its session id, or None; never raises.
+
+    Claude Code writes it to <config folder>/projects/<a folder named after the start directory>/<id>.jsonl. A setup
+    line may move the config folder (CLAUDE_CONFIG_DIR) or the start directory, so the file is looked for by its name
+    under every root, never rebuilt: the folders in PM_RUN_CLAUDE_PROJECTS when it is set, else $CLAUDE_CONFIG_DIR's
+    and every ~/.claude*'s `projects`. A file older than the attempt does not count. The path is kept in the
+    attempt's "transcript", never in "session_log", which is Pi's (the nudge and the usage sum read that).
+    """
+    try:
+        session = attempt.get("session_id")
+        if job.get("harness") != "claude" or not re.fullmatch(r"[0-9a-f-]{36}", str(session)):
+            return None
+        listed = os.environ.get("PM_RUN_CLAUDE_PROJECTS")
+        if listed is not None:
+            roots = [Path(folder) for folder in listed.split(os.pathsep) if folder]
+        else:
+            config = os.environ.get("CLAUDE_CONFIG_DIR")
+            roots = [Path(config) / "projects"] if config else []
+            roots += sorted(Path.home().glob(".claude*/projects"))
+        for root in dict.fromkeys(roots):
+            try:
+                for path in root.glob(f"*/{session}.jsonl"):
+                    if path.stat().st_mtime >= attempt["started"]:
+                        attempt["transcript"] = str(path)
+                        return path
+            except OSError:
+                continue
+    except Exception:  # noqa: BLE001 - a lookup that fails is a gap in the evidence, never a broken tick
+        return None
+    return None
+
+
 def turn_end(job, attempt, repo):
     """The last assistant message of this attempt's Pi session log: its stop reason or provider error."""
     if job.get("harness", "pi") != "pi":
@@ -797,7 +846,7 @@ def turn_end(job, attempt, repo):
 
 
 def log_text(value):
-    """A string read from a Pi log, safe to write as UTF-8; anything else as it was.
+    """A string read from a worker's log, safe to write as UTF-8; anything else as it was.
 
     JSON can hold a lone surrogate (half of an escaped character pair), and no UTF-8 file takes one: each becomes "?".
     """
@@ -805,7 +854,7 @@ def log_text(value):
 
 
 def log_time(entry):
-    """Epoch seconds of a Pi log line, from its own timestamp or its message's (ms); None when it has neither."""
+    """Epoch seconds of a log line, from its own timestamp or its message's (Pi, ms); None when it has neither."""
     stamp = entry.get("timestamp")
     if isinstance(stamp, str):
         try:
@@ -819,7 +868,7 @@ def log_time(entry):
     return None
 
 
-# What a worker does now by its Pi session log, as the stall warning says it.
+# What a worker does now by its log (Pi's session log, Claude Code's transcript), as the stall warning says it.
 DOING = {
     "tool": "a tool is running",
     "retry": "the harness retries on provider errors",
@@ -827,41 +876,103 @@ DOING = {
     "prompt": "no model answer has been written since the last prompt",
     "result": "no model answer has been written since the last tool result",
     "answer": "no model answer has been written since the last one ended a turn",
+    "gave_up": "the harness gave up after provider errors",  # Claude Code's error entry once its retries end
 }
+# Claude Code writes an entry per block, and a thinking block ends no turn: only what the transcript shows.
+CLAUDE_DOING = {**DOING, "answer": "nothing has been written since the model's last answer"}
 PROGRESS_TAIL = 4 * 1024 * 1024  # one look reads 4 MB at most: when more was written since, only the last 4 MB
-LOOKUP_S = 60  # while an attempt's Pi log is not found, it is looked for once a minute at most
+LOOKUP_S = 60  # while an attempt's log is not found, it is looked for once a minute at most
+
+
+def pi_kind(entry):
+    """What a Pi log line says the worker did, as (kind, error, tool ids), or None for a prompt or a note."""
+    message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
+    if not isinstance(message, dict):
+        return None  # a context_edit, a session line, anything that is not a message
+    role, stop = message.get("role"), message.get("stopReason")
+    if role not in ("assistant", "toolResult"):
+        return None
+    if role == "assistant" and stop == "error":
+        return "retry", log_text(" ".join(str(message.get("errorMessage") or "").split())[:160]), ()
+    return ("result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"), None, ()
+
+
+def claude_kind(entry):
+    """What a Claude Code transcript line says the worker did, as (kind, error, tool ids), or None.
+
+    Claude Code writes one entry per content block. "tool": an assistant entry with a tool_use block whose id is a
+    nonempty string (those ids; one with no such id is an "answer"); "result": a user entry with a tool_result block
+    (the ids it answers, those that are nonempty strings); "retry": a failed API call the harness
+    retries by itself; "gave_up": the assistant entry it writes when those retries gave up (for both, the error is
+    the status and the message); "answer": any other assistant entry. A prompt, and the entries written again at every flush (title, mode, cost
+    and the like), are None: a file that grows with those is no progress.
+    """
+    if not isinstance(entry, dict):
+        return None
+    kind, message = entry.get("type"), entry.get("message") if isinstance(entry.get("message"), dict) else {}
+    content = message.get("content")
+    blocks = [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
+    if (
+        kind == "system"
+        and entry.get("subtype") == "api_error"
+        or kind == "assistant"
+        and entry.get("isApiErrorMessage")
+    ):
+        if kind == "system":
+            error = entry.get("error") if isinstance(entry.get("error"), dict) else {}
+            status, text = error.get("status"), error.get("message")
+        else:
+            status = entry.get("apiErrorStatus")
+            text = " ".join(str(block.get("text") or "") for block in blocks if block.get("type") == "text")
+            text = text or entry.get("error")
+        said = " ".join(str(part) for part in (status, text) if part not in (None, ""))
+        return ("retry" if kind == "system" else "gave_up"), log_text(" ".join(said.split())[:160]), ()
+    key, wanted = ("id", "tool_use") if kind == "assistant" else ("tool_use_id", "tool_result")
+    ids = tuple(b[key] for b in blocks if b.get("type") == wanted and isinstance(b.get(key), str) and b[key])
+    if kind == "assistant":
+        return ("tool", None, ids) if ids else ("answer", None, ())  # a call without an id cannot be tracked
+    if kind == "user" and any(block.get("type") == "tool_result" for block in blocks):
+        return "result", None, ids
+    return None  # a user entry without a tool_result block is a prompt
 
 
 def log_progress(job, attempt, repo, seen, now):
-    """What this attempt's Pi session log says about its progress: {"at", "doing", "error"}; never raises.
+    """What this attempt's log says about its progress: {"at", "doing", "error"}; never raises.
 
+    The log is Pi's session log (pi_log) or Claude Code's transcript (claude_transcript, by the session id pm_run
+    gave the attempt); each line is read by that harness's classifier (pi_kind, claude_kind).
     "at" is the time of the last progress entry written after the attempt's last prompt (None when there is none
-    yet): a tool's result, or an assistant message whose stopReason is not "error". A failed model call and the
-    context_edit Pi writes with it are not progress, so a log that only grows with Pi's own retries is not either.
-    An entry time later than `now` counts as `now`.
-    "doing" comes from the last message written after that prompt, by the model or a tool (a prompt or any other
-    role changes nothing): "tool" (a toolUse with no result yet), "retry" (a failed call, with its error message in
-    "error"), "result" (a tool's result), "answer" (any other model answer, one that ended a turn), "prompt" (no
-    such message), or "unknown" when there is no log (another harness, a log not found, a log that cannot be read).
+    yet): a tool call, a tool's result, or a model answer. A failed model call the harness retries by itself (with
+    Pi's context_edit beside it), the error Claude Code writes when its retries gave up, and the entries it writes
+    again at every flush, are not progress, so a log that only grows with those is not either. An entry time later
+    than `now` counts as `now`.
+    "doing" comes from the last such entry written after that prompt (a prompt or any other entry changes nothing):
+    "tool" (a tool call with no result yet; for Claude Code, while any call written after the prompt has none and
+    the model has not answered again since: an assistant entry of another message id ends the calls still open),
+    "retry" (a failed call, with its error in "error"), "gave_up" (Claude Code's retries gave up; its error too),
+    "result" (a tool's result), "answer" (any other model answer), "prompt" (no such entry), or "unknown" when
+    there is no log (a harness without one, a log not found, a log that cannot be read).
     `seen` is the caller's cache, one entry per attempt name, so each tick does bounded work: a log not found yet is
     looked for once in LOOKUP_S; a log whose size and mtime have not changed since the last look gives the last
     answer without opening the file; a grown one is read from where the last look ended, PROGRESS_TAIL bytes at
-    most, and only up to its last line break (the rest is read whole at a later look). A log that shrank or is
+    most, and only up to its last line break (the rest is read whole at a later look); a read that skips ahead
+    forgets the tool calls still open, since their results may be in the part it skipped. A log that shrank or is
     another file under the same name (its identity changed) is read anew.
     """
     try:
-        if job.get("harness", "pi") != "pi":
+        claude = job.get("harness") == "claude"
+        if not claude and job.get("harness", "pi") != "pi":
             return {"at": None, "doing": "unknown", "error": None}
-        name, path = attempt["name"], attempt.get("session_log")
+        name, path = attempt["name"], attempt.get("transcript" if claude else "session_log")
         if not path:
             looked = (seen.get(name) or {}).get("looked")
             if looked is not None and 0 <= now - looked < LOOKUP_S:
                 return {"at": None, "doing": "unknown", "error": None}
             seen[name] = {"looked": now}
-            found = pi_log(job, attempt, repo)
+            found = claude_transcript(job, attempt) if claude else pi_log(job, attempt, repo)
             if not found:
                 return {"at": None, "doing": "unknown", "error": None}
-            path = found[0]
+            path = found if claude else found[0]
         path = str(path)
         stat = os.stat(path)
         identity = (stat.st_dev, stat.st_ino)
@@ -869,8 +980,13 @@ def log_progress(job, attempt, repo, seen, now):
         if last.get("path") != path or last.get("identity") != identity or stat.st_size < last["size"]:
             last = {"path": path, "identity": identity, "size": -1, "mtime": None, "offset": 0, "at": None}
             last.update(kind=None, kind_at=None, error=None)  # the last message's kind, and when it was written
+        last["tools"] = dict(last.get("tools") or {})  # Claude Code's tool calls with no result yet: id -> written
         if (stat.st_size, stat.st_mtime) != (last["size"], last["mtime"]):
             start = max(last["offset"], stat.st_size - PROGRESS_TAIL)
+            if start > last["offset"]:  # a read that skips ahead: the part not read may hold the open calls' results
+                last["tools"] = {}
+                if claude and last["kind"] == "tool":
+                    last["kind"] = "answer"  # a call is still a model answer; whether it runs is no longer known
             with open(path, "rb") as f:
                 f.seek(start)
                 chunk = f.read(PROGRESS_TAIL)
@@ -882,27 +998,33 @@ def log_progress(job, attempt, repo, seen, now):
                     entry = json.loads(line)
                 except (ValueError, UnicodeError):
                     continue  # a partial write, or not JSON
-                message = entry.get("message") if isinstance(entry, dict) and entry.get("type") == "message" else None
-                if not isinstance(message, dict):
-                    continue  # a context_edit, a session line, anything that is not a message
-                role, stop = message.get("role"), message.get("stopReason")
-                if role not in ("assistant", "toolResult"):
+                found = claude_kind(entry) if claude else pi_kind(entry)
+                if found is None:
                     continue  # a prompt or a note: what the worker does stays what it was
+                kind, error, tools = found
+                message = entry.get("message") if claude and kind in ("tool", "answer") else None
+                said_in = message.get("id") if isinstance(message, dict) else None
+                if isinstance(said_in, str) and said_in and said_in != last.get("tools_in"):
+                    last["tools"] = {}  # the model answered again: a call with no result by now never gets one
                 when = log_time(entry)
                 when = None if when is None else min(when, now)  # a clock ahead of ours must not hold off a stall
                 kind_at = min(stat.st_mtime, now) if when is None else when  # no time of its own: by this look
-                if role == "assistant" and stop == "error":
-                    error = log_text(" ".join(str(message.get("errorMessage") or "").split())[:160])
-                    last.update(kind="retry", kind_at=kind_at, error=error)
+                last.update(kind=kind, kind_at=kind_at, error=error)
+                if kind in ("retry", "gave_up"):
                     continue
-                kind = "result" if role == "toolResult" else "tool" if stop == "toolUse" else "answer"
-                last.update(kind=kind, kind_at=kind_at, error=None)
+                for tool in tools:  # a call opens its id, its result closes it
+                    if kind == "tool":
+                        last["tools"][tool], last["tools_in"] = kind_at, said_in  # and the message that made it
+                    else:
+                        last["tools"].pop(tool, None)
                 if when is not None and (last["at"] is None or when > last["at"]):
                     last["at"] = when
             last.update(size=stat.st_size, mtime=stat.st_mtime)
             seen[attempt["name"]] = last
         prompted = attempt.get("prompted", attempt["started"])
         at = last["at"] if last["at"] is not None and last["at"] >= prompted else None
+        if any(written >= prompted for written in last["tools"].values()):
+            return {"at": at, "doing": "tool", "error": None}  # two tools may run at once: one result leaves one
         if last["kind_at"] is None or last["kind_at"] < prompted:
             return {"at": at, "doing": "prompt", "error": None}  # nothing written since the prompt
         return {"at": at, "doing": last["kind"], "error": last["error"]}
@@ -1137,6 +1259,9 @@ class Run:
         agent_args += NO_HELPERS[harness]
         if harness == "claude":
             agent_args += ["--name", label]  # Claude Code's display name for the session; nothing reads it back
+            # Each attempt its own session, so its transcript is the file named after this id (claude_transcript).
+            attempt["session_id"] = str(uuid.uuid4())
+            agent_args += ["--session-id", attempt["session_id"]]
             # A project .mcp.json makes Claude Code ask which servers to enable before the first turn, and the brief
             # would land in that dialog. A settings file, not inline JSON: the pane's shell may strip the quotes.
             settings = self.root / "claude-settings.json"
@@ -1297,16 +1422,24 @@ class Run:
     def check_stall(self, job, attempt, now, content, probe=True):
         """The stall rule: one STALLED line, the receipt's stall flag and cause per episode of no progress.
 
-        With a Pi session log the log decides, whatever the pane shows: no progress (log_progress) for STALL_S while
-        Pi retries or a request is pending is a stall; a running tool is not (one routine BUSY line at most). Without
-        a log (another harness, a log not found) the pane decides as before: `content`, which the caller read and
-        noted (pane_seen), unchanged for STALL_S; None when it could not be read. Progress, or a pane change for the
+        With a log (Pi's session log, Claude Code's transcript) the log decides, whatever the pane shows: no progress
+        (log_progress) for STALL_S while the harness retries or gave up or a request is pending is a stall; a running
+        tool is not (one routine BUSY line at most). The lines name the log they read. Without a log (a harness without one, a log
+        not found) the pane decides as before: `content`, which the caller read and noted (pane_seen), unchanged for
+        STALL_S; None when it could not be read. A Claude Code attempt without a transcript read for over STALL_S
+        since its prompt is named once (TRANSCRIPT), whether its pane could be read or not, since its transcript should
+        be there (a file not found and one that cannot be read give the same verdict). Progress, or a pane change for the
         pane rule, ends the episode. The worker is never stopped or prompted. It reads no pane itself. It runs while
         Herdr reports the turn working, and while a settled turn is held (probe=False: a held turn never probes the
         provider).
         """
         progress = log_progress(job, attempt, self.repo, self.progress, now)
+        source = "Claude Code's transcript" if job.get("harness") == "claude" else "Pi's log"
         if progress["doing"] == "unknown":
+            prompted = attempt.get("prompted", attempt["started"])
+            if job.get("harness") == "claude" and now - prompted > STALL_S and not attempt.get("transcript_missing"):
+                attempt["transcript_missing"] = True  # once per attempt: the pane rule is the weaker one
+                self.log(f"TRANSCRIPT {job['id']}: no transcript could be read; judged by its pane")
             if content is None:
                 return  # failed reads neither alter the episode nor warn
             since, what = attempt["seen_at"], "new output"
@@ -1318,7 +1451,7 @@ class Run:
             if progress["doing"] == "tool" and now - since >= STALL_S and attempt.get("busy_since") != since:
                 attempt["busy_since"] = since  # once per tool run: a long build or test run is work, not a stall
                 self.log(
-                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but Pi's log shows a "
+                    f"BUSY {job['id']}: no progress for {round((now - since) / 60, 1):g} min, but {source} shows a "
                     "tool still running; not a stall"
                 )
             if attempt.get("stall") and attempt.setdefault("stall_since", since) < since:
@@ -1332,7 +1465,8 @@ class Run:
                 cause, said = f"pane: {found}", f"likely {found}"
             else:
                 error = f' (last error: "{progress["error"]}")' if progress["error"] else ""
-                cause = said = f"Pi's log says {DOING[progress['doing']]}{error}"
+                doing = (CLAUDE_DOING if job.get("harness") == "claude" else DOING)[progress["doing"]]
+                cause = said = f"{source} says {doing}{error}"
             attempt.update(stall=True, stall_cause=cause)
             if what == "progress":
                 attempt["stall_since"] = since  # the last progress the episode is measured from

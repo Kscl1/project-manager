@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 import unittest
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
@@ -272,7 +273,11 @@ class PmRunFixture:
             "PM_RUN_HERDR_TIMEOUT": "30",
             "PM_RUN_VERIFY_S": "600",
             "PM_RUN_PI_SESSIONS": str(self.tmp / "sessions"),
+            "PM_RUN_CLAUDE_PROJECTS": str(self.tmp / "claude-projects"),  # never the real ~/.claude folders
         }
+        patcher = patch.dict(os.environ, {"PM_RUN_CLAUDE_PROJECTS": self.env["PM_RUN_CLAUDE_PROJECTS"]})
+        patcher.start()  # also for the runs a test makes in its own process
+        self.addCleanup(patcher.stop)
 
     @property
     def a1(self):
@@ -398,11 +403,14 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         argv = herdr["gone"][self.a1]["argv"]
         self.assertEqual(argv[argv.index("--kind") + 1], "claude")
         settings = argv[argv.index("--settings") + 1]
+        session = argv[argv.index("--session-id") + 1]
         self.assertEqual(
             argv[argv.index("--") + 1 :],
-            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--settings", settings]
-            + ["--permission-mode", "acceptEdits"],
+            ["--model", "ok", "--disallowedTools", "Agent,Workflow", "--name", "a", "--session-id", session]
+            + ["--settings", settings, "--permission-mode", "acceptEdits"],
         )
+        self.assertEqual(uuid.UUID(session).version, 4)
+        self.assertEqual(self.receipts()["a"]["attempts"][0]["session_id"], session, "the receipt keeps the id")
         # The project's MCP servers start without the approval dialog that would swallow the brief, and Claude Code's
         # bundled skills are off. No allow rules: Claude Code's own read-only check is stricter than a prefix.
         self.assertEqual(
@@ -439,6 +447,21 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
         self.assertEqual(self.receipts()["a"]["attempts"][0]["model"], "ok")
         self.assertNotIn("ran", herdr)
         self.assertIn("Write only that file. ", herdr["gone"][self.a1]["prompts"][0])
+        self.assertNotIn("--session-id", argv)
+        self.assertNotIn("session_id", self.receipts()["a"]["attempts"][0])
+
+    def test_each_claude_code_attempt_starts_a_session_of_its_own(self):
+        self.jobs(self.job("a", "vanish", harness="claude"))  # gone mid-turn, so pm_run starts a second attempt
+        self.run_pm()
+        attempts = self.receipts()["a"]["attempts"]
+        self.assertEqual(len(attempts), 2)
+        gone = self.herdr_state()["gone"]
+        ids = [
+            gone[attempt["name"]]["argv"][gone[attempt["name"]]["argv"].index("--session-id") + 1]
+            for attempt in attempts
+        ]
+        self.assertEqual(ids, [attempt["session_id"] for attempt in attempts])
+        self.assertNotEqual(ids[0], ids[1])
 
     def seed_reads(self, *screens):
         empty = {"n": 0, "workspaces": [], "agents": {}, "gone": {}, "closed": []}
@@ -1012,6 +1035,18 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 launch.assert_not_called()
                 self.assertEqual(state["a"]["state"], "failed")
                 self.assertIn("task must be a task ID (text)", state["a"]["why"])
+
+    def test_preflight_refuses_a_claude_job_that_brings_its_own_session(self):
+        flags = ("--session-id", "--resume=abc", "-r", "--continue", "-c", "--fork-session", "--from-pr", "--teleport")
+        for flag in flags:
+            with self.subTest(flag=flag):
+                why = pm_run.preflight(self.job("a", "ok", harness="claude", args=[flag]), self.tmp)
+                self.assertEqual(
+                    why,
+                    f"args hold {flag}, but pm_run starts each Claude Code attempt in a session of its own, to read "
+                    "its transcript; remove it",
+                )
+        self.assertIsNone(pm_run.preflight(self.job("a", "ok", args=["-c"]), self.tmp), "Pi's flags are its own")
 
     def tab_labels(self):
         """The --label of each `tab create` the fake Herdr saw, in order."""
@@ -2708,13 +2743,16 @@ class PaneWarningTest(PmRunFixture, unittest.TestCase):
 
 
 T0 = 1_700_000_000  # a fixed clock for the progress tests
+SESSION = "0b5e6a1c-1d2e-4f3a-8b4c-5d6e7f8a9b0c"  # the session id pm_run gave a Claude Code attempt
 
 
 def pi_line(kind, when):
     """Pi session-log lines of the shapes real logs show: "result" (a tool's result), "tool" (a model call that asks
     for a tool), "answer" (a finished model call), "error" (a failed model call and the context_edit Pi writes with
-    it, before it retries by itself), "prompt" (what the worker was sent)."""
+    it, before it retries by itself), "prompt" (what the worker was sent), "note" (a line that is not a message)."""
     stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    if kind == "note":
+        return json.dumps({"type": "session_info", "timestamp": stamp, "name": "worker"}) + "\n"
     message = {
         "prompt": {"role": "user"},
         "result": {"role": "toolResult"},
@@ -2728,45 +2766,188 @@ def pi_line(kind, when):
     return "".join(json.dumps(entry) + "\n" for entry in entries)
 
 
+def claude_line(kind, when, tool="toolu_1"):
+    """Claude Code transcript lines of the shapes real transcripts show, one entry per content block, for the kinds
+    pi_line knows: "error" is a failed API call Claude Code retries by itself, "note" the entries it writes again at
+    every flush; `tool` is the id that ties a tool call to its result."""
+    stamp = datetime.fromtimestamp(when, timezone.utc).isoformat().replace("+00:00", "Z")
+    entries = {
+        "prompt": [{"type": "user", "message": {"content": "Go on."}}],
+        "result": [{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": tool}]}}],
+        "tool": [
+            {"type": "assistant", "message": {"id": "msg_2", "content": [{"type": "tool_use", "id": tool}]}},
+        ],
+        "answer": [  # one answer, two blocks: two entries with the same message id
+            {"type": "assistant", "message": {"id": "msg_1", "content": [{"type": "thinking", "thinking": ""}]}},
+            {"type": "assistant", "message": {"id": "msg_1", "content": [{"type": "text", "text": "Done."}]}},
+        ],
+        "error": [
+            {"type": "system", "subtype": "api_error", "level": "error", "retryAttempt": 3, "maxRetries": 10}
+            | {"retryInMs": 8000, "error": {"status": 503, "message": "upstream  unavailable"}}
+        ],
+        "note": [
+            {"type": note}
+            for note in ("custom-title", "agent-name", "mode", "permission-mode", "last-prompt", "cost-state")
+        ],
+    }[kind]
+    return "".join(json.dumps({**entry, "timestamp": stamp}) + "\n" for entry in entries)
+
+
 class LogProgressTest(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="pm_run_progress_"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.log = self.tmp / "session.jsonl"
         self.log.write_text("", encoding="utf-8")
+        self.job = {}
         self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, "session_log": str(self.log)}
         self.seen = {}
+        patcher = patch.dict(os.environ, {"PM_RUN_CLAUDE_PROJECTS": str(self.tmp / "claude-projects")})
+        patcher.start()  # never the real ~/.claude folders
+        self.addCleanup(patcher.stop)
+
+    def each_harness(self):
+        """The line-builder of each harness in turn, on an empty log that its attempt reads; proofs that hold for both
+        run once per harness."""
+        for line, job, key in ((pi_line, {}, "session_log"), (claude_line, {"harness": "claude"}, "transcript")):
+            self.log.write_text("", encoding="utf-8")
+            self.job, self.seen = job, {}
+            self.attempt = {"name": "worker", "started": T0, "prompted": T0 + 10, key: str(self.log)}
+            yield line
 
     def write(self, *lines):
         with self.log.open("a", encoding="utf-8") as f:
             f.write("".join(lines))
 
     def progress(self, now=T0 + 1000):
-        return pm_run.log_progress({}, self.attempt, self.tmp, self.seen, now)
+        return pm_run.log_progress(self.job, self.attempt, self.tmp, self.seen, now)
 
     def test_progress_is_a_tool_result_or_a_model_answer_after_the_last_prompt(self):
-        self.write(pi_line("answer", T0 + 5))  # an answer to an earlier prompt
-        self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
-        self.write(pi_line("tool", T0 + 20), pi_line("result", T0 + 30))
-        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
-        self.write(pi_line("tool", T0 + 40), pi_line("prompt", T0 + 45))  # a prompt is not what the worker does
-        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("answer", T0 + 5))  # an answer to an earlier prompt
+                self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
+                self.write(line("tool", T0 + 20), line("result", T0 + 30))
+                self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "result", "error": None})
+                self.write(line("answer", T0 + 35))
+                self.assertEqual(self.progress(), {"at": T0 + 35, "doing": "answer", "error": None})
+                self.write(line("tool", T0 + 40), line("prompt", T0 + 45))  # a prompt is not what the worker does
+                self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
 
     def test_failed_calls_and_their_context_edits_are_not_progress(self):
-        self.write(pi_line("result", T0 + 20), pi_line("error", T0 + 30), pi_line("error", T0 + 40))
-        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"})
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("result", T0 + 20), line("error", T0 + 30), line("error", T0 + 40))
+                self.assertEqual(
+                    self.progress(), {"at": T0 + 20, "doing": "retry", "error": "503 upstream unavailable"}
+                )
+
+    def test_entries_that_are_not_progress_change_nothing(self):
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("answer", T0 + 20))
+                self.write(*(line("note", T0 + 60 * n) for n in range(1, 10)))  # the file grows every flush
+                self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "answer", "error": None})
+
+    def test_a_tool_called_before_the_last_prompt_is_not_running(self):
+        for line in self.each_harness():
+            with self.subTest(line.__name__):
+                self.write(line("tool", T0 + 20))  # its result never came
+                self.attempt["prompted"] = T0 + 30  # a nudge
+                self.assertEqual(self.progress(), {"at": None, "doing": "prompt", "error": None})
+
+    def test_one_result_of_two_running_tools_leaves_the_other_running_until_the_model_answers_again(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        self.write(claude_line("tool", T0 + 20, "toolu_1"), claude_line("tool", T0 + 21, "toolu_2"))
+        self.write(claude_line("result", T0 + 30, "toolu_2"))
+        self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "tool", "error": None})
+        sibling = json.loads(claude_line("answer", T0 + 31).splitlines()[0])
+        sibling["message"]["id"] = "msg_2"  # a block of the message that called both tools
+        no_id = {**sibling, "message": {"content": [{"type": "text", "text": "Hm."}]}}
+        self.write(json.dumps(sibling) + "\n", json.dumps(no_id) + "\n")
+        self.assertEqual(self.progress(), {"at": T0 + 31, "doing": "tool", "error": None})
+        self.write(claude_line("answer", T0 + 40))  # the next message: toolu_1 never gets its result
+        self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "answer", "error": None})
+        self.write(claude_line("result", T0 + 50, "toolu_1"))
+        self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "result", "error": None})
+
+    def test_a_tool_id_that_cannot_be_tracked_breaks_nothing(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        bad = claude_line("result", T0 + 25).replace('"toolu_1"', "{}")
+        self.write(claude_line("result", T0 + 20, "toolu_9"), bad, claude_line("tool", T0 + 30))
+        for look in ("first", "second"):
+            with self.subTest(look):
+                self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "tool", "error": None})
+        self.write(claude_line("result", T0 + 40))
+        for n, tool_id in enumerate(("", 7, None), 5):  # an empty id, a number, null: progress, but no tool to track
+            call = claude_line("tool", T0 + 10 * n, "toolu_x").replace('"toolu_x"', json.dumps(tool_id))
+            self.write(call.replace('"msg_2"', f'"msg_{n}"'))
+            self.assertEqual(self.progress(), {"at": T0 + 10 * n, "doing": "answer", "error": None})
+
+    def test_a_read_that_skips_ahead_forgets_the_open_calls(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        with patch.object(pm_run, "PROGRESS_TAIL", 400):
+            self.write(claude_line("tool", T0 + 20))
+            self.assertEqual(self.progress()["doing"], "tool")
+            self.write(claude_line("result", T0 + 30), claude_line("note", T0 + 40), claude_line("note", T0 + 50))
+            self.assertGreater(self.log.stat().st_size - self.seen["w"]["offset"], 400, "the result is not read")
+            self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "answer", "error": None})
+
+    def test_retries_that_gave_up_are_not_progress(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        gave_up = {"type": "assistant", "isApiErrorMessage": True, "apiErrorStatus": 529, "error": "overloaded"}
+        gave_up["timestamp"] = datetime.fromtimestamp(T0 + 40, timezone.utc).isoformat()
+        gave_up["message"] = {"content": [{"type": "text", "text": "API  Error"}]}
+        self.write(claude_line("answer", T0 + 20), json.dumps(gave_up) + "\n")
+        self.assertEqual(self.progress(), {"at": T0 + 20, "doing": "gave_up", "error": "529 API Error"})
+        self.assertEqual(pm_run.CLAUDE_DOING["gave_up"], "the harness gave up after provider errors")
 
     def test_no_log_is_unknown_and_never_raises(self):
         unknown = {"at": None, "doing": "unknown", "error": None}
         with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}):
             for job, attempt in (
-                ({"harness": "claude"}, self.attempt),  # no log pm_run knows
+                ({"harness": "claude"}, {"name": "worker", "started": T0, "session_id": SESSION}),  # no transcript
+                ({"harness": "agy"}, self.attempt),  # no log pm_run knows
                 ({}, {"name": "worker", "started": T0}),  # not found
                 ({}, {**self.attempt, "session_log": str(self.tmp / "gone.jsonl")}),
                 ({}, {**self.attempt, "session_log": str(self.tmp)}),  # a folder: cannot be read
             ):
                 with self.subTest(job=job, attempt=attempt):
                     self.assertEqual(pm_run.log_progress(job, attempt, self.tmp, {}, T0), unknown)
+
+    def transcript(self, root, when=T0 + 1):
+        """An empty Claude Code transcript of SESSION under `root`, in a folder not named after the repo."""
+        path = root / "C--somewhere-else" / f"{SESSION}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+        os.utime(path, (when, when))
+        return path
+
+    def test_a_transcript_is_found_by_its_session_id_under_any_root(self):
+        home, profile = self.tmp / "home", self.tmp / "profile"
+        (home / ".claude" / "projects").mkdir(parents=True)  # the default profile, without this session
+        listed = os.pathsep.join([str(self.tmp / "first"), str(self.tmp / "second")])
+        for env, root in (
+            ({"PM_RUN_CLAUDE_PROJECTS": listed}, self.tmp / "second"),
+            ({"CLAUDE_CONFIG_DIR": str(profile)}, profile / "projects"),
+            ({}, home / ".claude-gpt" / "projects"),  # a second profile a setup line points to
+        ):
+            with self.subTest(root=root), patch.dict(os.environ, env), patch.object(
+                pm_run.Path, "home", return_value=home
+            ):
+                for key in {"PM_RUN_CLAUDE_PROJECTS", "CLAUDE_CONFIG_DIR"} - set(env):
+                    os.environ.pop(key, None)
+                path, attempt = self.transcript(root), {"name": "worker", "started": T0, "session_id": SESSION}
+                self.assertEqual(pm_run.claude_transcript({"harness": "claude"}, attempt), path)
+                self.assertEqual(attempt["transcript"], str(path))
+                self.assertNotIn("session_log", attempt, "Pi's key: the nudge and the usage sum read it")
+                path.unlink()
+
+    def test_a_transcript_older_than_the_attempt_does_not_count(self):
+        self.transcript(self.tmp / "claude-projects", when=T0 - 1)  # a session that ended before this attempt
+        attempt = {"name": "worker", "started": T0, "session_id": SESSION}
+        self.assertIsNone(pm_run.claude_transcript({"harness": "claude"}, attempt))
+        self.assertNotIn("transcript", attempt)
 
     def test_an_unchanged_log_is_not_read_again(self):
         self.write(pi_line("result", T0 + 20))
@@ -2779,24 +2960,27 @@ class LogProgressTest(unittest.TestCase):
         self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "tool", "error": None})
 
     def test_a_log_not_found_is_looked_for_once_a_minute(self):
-        self.attempt.pop("session_log")
-        with patch.dict(os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}), patch.object(
-            pm_run, "pi_log", wraps=pm_run.pi_log
-        ) as lookup:
-            for now in (T0, T0 + 30, T0 + 59, T0 + 60):
-                self.assertEqual(self.progress(now)["doing"], "unknown")
-        self.assertEqual(lookup.call_count, 2, "at T0 and at T0 + 60")
+        for line, lookup in zip(self.each_harness(), ("pi_log", "claude_transcript")):
+            with self.subTest(line.__name__), patch.dict(
+                os.environ, {"PM_RUN_PI_SESSIONS": str(self.tmp / "no-sessions")}
+            ), patch.object(pm_run, lookup, wraps=getattr(pm_run, lookup)) as looked:
+                self.attempt = {"name": "worker", "started": T0, "session_id": SESSION}
+                for now in (T0, T0 + 30, T0 + 59, T0 + 60):
+                    self.assertEqual(self.progress(now)["doing"], "unknown")
+                self.assertEqual(looked.call_count, 2, "at T0 and at T0 + 60")
 
     def test_a_record_split_across_two_looks_is_read_once_and_whole(self):
-        line = pi_line("tool", T0 + 40)
-        with patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
-            self.write(pi_line("result", T0 + 20), line[:30])
-            self.assertEqual(self.progress()["doing"], "result")
-            self.write(line[30:-1])  # the whole record, still without its line break
-            self.assertEqual(self.progress()["doing"], "result")
-            self.write("\n")
-            self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
-        self.assertEqual(sum(b"toolUse" in c.args[0] for c in parsed.call_args_list), 1)
+        for line in self.each_harness():
+            with self.subTest(line.__name__), patch.object(pm_run.json, "loads", wraps=json.loads) as parsed:
+                tool = line("tool", T0 + 40)
+                self.write(line("result", T0 + 20), tool[:30])
+                self.assertEqual(self.progress()["doing"], "result")
+                self.write(tool[30:-1])  # the whole record, still without its line break
+                self.assertEqual(self.progress()["doing"], "result")
+                self.write("\n")
+                self.assertEqual(self.progress(), {"at": T0 + 40, "doing": "tool", "error": None})
+                record = tool.strip().encode()  # the file is written in text mode: \r\n on Windows
+                self.assertEqual(sum(c.args[0].strip() == record for c in parsed.call_args_list), 1)
 
     def test_an_entry_time_later_than_now_counts_as_now(self):
         self.write(pi_line("result", T0 + 5000))  # a clock ahead of ours
@@ -2829,12 +3013,34 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
             self.addCleanup(patcher.stop)
         self.run = pm_run.Run(self.run_dir)
         self.run.repo = self.tmp
+        self.fresh("pi")
+
+    def fresh(self, harness):
+        """A new run and attempt whose worker runs on `harness`; returns that harness's line-builder."""
+        self.run = pm_run.Run(self.run_dir)
+        self.run.repo = self.tmp
+        self.run.log_path.unlink(missing_ok=True)
+        self.harness, self.snapshots = harness, []
         self.attempt = {"name": "worker", "started": T0, "prompted": T0, "seq0": 0, "tab": "w1:t2", "label": "Review"}
         self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
-        self.snapshots = []
+        return claude_line if harness == "claude" else pi_line
+
+    def harnesses(self):
+        """Each harness in turn, with a fresh run, for the proofs that hold for both: (its line-builder, how its log
+        is named in the run's log)."""
+        for harness, source in (("pi", "Pi's log"), ("claude", "Claude Code's transcript")):
+            yield self.fresh(harness), source
 
     def start_log(self, *lines):
-        """This attempt's Pi session log, where pi_log looks for it."""
+        """This attempt's log where pm_run looks for it: Pi's session log, or Claude Code's transcript of the session
+        id pm_run gave the attempt, in a folder that is not named after the repo."""
+        if self.harness == "claude":
+            self.attempt["session_id"] = SESSION
+            self.session = self.tmp / "claude-projects" / "C--elsewhere" / f"{SESSION}.jsonl"
+            self.session.parent.mkdir(parents=True, exist_ok=True)
+            self.session.write_text("".join(lines), encoding="utf-8")
+            os.utime(self.session, (T0 + 1, T0 + 1))
+            return
         folder = self.tmp / "sessions" / ("--" + re.sub(r"[/\\:]", "-", str(self.tmp).lstrip("/\\")) + "--")
         folder.mkdir(parents=True, exist_ok=True)
         self.session = folder / "worker.jsonl"
@@ -2896,31 +3102,58 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
     def renamed(self):
         return self.herdr_state().get("renamed", [])
 
+    def worker(self, behaviour):
+        """Job a, run on the harness of the current attempt."""
+        return self.job("a", behaviour, harness=self.harness)
+
     def test_retries_alone_are_a_stall_whatever_the_pane_shows(self):
-        self.start_log()
-        screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
-        log = self.tick_minutes(
-            self.job("a", "hang"), 8, screens, write=lambda now: self.add_log(pi_line("error", now), now)
-        )
-        self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn("STALLED a: no progress for 5 min; Pi's log says the harness retries on provider errors", log)
-        self.assertIn('(last error: "503 upstream unavailable")', log)
-        self.assertTrue(self.attempt["stall"])
-        self.assertIn("retries on provider errors", self.attempt["stall_cause"])
-        self.assertEqual(self.renamed(), [MARKED])
-        self.run.hand_over(self.job("a", "hang"), self.state["a"], "test")  # the hand-over mark wins
-        self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
-        self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()
+                screens = [f"Retrying in {60 - n} s" for n in range(30)]  # a new pane every tick
+                log = self.tick_minutes(
+                    self.worker("hang"), 8, screens, write=lambda now: self.add_log(line("error", now), now)
+                )
+                self.assertEqual(log.count("STALLED a:"), 1)
+                said = f"STALLED a: no progress for 5 min; {source} says the harness retries on provider errors"
+                self.assertIn(said, log)
+                self.assertIn('(last error: "503 upstream unavailable")', log)
+                self.assertTrue(self.attempt["stall"])
+                self.assertIn("retries on provider errors", self.attempt["stall_cause"])
+                self.assertEqual(self.renamed(), [MARKED])
+                self.run.hand_over(self.worker("hang"), self.state["a"], "test")  # the hand-over mark wins
+                self.assertEqual(self.renamed(), [MARKED, ["w1:t2", "⚠ Review"]])
+                self.assertNotIn("stall_marked", self.attempt, "the stall mark is no longer on the tab")
+
+    def test_a_prompt_or_an_answer_with_nothing_after_it_is_a_stall(self):
+        after = {  # Claude Code writes an entry per block: a thinking block is an answer that ends no turn
+            "pi": "Pi's log says no model answer has been written since the last one ended a turn",
+            "claude": "Claude Code's transcript says nothing has been written since the model's last answer",
+        }
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()  # nothing since the brief, while the pane changes every tick
+                log = self.tick_minutes(self.worker("hang"), 6, [f"Thinking {n}" for n in range(30)])
+                said = f"STALLED a: no progress for 5 min; {source} says no model answer has been written since the "
+                self.assertEqual(log.count(said + "last prompt"), 1)
+                self.assertEqual(self.renamed(), [MARKED])
+                self.fresh(self.harness)
+                self.start_log(line("answer", T0 + 30))
+                log = self.tick_minutes(self.worker("hang"), 6, [f"Thinking {n}" for n in range(30)])
+                self.assertEqual(log.count(f"STALLED a: no progress for 5 min; {after[self.harness]}"), 1)
 
     def test_a_running_tool_is_not_a_stall(self):
-        self.start_log(pi_line("tool", T0 + 30))
-        log = self.tick_minutes(self.job("a", "hang"), 12, ["frozen"])
-        self.assertNotIn("STALLED", log)
-        self.assertFalse(self.attempt["stall"])
-        self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
-        self.assertEqual(self.renamed(), [])
-        failures = self.tmp / ".pm" / "local" / "failures.log"
-        self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log(line("tool", T0 + 30))
+                log = self.tick_minutes(self.worker("hang"), 12, ["frozen"])
+                self.assertNotIn("STALLED", log)
+                self.assertFalse(self.attempt["stall"])
+                self.assertEqual(log.count("BUSY a:"), 1, "one routine line per tool run")
+                self.assertIn(f"but {source} shows a tool still running; not a stall", log)
+                self.assertEqual(self.renamed(), [])
+                failures = self.tmp / ".pm" / "local" / "failures.log"
+                self.assertFalse(failures.exists() and "BUSY" in failures.read_text(encoding="utf-8"))
 
     def test_progress_ends_the_episode_and_a_later_stall_warns_again(self):
         self.start_log(pi_line("tool", T0), pi_line("result", T0))
@@ -3017,38 +3250,49 @@ class StallRuleTest(PmRunFixture, unittest.TestCase):
     def test_a_held_turn_whose_log_grows_with_errors_only_is_a_stall(self):
         # Herdr calls the turn done and no report is there; Pi's own retries keep the log fresh, so no nudge goes out.
         # Its error text holds a lone surrogate, which JSON can carry and no UTF-8 file takes: both log readers meet
-        # it (the HOLD line and the stall), and the tick still goes on to job b.
-        self.start_log()
-        bad = lambda now: pi_line("error", now).replace("503 upstream  unavailable", "bad \\ud800 text")  # noqa: E731
-        other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
-        self.state["b"] = {"state": "started", "attempts": [other]}
-        log = self.tick_minutes(
-            self.job("a", "nothing"),
-            8,
-            ["Retrying"],
-            write=lambda now: self.add_log(bad(now), now),
-            others=[(self.job("b", "hang", harness="claude"), other)],
-        )
-        self.assertEqual(log.count("HOLD a:"), 1)
-        self.assertEqual(log.count("STALLED a:"), 1)
-        self.assertIn('retries on provider errors (last error: "bad ? text")', log)
-        self.assertFalse(self.snapshots[4]["stall"])
-        self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
-        self.assertEqual(self.renamed(), [MARKED])
-        calls = self.herdr_state()["calls"]
-        self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
-        self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
+        # it (the HOLD line and the stall), and the tick still goes on to job b. Claude Code's nudge waits on its pane
+        # (Pi's on its log), which changes every tick here; its stall is still judged by its transcript.
+        for line, source in self.harnesses():
+            with self.subTest(self.harness):
+                self.start_log()
+                bad = lambda now: line("error", now).replace("upstream  unavailable", "bad \\ud800 text")  # noqa: E731
+                other = {"name": "other", "started": T0, "prompted": T0, "seq0": 0}
+                self.state["b"] = {"state": "started", "attempts": [other]}
+                log = self.tick_minutes(
+                    self.worker("nothing"),
+                    8,
+                    [f"Retrying {n}" for n in range(30)],
+                    write=lambda now: self.add_log(bad(now), now),
+                    others=[(self.job("b", "hang", harness="claude"), other)],
+                )
+                self.assertEqual(log.count("HOLD a:"), 1)
+                self.assertEqual(log.count("STALLED a:"), 1)
+                self.assertIn(
+                    f'{source} says the harness retries on provider errors (last error: "503 bad ? text")', log
+                )
+                self.assertFalse(self.snapshots[4]["stall"])
+                self.assertTrue(self.snapshots[5]["stall"], "at STALL_S after the prompt")
+                self.assertEqual(self.renamed(), [MARKED])
+                calls = self.herdr_state()["calls"]
+                if self.harness == "pi":
+                    self.assertNotIn(["agent", "read", "worker"], [c[:3] for c in calls], "the log decides alone")
+                self.assertEqual(calls.count(["agent", "get", "other"]), 9, "every tick reached b")
 
     def test_without_a_log_the_pane_decides(self):
-        for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0)):
+        # A Claude Code attempt whose transcript is not found: the pane rule, and one line that says so, also while
+        # its pane cannot be read.
+        unread = [{"error": "read failed"}]
+        for screens, stalls in ((["frozen"], 1), ([f"step {n}" for n in range(30)], 0), (unread, 0)):
             with self.subTest(screens=screens[:2]):
-                self.run.log_path.unlink(missing_ok=True)
-                self.attempt = {"name": "worker", "started": T0, "prompted": T0, "tab": "w1:t2", "label": "Review"}
-                self.state = {"a": {"state": "started", "attempts": [self.attempt]}}
-                log = self.tick_minutes(self.job("a", "hang", harness="claude"), 8, screens)
+                self.fresh("claude")
+                self.attempt["session_id"] = SESSION  # no such file under PM_RUN_CLAUDE_PROJECTS
+                log = self.tick_minutes(self.worker("hang"), 8, screens)
                 self.assertEqual(log.count("STALLED a: no new output for 5 min"), stalls)
-                self.assertEqual(self.attempt["stall"], bool(stalls))
+                self.assertEqual(self.attempt.get("stall", False), bool(stalls))  # a pane never read notes none
                 self.assertEqual(self.renamed(), [MARKED] * stalls)
+                self.assertEqual(log.count("TRANSCRIPT a: no transcript could be read; judged by its pane"), 1)
+                failures = self.tmp / ".pm" / "local" / "failures.log"
+                self.assertNotIn("TRANSCRIPT", failures.read_text("utf-8") if failures.exists() else "")
 
 
 # A Pi `usage` object as an assistant message carries it: 115 tokens for $0.12.
