@@ -115,8 +115,9 @@ usage: python .pm/swarm/pm_run.py <run-dir>                 loop until every job
                                                 again)
                        (harness "claude" starts Claude Code with --model, --name <title or id>, --session-id <a new
                         uuid per attempt> and args, without its bundled skills (CLAUDE_SETTINGS); its args may not
-                        choose the session (--session-id, --resume, -r, --continue, -c, --fork-session fail
-                        PREFLIGHT); harness "agy" starts the Antigravity CLI with --model and args (the model id
+                        choose the session (--session-id, --resume, -r, --continue, -c, --fork-session, --from-pr,
+                        --teleport fail PREFLIGHT, alone or with =value; a short flag with its value attached, such
+                        as -rID, is not caught); harness "agy" starts the Antigravity CLI with --model and args (the model id
                         carries the thinking level, e.g. gemini-3.8-flash-low; pass "args": ["--mode", "accept-edits"]
                         or similar so file writes need no approval); thinking applies to Pi only;
                         Pi and Claude Code start without in-process sub-agent tools: a helper is its own pm_run job, so
@@ -272,7 +273,7 @@ NO_HELPERS = {
     "agy": [],  # no switch for its sub-agents; the brief forbids them
 }
 # Claude Code flags that choose the session; pm_run chooses it (--session-id), so a job's args may not.
-SESSION_FLAGS = ("--session-id", "--resume", "-r", "--continue", "-c", "--fork-session")
+SESSION_FLAGS = ("--session-id", "--resume", "-r", "--continue", "-c", "--fork-session", "--from-pr", "--teleport")
 # Screens a harness shows on its first run, before it takes a brief. Herdr reports agy idle there (its fallback when
 # no detection rule matches), so a brief sent now would land in the menu. Only the owner should accept agy's terms,
 # or say that agy may trust this folder: a retry shows the same screen again.

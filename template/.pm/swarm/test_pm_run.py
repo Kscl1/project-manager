@@ -1037,7 +1037,8 @@ class PmRunTest(PmRunFixture, unittest.TestCase):
                 self.assertIn("task must be a task ID (text)", state["a"]["why"])
 
     def test_preflight_refuses_a_claude_job_that_brings_its_own_session(self):
-        for flag in ("--session-id", "--resume=abc", "-r", "--continue", "-c", "--fork-session"):
+        flags = ("--session-id", "--resume=abc", "-r", "--continue", "-c", "--fork-session", "--from-pr", "--teleport")
+        for flag in flags:
             with self.subTest(flag=flag):
                 why = pm_run.preflight(self.job("a", "ok", harness="claude", args=[flag]), self.tmp)
                 self.assertEqual(
