@@ -2870,6 +2870,19 @@ class LogProgressTest(unittest.TestCase):
         self.write(claude_line("result", T0 + 50, "toolu_1"))
         self.assertEqual(self.progress(), {"at": T0 + 50, "doing": "result", "error": None})
 
+    def test_a_tool_id_that_cannot_be_tracked_breaks_nothing(self):
+        self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
+        bad = claude_line("result", T0 + 25).replace('"toolu_1"', "{}")
+        self.write(claude_line("result", T0 + 20, "toolu_9"), bad, claude_line("tool", T0 + 30))
+        for look in ("first", "second"):
+            with self.subTest(look):
+                self.assertEqual(self.progress(), {"at": T0 + 30, "doing": "tool", "error": None})
+        self.write(claude_line("result", T0 + 40))
+        for n, tool_id in enumerate(("", 7, None), 5):  # an empty id, a number, null: progress, but no tool to track
+            call = claude_line("tool", T0 + 10 * n, "toolu_x").replace('"toolu_x"', json.dumps(tool_id))
+            self.write(call.replace('"msg_2"', f'"msg_{n}"'))
+            self.assertEqual(self.progress(), {"at": T0 + 10 * n, "doing": "answer", "error": None})
+
     def test_retries_that_gave_up_are_not_progress(self):
         self.job, self.attempt = {"harness": "claude"}, {"name": "w", "started": T0, "transcript": str(self.log)}
         gave_up = {"type": "assistant", "isApiErrorMessage": True, "apiErrorStatus": 529, "error": "overloaded"}

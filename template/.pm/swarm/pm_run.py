@@ -896,8 +896,9 @@ def pi_kind(entry):
 def claude_kind(entry):
     """What a Claude Code transcript line says the worker did, as (kind, error, tool ids), or None.
 
-    Claude Code writes one entry per content block. "tool": an assistant entry with a tool_use block (its ids);
-    "result": a user entry with a tool_result block (the ids it answers); "retry": a failed API call the harness
+    Claude Code writes one entry per content block. "tool": an assistant entry with a tool_use block whose id is a
+    nonempty string (those ids; one with no such id is an "answer"); "result": a user entry with a tool_result block
+    (the ids it answers, those that are nonempty strings); "retry": a failed API call the harness
     retries by itself, or the error it writes when those retries gave up (the error is the status and the message);
     "answer": any other assistant entry. A prompt, and the entries written again at every flush (title, mode, cost
     and the like), are None: a file that grows with those is no progress.
@@ -922,14 +923,13 @@ def claude_kind(entry):
             text = text or entry.get("error")
         said = " ".join(str(part) for part in (status, text) if part not in (None, ""))
         return "retry", log_text(" ".join(said.split())[:160]), ()
+    key, wanted = ("id", "tool_use") if kind == "assistant" else ("tool_use_id", "tool_result")
+    ids = tuple(b[key] for b in blocks if b.get("type") == wanted and isinstance(b.get(key), str) and b[key])
     if kind == "assistant":
-        calls = [block for block in blocks if block.get("type") == "tool_use"]
-        ids = tuple(call["id"] for call in calls if isinstance(call.get("id"), str))
-        return ("tool", None, ids) if calls else ("answer", None, ())
-    if kind == "user":
-        ids = tuple(block.get("tool_use_id") for block in blocks if block.get("type") == "tool_result")
-        return ("result", None, ids) if ids else None  # without a tool_result block it is a prompt
-    return None
+        return ("tool", None, ids) if ids else ("answer", None, ())  # a call without an id cannot be tracked
+    if kind == "user" and any(block.get("type") == "tool_result" for block in blocks):
+        return "result", None, ids
+    return None  # a user entry without a tool_result block is a prompt
 
 
 def log_progress(job, attempt, repo, seen, now):
