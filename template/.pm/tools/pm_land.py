@@ -18,8 +18,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 TASK_DIRS = (".pm/backlog/tasks", ".pm/backlog/completed", ".pm/backlog/archive/tasks")
-RECEIPT = re.compile(r"Receipt:\s*(\S+) onto (\S+) \| (.*) \| exit (-?\d+) \| (.*)")
-LANDED = re.compile(r"Landed:\s*(\S+) into (\S+) \|")
+FRONTMATTER = re.compile(r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.S)
+RECEIPT = re.compile(r"\s*Receipt:\s*(\S+) onto (\S+) \| (.*) \| exit (-?\d+) \| (.*)")
+LANDED = re.compile(r"\s*Landed:\s*(\S+) into (\S+) \|")
 
 
 def git(repo, *arguments):
@@ -56,14 +57,16 @@ def find_task(records, task_id):
                 text = path.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeError):
                 continue
-            if re.search(rf"(?m)^id:\s*['\"]?{re.escape(task_id)}['\"]?\s*$", text):
+            block = FRONTMATTER.match(text)
+            if block and re.search(rf"(?m)^id:\s*['\"]?{re.escape(task_id)}['\"]?\s*$", block.group(1)):
                 return path
     return None
 
 
 def target(repo, records, commit_arg, branch, task_id):
-    """(commit, tip, task path) once resolved, or None after one line saying what was not found."""
-    commit, tip = resolve(repo, commit_arg), resolve(repo, branch)
+    """(commit, tip, task path, branch) once resolved, or None after one line saying what was not found."""
+    branch = branch[len("refs/heads/") :] if branch.startswith("refs/heads/") else branch
+    commit, tip = resolve(repo, commit_arg), resolve(repo, "refs/heads/" + branch)
     if commit is None or tip is None:
         print(f"Could not resolve {commit_arg!r} or {branch!r} in {repo}.")
         return None
@@ -71,15 +74,14 @@ def target(repo, records, commit_arg, branch, task_id):
     if task_path is None:
         print(f"Task {task_id} was not found under {records}.")
         return None
-    return commit, tip, task_path
+    return commit, tip, task_path, branch
 
 
 def write_landed(records, task_id, task_path, commit, branch):
     """Write the one Landed line unless the task already has it."""
-    for line in task_path.read_text(encoding="utf-8-sig").splitlines():
-        match = LANDED.search(line)
-        if match and match.group(1) == commit and match.group(2) == branch:
-            return 0
+    lines = task_path.read_text(encoding="utf-8-sig").splitlines()
+    if any(m and (m.group(1), m.group(2)) == (commit, branch) for m in map(LANDED.match, lines)):
+        return 0
     line = f"Landed: {commit} into {branch} | {utc_now()}"
     if append_note(records, task_id, line) != 0:
         print(f"Could not write the Landed line to {task_path.name}.")
@@ -89,9 +91,9 @@ def write_landed(records, task_id, task_path, commit, branch):
 
 
 def remove_worktree(repo, path):
-    """Remove a throw-away worktree, even one left by a conflicted merge."""
+    """Remove a throw-away worktree and the temporary folder holding it."""
     git(repo, "worktree", "remove", "--force", str(path))
-    shutil.rmtree(path, ignore_errors=True)
+    shutil.rmtree(path.parent, ignore_errors=True)
     git(repo, "worktree", "prune")
 
 
@@ -99,9 +101,8 @@ def check(repo, records, commit_arg, branch, task_id, command):
     ready = target(repo, records, commit_arg, branch, task_id)
     if ready is None:
         return 2
-    commit, tip, task_path = ready
-    folder = Path(tempfile.mkdtemp(prefix="pm-land-"))
-    path = folder / "worktree"
+    commit, tip, task_path, branch = ready
+    path = Path(tempfile.mkdtemp(prefix="pm-land-")) / "worktree"
     try:
         if git(repo, "worktree", "add", "--detach", str(path), tip).returncode != 0:
             print(f"Could not make a throw-away worktree at {tip[:12]}.")
@@ -113,7 +114,6 @@ def check(repo, records, commit_arg, branch, task_id, command):
             code = subprocess.run(command, shell=True, cwd=str(path)).returncode
     finally:
         remove_worktree(repo, path)
-        shutil.rmtree(folder, ignore_errors=True)
     line = f"Receipt: {commit} onto {tip} | {command} | exit {code} | {utc_now()}"
     if append_note(records, task_id, line) != 0:
         print(f"Could not write the receipt to {task_path.name}.")
@@ -125,23 +125,21 @@ def check(repo, records, commit_arg, branch, task_id, command):
 def branch_worktree(repo, branch):
     """The folder where the branch is checked out, or None."""
     for block in git(repo, "worktree", "list", "--porcelain").stdout.split("\n\n"):
-        lines = block.splitlines()
-        if f"branch refs/heads/{branch}" in lines:
-            return lines[0][len("worktree ") :]
+        if f"branch refs/heads/{branch}" in block.splitlines():
+            return block.splitlines()[0][len("worktree ") :]
     return None
 
 
 def land(repo, records, commit_arg, branch, task_id):
-    branch = branch[len("refs/heads/") :] if branch.startswith("refs/heads/") else branch
     ready = target(repo, records, commit_arg, branch, task_id)
     if ready is None:
         return 2
-    commit, tip, task_path = ready
+    commit, tip, task_path, branch = ready
     if git(repo, "merge-base", "--is-ancestor", commit, tip).returncode == 0:
         return write_landed(records, task_id, task_path, commit, branch)
     found = []
     for line in task_path.read_text(encoding="utf-8-sig").splitlines():
-        match = RECEIPT.search(line)
+        match = RECEIPT.match(line)
         if match and match.group(1) == commit:
             found.append((match.group(2), int(match.group(4))))
     if not found:
@@ -155,19 +153,23 @@ def land(repo, records, commit_arg, branch, task_id):
         print(f"The target moved since the check ({checked_tip[:12]} to {tip[:12]}): run check again.")
         return 2
     where = branch_worktree(repo, branch)
-    folder = None if where else Path(tempfile.mkdtemp(prefix="pm-land-"))
-    path = Path(where) if where else folder / "worktree"
+    path = Path(where) if where else Path(tempfile.mkdtemp(prefix="pm-land-")) / "worktree"
     try:
         if where is None:
             git(repo, "worktree", "add", str(path), branch)
+        if resolve(repo, "refs/heads/" + branch) != tip:
+            print("The target moved while landing: run check again.")
+            return 2
         if git(path, "merge", "--no-edit", commit).returncode != 0:
             git(path, "merge", "--abort")
             print(f"Merging {commit[:12]} into {branch} failed; nothing was landed.")
             return 1
     finally:
-        if folder is not None:
+        if where is None:
             remove_worktree(repo, path)
-            shutil.rmtree(folder, ignore_errors=True)
+    if git(repo, "merge-base", "--is-ancestor", commit, "refs/heads/" + branch).returncode != 0:
+        print(f"{commit[:12]} is not in {branch} after the merge; nothing was landed.")
+        return 1
     return write_landed(records, task_id, task_path, commit, branch)
 
 

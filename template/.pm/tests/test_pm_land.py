@@ -109,12 +109,12 @@ class LandTest(unittest.TestCase):
     def worktree_count(self):
         return run_git(self.repo, "worktree", "list", "--porcelain").count("worktree ")
 
-    def run_action(self, action, commit, command=None):
+    def run_action(self, action, commit, command=None, into="main"):
         argv = [
             action,
             commit,
             "--into",
-            "main",
+            into,
             "--task",
             "TASK-1",
             "--repo",
@@ -226,6 +226,44 @@ class LandTest(unittest.TestCase):
         self.assertEqual(self.worktree_count(), 1)
         code, _ = self.run_action("land", feature)
         self.assertEqual(code, 2)
+
+    def test_find_task_ignores_id_outside_the_frontmatter(self):
+        self.task_path.unlink()
+        decoy = self.task_path.with_name("task-2 - decoy.md")
+        decoy.write_text("---\nid: TASK-2\ntitle: Decoy\n---\n\nid: TASK-1\n", encoding="utf-8")
+        self.assertIsNone(pm_land.find_task(self.records, "TASK-1"))
+        self.assertEqual(pm_land.find_task(self.records, "TASK-2"), decoy)
+
+    def test_only_a_line_starting_with_receipt_or_landed_counts(self):
+        feature = self.make_feature()
+        mentioned = f"Note: Receipt: {feature} onto {self.base_tip} | true | exit 0 | 2026-01-01T00:00:00Z\n"
+        mentioned += f"Note: Landed: {feature} into main | 2026-01-01T00:00:00Z\n"
+        with self.task_path.open("a", encoding="utf-8") as handle:
+            handle.write(mentioned)
+        code, _ = self.run_action("land", feature)
+        self.assertEqual(code, 2)  # a mention is not a receipt
+        self.assertEqual(self.rev("main"), self.base_tip)
+        self.assertNotIn("\nLanded:", self.task_text())
+        receipt = f"  Receipt: {feature} onto {self.base_tip} | true | exit 0 | 2026-01-01T00:00:00Z\n"
+        with self.task_path.open("a", encoding="utf-8") as handle:
+            handle.write(receipt)
+        code, _ = self.run_action("land", feature)
+        self.assertEqual(code, 0)  # leading spaces are allowed
+        text = self.task_text()
+        self.assertIn(f"\nLanded: {feature} into main |", text)
+        self.assertEqual(text.count(f"\nLanded: {feature}"), 1)
+
+    def test_a_tag_named_like_the_branch_does_not_supply_the_tip(self):
+        feature = self.make_feature()
+        run_git(self.repo, "tag", "main", feature)
+        marker = Path(self._tmp.name) / "checked.txt"
+        code, _ = self.run_action("check", feature, marker_command(marker))
+        self.assertEqual(code, 0)
+        self.assertIn(f"Receipt: {feature} onto {self.base_tip} |", self.task_text())
+        code, _ = self.run_action("land", feature, into="refs/heads/main")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.rev("refs/heads/main"), feature)
+        self.assertIn(f"Landed: {feature} into main |", self.task_text())
 
 
 if __name__ == "__main__":
