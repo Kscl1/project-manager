@@ -1042,6 +1042,111 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn(ACTIVE_TASK_LINE, result.stdout)
 
 
+class LiveBlockParsingTest(unittest.TestCase):
+    """A formatter may reflow the live block into one paragraph or wrap a long value onto later lines."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("pm_resume", SCRIPT_SOURCE)
+        cls.pm_resume = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.pm_resume)
+
+    def test_joined_fields_on_one_line_are_read(self):
+        lines = [
+            "Next: Run tests Evidence: abc123 passed 4 tests Blocker: none Needs owner: nothing "
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_wrapped_value_continues_until_the_next_field(self):
+        lines = [
+            "Next: Read the failing test and write down what it expects before changing the runner",
+            "so the next session starts from the same place",
+            "Evidence: abc123 passed 4 tests",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume",
+            "· .worktrees/b1-resume/.pm-report.md",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(
+            live["Next"],
+            "Read the failing test and write down what it expects before changing the runner so the next session "
+            "starts from the same place",
+        )
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_untouched_block_reads_as_before(self):
+        live = self.pm_resume.parse_live_block(LIVE_BLOCK.splitlines())
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_inline_mention_does_not_restart_a_field(self):
+        lines = [
+            "Next: Check the log and see Evidence: below Evidence: abc123 passed 4 tests Blocker: none "
+            "Needs owner: nothing"
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Check the log and see Evidence: below")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+
+    def test_line_start_worker_is_authoritative_over_an_inline_mention(self):
+        lines = [
+            "Next: ask the Worker: coordinator",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "ask the Worker: coordinator")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_joined_workers_are_kept_when_none_starts_a_line(self):
+        lines = [
+            "Next: Run tests Worker: GPT-6 Luna · .worktrees/b1-resume Worker: Kimi K3 · .worktrees/b2-resume-tests"
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(
+            live["Worker"],
+            ["GPT-6 Luna · .worktrees/b1-resume", "Kimi K3 · .worktrees/b2-resume-tests"],
+        )
+
+    def test_only_a_known_field_at_a_word_boundary_with_a_colon_starts_a_field(self):
+        lines = [
+            "Next: Add Notes: to the guide, read MyEvidence: and EvidenceX: as words, then see Evidence: the log",
+            "Evidence: abc123",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(
+            live["Next"],
+            "Add Notes: to the guide, read MyEvidence: and EvidenceX: as words, then see Evidence: the log",
+        )
+        self.assertEqual(live["Evidence"], "abc123")
+
+
 class FrontmatterTitleTest(unittest.TestCase):
     """Backlog writes long titles as folded YAML and escapes apostrophes by doubling them."""
 
