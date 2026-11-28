@@ -218,6 +218,26 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("(no commits yet)", result.stdout)
         self.assertNotIn("Could not", result.stdout)
 
+    def test_owner_section_lists_recently_closed_tasks_that_still_wait(self):
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-1", "Open", "Ready", notes="Needs owner: pick A or B")
+        recent = write_task(self.root, "TASK-2", "Recently closed", "Done", notes="Needs owner: confirm the date")
+        old = write_task(self.root, "TASK-3", "Long closed", "Done", notes="Needs owner: old request")
+        settled = write_task(self.root, "TASK-4", "Closed settled", "Done", notes="Needs owner: none")
+        today = date.today()
+        for path, days in ((recent, 0), (old, 15), (settled, 0)):
+            stamp = f"updated_date: '{(today - timedelta(days=days)).isoformat()} 09:00'\nlabels: []"
+            path.write_text(path.read_text(encoding="utf-8").replace("labels: []", stamp), encoding="utf-8")
+
+        result = self.run_resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        section = result.stdout.split("## Waiting on the owner", 1)[1].split("## Waiting", 1)[0]
+        self.assertIn("- TASK-1 [Ready]: pick A or B", section)
+        self.assertIn("- TASK-2 [Done]: confirm the date", section)
+        self.assertNotIn("TASK-3", section, "a closed task older than 14 days stays out")
+        self.assertNotIn("TASK-4", section, "a closed task whose line says none asks for nothing")
+
     def test_owner_line_with_a_parenthetical_counts(self):
         self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1", "Two leads", "Active", notes="Needs owner (both leads agree): four decisions")
