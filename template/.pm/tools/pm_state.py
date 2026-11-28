@@ -436,14 +436,14 @@ def snapshot(now=None):
     by_task = {}
     for job in jobs:
         by_task.setdefault(job["task"] or NO_TASK, []).append(f"{job['run']}/{job['job']}")
-    waits = [
-        {"task": task["id"], "status": task["status"], "needs": task["live"]["Needs owner"]}
-        for task in open_tasks + drafts
-        if task["status"] != "Done" and pm_resume.asks_something(task["live"]["Needs owner"])
-    ]
-    agents = herdr_agents(jobs)
+    waits = []
     closed = pm_resume.load_closed()
-    cards = waiting_cards(open_tasks + drafts, waits, jobs, agents)
+    for task in open_tasks + drafts + closed:
+        needs = pm_resume.owner_ask(task, today)
+        if needs:
+            waits.append({"task": task["id"], "status": task["status"], "needs": needs})
+    agents = herdr_agents(jobs)
+    cards = waiting_cards(open_tasks + drafts + closed, waits, jobs, agents)
     return {
         "version": VERSION,
         "project": {"name": ROOT.name, "root": str(ROOT)},

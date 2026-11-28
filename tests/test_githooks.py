@@ -39,6 +39,14 @@ class CommitMsgTest(unittest.TestCase):
     def test_title_without_scope_passes(self):
         self.assert_ok("docs: add notes\n\nRefs: #1\nAssisted-by: DeepSeek V4.1 Flash (high)\n")
 
+    def test_body_needs_a_blank_line_after_the_title(self):
+        self.assert_ok("docs: add notes\n\nThe body, in its own paragraph.\n\nRefs: #1\nAssisted-by: A (low)\n")
+        self.assert_blocked(
+            "docs: add notes\nThe body, with no blank line.\n\nRefs: #1\nAssisted-by: A (low)\n",
+            "blank line after the title",
+        )
+        self.assert_blocked("docs: add notes\n \nRefs: #1\nAssisted-by: A (low)\n", "blank line after the title")
+
     def test_co_authored_by_is_blocked_in_any_case(self):
         self.assert_blocked("docs: x\n\nAssisted-by: A (low)\nCo-Authored-By: A <a@example.com>\n", "Co-authored-by")
 
