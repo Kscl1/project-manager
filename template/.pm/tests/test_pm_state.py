@@ -31,8 +31,8 @@ def run_git(repo, *args):
     return result.stdout
 
 
-def write_task(root, task_id, title, status, notes=None, updated=None, priority=None):
-    tasks = root / ".pm" / "backlog" / "tasks"
+def write_task(root, task_id, title, status, notes=None, updated=None, priority=None, closed=False):
+    tasks = root / ".pm" / "backlog" / ("completed" if closed else "tasks")
     tasks.mkdir(parents=True, exist_ok=True)
     lines = ["---", f"id: {task_id}", f"title: {title}", f"status: {status}", "created_date: '2026-06-01 09:00'"]
     if updated:
@@ -301,6 +301,28 @@ class StateTest(unittest.TestCase):
         self.assertEqual(state["git"]["branch"], "main")
         self.assertEqual(state["git"]["last_commits"][0]["tasks"], ["REQ-1"])
         self.assertIsNone(state["agents"])  # Herdr did not answer: unknown, not empty
+
+    def test_a_recently_closed_task_that_still_asks_is_an_owner_wait(self):
+        write_task(self.root, "REQ-1", "Build the thing", "Active", "Next: write it\nNeeds owner: pick A or B")
+        recent = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:00Z")
+        old = (datetime.now(timezone.utc) - timedelta(days=20)).strftime("%Y-%m-%dT%H:%M:00Z")
+        write_task(self.root, "REQ-2", "Just closed", "Done", "Needs owner: say the date", recent, closed=True)
+        write_task(self.root, "REQ-3", "Long closed", "Done", "Needs owner: an old request", old, closed=True)
+        write_task(self.root, "REQ-4", "Closed settled", "Done", "Needs owner: none", recent, closed=True)
+        state = self.snapshot()
+        self.assertEqual(
+            state["owner_waits"],
+            [
+                {"task": "REQ-1", "status": "Active", "needs": "pick A or B"},
+                {"task": "REQ-2", "status": "Done", "needs": "say the date"},
+            ],
+            "a fresh ask of a closed task shows; an old one and `none` stay out",
+        )
+        asked = {card["ref"] for card in state["waiting"] if card["kind"] == "decision"}
+        self.assertEqual(asked, {"REQ-1", "REQ-2"})
+        rows = {row["id"]: row for row in state["board"]}
+        self.assertTrue(rows["REQ-2"]["waiting"], "the board marks the closed task that waits on the owner")
+        self.assertFalse(rows["REQ-3"]["waiting"])
 
     def test_the_snapshot_writes_nothing_in_the_records(self):
         write_task(self.root, "REQ-1", "Build the thing", "Active", "Next: write it")
