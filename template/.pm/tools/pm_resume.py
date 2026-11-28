@@ -563,18 +563,26 @@ def git_stdout(arguments, failure_warning, timeout=None):
     return result.stdout
 
 
+def owner_ask(task, today):
+    """What a task's `Needs owner:` line asks for, or None: an open task asks while the line does, a Done one only
+    while its ask is fresh."""
+    needs = task["live"]["Needs owner"]
+    if not asks_something(needs):
+        return None
+    if task["status"] == "Done":
+        updated = local_day(task["updated"])
+        if updated is None or (today - updated).days > CLOSED_OWNER_DAYS:
+            return None
+    return needs
+
+
 def owner_lines(tasks, today):
     """Every task that waits on the owner: open ones, and Done ones whose ask is still fresh."""
     lines = []
     for task in tasks:
-        needs = task["live"]["Needs owner"]
-        if not asks_something(needs):
-            continue
-        if task["status"] == "Done":
-            updated = local_day(task["updated"])
-            if updated is None or (today - updated).days > CLOSED_OWNER_DAYS:
-                continue
-        lines.append(f"- {task['id']} [{task['status']}]: {needs}")
+        needs = owner_ask(task, today)
+        if needs:
+            lines.append(f"- {task['id']} [{task['status']}]: {needs}")
     return lines
 
 
