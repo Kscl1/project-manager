@@ -9,7 +9,7 @@ date: <YYYY-MM-DD>
 
 ## Source and updates
 
-<who decided, when, where; later update notes>
+<who decided, when, where; later update notes. Quote the owner's words with their date: "..." (owner, YYYY-MM-DD)>
 
 ## Context
 
@@ -29,7 +29,7 @@ date: <YYYY-MM-DD>
 
 ## Evidence and work
 
-<clickable links to the study, task or file>
+<clickable links to the study, task or file. For the check behind the decision, give the command, its exit code and the commit; if it was not run, say "not run".>
 
 <!--
 Save as .pm/decisions/D-<n>.md, then run `python .pm/tools/pm_check.py --write-index`.

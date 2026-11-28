@@ -218,6 +218,26 @@ class ResumeSummaryTest(unittest.TestCase):
         self.assertIn("(no commits yet)", result.stdout)
         self.assertNotIn("Could not", result.stdout)
 
+    def test_owner_section_lists_recently_closed_tasks_that_still_wait(self):
+        self.commit_subjects(["setup"])
+        write_task(self.root, "TASK-1", "Open", "Ready", notes="Needs owner: pick A or B")
+        recent = write_task(self.root, "TASK-2", "Recently closed", "Done", notes="Needs owner: confirm the date")
+        old = write_task(self.root, "TASK-3", "Long closed", "Done", notes="Needs owner: old request")
+        settled = write_task(self.root, "TASK-4", "Closed settled", "Done", notes="Needs owner: none")
+        today = date.today()
+        for path, days in ((recent, 0), (old, 15), (settled, 0)):
+            stamp = f"updated_date: '{(today - timedelta(days=days)).isoformat()} 09:00'\nlabels: []"
+            path.write_text(path.read_text(encoding="utf-8").replace("labels: []", stamp), encoding="utf-8")
+
+        result = self.run_resume()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        section = result.stdout.split("## Waiting on the owner", 1)[1].split("## Waiting", 1)[0]
+        self.assertIn("- TASK-1 [Ready]: pick A or B", section)
+        self.assertIn("- TASK-2 [Done]: confirm the date", section)
+        self.assertNotIn("TASK-3", section, "a closed task older than 14 days stays out")
+        self.assertNotIn("TASK-4", section, "a closed task whose line says none asks for nothing")
+
     def test_owner_line_with_a_parenthetical_counts(self):
         self.commit_subjects(["setup"])
         write_task(self.root, "TASK-1", "Two leads", "Active", notes="Needs owner (both leads agree): four decisions")
@@ -1020,6 +1040,183 @@ class ResumeSummaryTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(ACTIVE_TASK_LINE, result.stdout)
+
+
+class LiveBlockParsingTest(unittest.TestCase):
+    """A formatter may join the live block into one line; notes after the block never add a field."""
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("pm_resume", SCRIPT_SOURCE)
+        cls.pm_resume = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.pm_resume)
+
+    def test_joined_fields_on_one_line_are_read(self):
+        lines = [
+            "Next: Run tests Evidence: abc123 passed 4 tests Blocker: none Needs owner: nothing "
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_untouched_block_reads_as_before(self):
+        live = self.pm_resume.parse_live_block(LIVE_BLOCK.splitlines())
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_inline_mention_does_not_restart_a_field(self):
+        lines = [
+            "Next: Check the log and see Evidence: below",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Check the log and see Evidence: below")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+
+    def test_line_start_worker_is_authoritative_over_an_inline_mention(self):
+        lines = [
+            "Next: ask the Worker: coordinator",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "ask the Worker: coordinator")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_joined_workers_are_kept_when_none_starts_a_line(self):
+        lines = [
+            "Next: Run tests Worker: GPT-6 Luna · .worktrees/b1-resume Worker: Kimi K3 · .worktrees/b2-resume-tests"
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(
+            live["Worker"],
+            ["GPT-6 Luna · .worktrees/b1-resume", "Kimi K3 · .worktrees/b2-resume-tests"],
+        )
+
+    def test_only_a_known_field_at_a_word_boundary_with_a_colon_starts_a_field(self):
+        lines = [
+            "Next: Add Notes: to the guide, read MyEvidence: and EvidenceX: as words, then see Evidence: the log",
+            "Evidence: abc123",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(
+            live["Next"],
+            "Add Notes: to the guide, read MyEvidence: and EvidenceX: as words, then see Evidence: the log",
+        )
+        self.assertEqual(live["Evidence"], "abc123")
+
+    def test_review_lines_after_the_block_stay_out_of_the_last_value(self):
+        lines = [
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], [])
+
+        review = self.pm_resume.review_fields(lines)
+        self.assertEqual(review["review_by"], "2026-10-17 · owner · the replay passed")
+        self.assertEqual(review["reviewed"], "2026-10-12")
+
+    def test_review_lines_after_a_worker_line_stay_out_of_its_value(self):
+        lines = [
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_a_dated_note_after_the_block_adds_no_field(self):
+        lines = [
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+            "7 Oct (X-1): text that mentions Worker: and Evidence: in passing",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+        review = self.pm_resume.review_fields(lines)
+        self.assertEqual(review["review_by"], "2026-10-17 · owner · the replay passed")
+        self.assertEqual(review["reviewed"], "2026-10-12")
+
+    def test_a_note_line_is_ignored_even_when_no_line_carries_its_field(self):
+        lines = [
+            "Next: Run tests",
+            "Blocker: none",
+            "7 Oct (X-1): ask the Worker: coordinator before the replay",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Worker"], [])
+
+    def test_a_label_line_that_is_not_a_live_field_is_ignored(self):
+        lines = [
+            "Next: Run tests",
+            "Needs owner: nothing",
+            "Audit report: .pm/local/audits/replay.md",
+            "Note: the replay is checked by hand",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], [])
 
 
 class FrontmatterTitleTest(unittest.TestCase):

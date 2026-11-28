@@ -44,8 +44,12 @@ RETRO_TITLE = re.compile(r"retro\b", re.IGNORECASE)  # "Retro: 1 to 7 June", not
 FEEDBACK_DIR = ROOT / ".pm" / "local" / "feedback"
 WIP_LIMIT = 7  # open top-level work (Epics, packages, standalone tasks); sub-tasks are not counted
 REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this shows up
+CLOSED_OWNER_DAYS = 14  # a Done task still asking the owner shows this long after its last update
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
+# A formatter may join the block into one line, so a field may start mid-line. The name must be a known
+# field at a word boundary, followed by an optional parenthetical and a colon.
+LIVE_MARKER = re.compile(r"(?<!\w)(Next|Evidence|Blocker|Needs owner|Worker)(?:\s*\([^)]*\))?:")
 NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
 # task files use it.
@@ -155,22 +159,36 @@ def closed_lines(tasks):
 
 
 def parse_live_block(lines):
-    """Extract known live-block fields; a live block may name more than one Worker."""
+    """Extract known live-block fields; a live block may name more than one Worker.
+
+    Only a line that starts with a known field is read: a dated note after the block never adds a field,
+    even when its text mentions one. A formatter may join the block into one line, so a later known field
+    name at a word boundary splits that line into several fields — unless another line starts with that
+    field, which keeps an inline mention in the value before it (for example "see Evidence: below").
+    """
     values = {name: None for name in (*LIVE_FIELDS, "Worker")}
     values["Worker"] = []
+    field_lines = []
     for line in lines:
         stripped = line.strip()
-        for name in (*LIVE_FIELDS, "Worker"):
-            # "Needs owner (both leads agree): ..." still counts as "Needs owner:"
-            match = re.match(rf"{re.escape(name)}(?:\s*\([^)]*\))?:(.*)$", stripped)
-            if not match:
-                continue
-            value = match.group(1).strip() or "?"
+        marker = LIVE_MARKER.match(stripped)
+        if marker:
+            field_lines.append((stripped, marker))
+    anchored = {marker.group(1) for _, marker in field_lines}
+
+    for stripped, first in field_lines:
+        markers = [first]
+        markers.extend(
+            marker for marker in LIVE_MARKER.finditer(stripped, first.end()) if marker.group(1) not in anchored
+        )
+        for index, marker in enumerate(markers):
+            end = markers[index + 1].start() if index + 1 < len(markers) else len(stripped)
+            value = stripped[marker.end() : end].strip() or "?"
+            name = marker.group(1)
             if name == "Worker":
                 values["Worker"].append(value)
             elif values[name] is None:
                 values[name] = value
-            break
     return values
 
 
@@ -545,13 +563,17 @@ def git_stdout(arguments, failure_warning, timeout=None):
     return result.stdout
 
 
-def owner_lines(tasks):
-    """Every open task that waits on the owner. Generated, so the owner list cannot go stale."""
+def owner_lines(tasks, today):
+    """Every task that waits on the owner: open ones, and Done ones whose ask is still fresh."""
     lines = []
     for task in tasks:
         needs = task["live"]["Needs owner"]
-        if task["status"] == "Done" or not needs or needs.split()[0].strip(".,;:").lower() in NOTHING_NEEDED:
+        if not asks_something(needs):
             continue
+        if task["status"] == "Done":
+            updated = local_day(task["updated"])
+            if updated is None or (today - updated).days > CLOSED_OWNER_DAYS:
+                continue
         lines.append(f"- {task['id']} [{task['status']}]: {needs}")
     return lines
 
@@ -839,7 +861,9 @@ def main(brief=False):
         if extra:
             warning_lines.append(extra)
     drafts = load_tasks(DRAFTS_DIR)
-    waiting = owner_lines(all_tasks) + owner_lines(drafts) + feedback_lines()
+    waiting = (
+        owner_lines(all_tasks + load_closed(), date.today()) + owner_lines(drafts, date.today()) + feedback_lines()
+    )
     closed = closed_lines(all_tasks + load_closed())
     ready = ready_lines(all_tasks)
     pulls = pr_lines()
