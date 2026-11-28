@@ -47,12 +47,9 @@ REVIEW_DAYS = 14  # a Ready task or draft not reviewed for longer than this show
 CLOSED_OWNER_DAYS = 14  # a Done task still asking the owner shows this long after its last update
 ACTIVE_STATUSES = {"Active", "In review", "Owner check"}
 LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
-# A formatter may join the block into one paragraph or wrap a value, so a field may start mid-line. The name
-# must be a known field at a word boundary, followed by an optional parenthetical and a colon.
+# A formatter may join the block into one line, so a field may start mid-line. The name must be a known
+# field at a word boundary, followed by an optional parenthetical and a colon.
 LIVE_MARKER = re.compile(r"(?<!\w)(Next|Evidence|Blocker|Needs owner|Worker)(?:\s*\([^)]*\))?:")
-# A line that starts another field of the task record (`Review by:`, `Reviewed:`, `Audit report:`) is not a
-# wrapped live value: it ends the open value. Such a label is capitalised and holds at most three words.
-OTHER_LABEL = re.compile(r"^[A-Z][\w'-]*(?:\s+[\w'-]+){0,2}:")
 NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
 # task files use it.
@@ -164,62 +161,34 @@ def closed_lines(tasks):
 def parse_live_block(lines):
     """Extract known live-block fields; a live block may name more than one Worker.
 
-    A formatter may join the block into one paragraph or wrap a long value onto the lines below, so a
-    field may start in the middle of a line. A known field name at a word boundary followed by a colon
-    starts a field, unless a line in the same paragraph starts with that field: that line is the field,
-    and an earlier inline mention stays in the value before it (for example "see Evidence: below").
-    Where no line starts with a field, the last inline mention opens it, so an earlier mention stays
-    text. A Worker entry that starts a line is likewise authoritative; where no Worker starts a line,
-    every joined Worker entry is kept. Lines without a label continue the open value, while a line that starts
-    another record field (`Review by:`, `Reviewed:`) ends it and stays out of the live block.
+    Only a line that starts with a known field is read: a dated note after the block never adds a field,
+    even when its text mentions one. A formatter may join the block into one line, so a later known field
+    name at a word boundary splits that line into several fields — unless another line starts with that
+    field, which keeps an inline mention in the value before it (for example "see Evidence: below").
     """
     values = {name: None for name in (*LIVE_FIELDS, "Worker")}
     values["Worker"] = []
-    paragraph = []
+    field_lines = []
+    for line in lines:
+        stripped = line.strip()
+        marker = LIVE_MARKER.match(stripped)
+        if marker:
+            field_lines.append((stripped, marker))
+    anchored = {marker.group(1) for _, marker in field_lines}
 
-    def read_paragraph():
-        if not paragraph:
-            return
-        text = "\n".join(paragraph)
-        markers = list(LIVE_MARKER.finditer(text))
-        line_starts = {marker.start() for marker in markers if marker.start() == 0 or text[marker.start() - 1] == "\n"}
-        if not line_starts:
-            return  # prose before the live block: no field line has started yet
-        first = min(line_starts)
-        anchored = {marker.group(1) for marker in markers if marker.start() in line_starts}
-        chosen = []
-        for name in (*LIVE_FIELDS, "Worker"):
-            found = [marker for marker in markers if marker.group(1) == name and marker.start() >= first]
-            if not found:
-                continue
-            if name == "Worker":
-                if name in anchored:
-                    found = [marker for marker in found if marker.start() in line_starts]
-                chosen.extend(found)  # no line-start Worker: several may share one reflowed line
-                continue
-            if name in anchored:
-                found = [marker for marker in found if marker.start() in line_starts]
-            else:
-                found = found[-1:]  # an earlier inline mention stays in the value before it
-            chosen.extend(found)
-        chosen.sort(key=lambda marker: marker.start())
-        for index, marker in enumerate(chosen):
-            end = chosen[index + 1].start() if index + 1 < len(chosen) else len(text)
-            value = text[marker.end() : end].replace("\n", " ").strip() or "?"
+    for stripped, first in field_lines:
+        markers = [first]
+        markers.extend(
+            marker for marker in LIVE_MARKER.finditer(stripped, first.end()) if marker.group(1) not in anchored
+        )
+        for index, marker in enumerate(markers):
+            end = markers[index + 1].start() if index + 1 < len(markers) else len(stripped)
+            value = stripped[marker.end() : end].strip() or "?"
             name = marker.group(1)
             if name == "Worker":
                 values["Worker"].append(value)
             elif values[name] is None:
                 values[name] = value
-
-    for line in (*lines, ""):
-        stripped = line.strip()
-        starts_other_field = OTHER_LABEL.match(stripped) and not LIVE_MARKER.match(stripped)
-        if stripped and not starts_other_field:
-            paragraph.append(stripped)
-        else:
-            read_paragraph()
-            paragraph.clear()
     return values
 
 

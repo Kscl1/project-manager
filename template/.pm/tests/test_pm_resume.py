@@ -1043,7 +1043,7 @@ class ResumeSummaryTest(unittest.TestCase):
 
 
 class LiveBlockParsingTest(unittest.TestCase):
-    """A formatter may reflow the live block into one paragraph or wrap a long value onto later lines."""
+    """A formatter may join the live block into one line; notes after the block never add a field."""
 
     @classmethod
     def setUpClass(cls):
@@ -1067,25 +1067,6 @@ class LiveBlockParsingTest(unittest.TestCase):
         self.assertEqual(live["Needs owner"], "nothing")
         self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
 
-    def test_wrapped_value_continues_until_the_next_field(self):
-        lines = [
-            "Next: Read the failing test and write down what it expects before changing the runner",
-            "so the next session starts from the same place",
-            "Evidence: abc123 passed 4 tests",
-            "Worker: GPT-6 Luna · .worktrees/b1-resume",
-            "· .worktrees/b1-resume/.pm-report.md",
-        ]
-
-        live = self.pm_resume.parse_live_block(lines)
-
-        self.assertEqual(
-            live["Next"],
-            "Read the failing test and write down what it expects before changing the runner so the next session "
-            "starts from the same place",
-        )
-        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
-        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
-
     def test_untouched_block_reads_as_before(self):
         live = self.pm_resume.parse_live_block(LIVE_BLOCK.splitlines())
 
@@ -1097,8 +1078,10 @@ class LiveBlockParsingTest(unittest.TestCase):
 
     def test_inline_mention_does_not_restart_a_field(self):
         lines = [
-            "Next: Check the log and see Evidence: below Evidence: abc123 passed 4 tests Blocker: none "
-            "Needs owner: nothing"
+            "Next: Check the log and see Evidence: below",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
         ]
 
         live = self.pm_resume.parse_live_block(lines)
@@ -1184,34 +1167,44 @@ class LiveBlockParsingTest(unittest.TestCase):
         self.assertEqual(live["Needs owner"], "nothing")
         self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
 
-    def test_wrapped_value_joins_before_the_review_lines(self):
+    def test_a_dated_note_after_the_block_adds_no_field(self):
         lines = [
-            "Next: Read the failing test and write down what it expects before changing the runner",
-            "so the next session starts from the same place",
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
             "Review by: 2026-10-17 · owner · the replay passed",
             "Reviewed: 2026-10-12",
+            "7 Oct (X-1): text that mentions Worker: and Evidence: in passing",
         ]
 
         live = self.pm_resume.parse_live_block(lines)
 
-        self.assertEqual(
-            live["Next"],
-            "Read the failing test and write down what it expects before changing the runner so the next session "
-            "starts from the same place",
-        )
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
 
-    def test_a_continuation_line_starting_lowercase_still_joins_the_value(self):
+        review = self.pm_resume.review_fields(lines)
+        self.assertEqual(review["review_by"], "2026-10-17 · owner · the replay passed")
+        self.assertEqual(review["reviewed"], "2026-10-12")
+
+    def test_a_note_line_is_ignored_even_when_no_line_carries_its_field(self):
         lines = [
-            "Next: Read the log",
-            "then note the time: the replay starts at 12:00",
-            "Review by: 2026-10-17 · owner · the replay passed",
+            "Next: Run tests",
+            "Blocker: none",
+            "7 Oct (X-1): ask the Worker: coordinator before the replay",
         ]
 
         live = self.pm_resume.parse_live_block(lines)
 
-        self.assertEqual(live["Next"], "Read the log then note the time: the replay starts at 12:00")
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Worker"], [])
 
-    def test_any_capitalised_label_line_ends_the_open_value(self):
+    def test_a_label_line_that_is_not_a_live_field_is_ignored(self):
         lines = [
             "Next: Run tests",
             "Needs owner: nothing",
@@ -1223,6 +1216,7 @@ class LiveBlockParsingTest(unittest.TestCase):
 
         self.assertEqual(live["Next"], "Run tests")
         self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], [])
 
 
 class FrontmatterTitleTest(unittest.TestCase):
