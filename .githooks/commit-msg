@@ -2,6 +2,7 @@
 # The product repo's commit message check, run as the commit-msg hook (git config core.hooksPath .githooks):
 # - title: type(scope): subject, types feat fix docs refactor test chore, no trailing period
 #   (git's own "Merge ..." and "Revert ..." titles are allowed)
+# - an empty line right after the title, so git does not read a body as part of the title
 # - ends with Assisted-by: <model> (<thinking level>); a squash lists each model once;
 #   merge commits may omit it; work done without a model ends with: Assisted-by: none (human)
 # - no Co-authored-by and no "Generated with" lines
@@ -29,6 +30,11 @@ case "$title" in
        add "no period at the end of the title"
      fi ;;
 esac
+
+# git reads the title as the first paragraph, up to the first empty line: text on the line right after
+# the title is shown as part of the title.
+after_title=$(printf '%s\n' "$msg" | sed -n '/[^[:space:]]/{n;p;q;}')
+[ -n "$after_title" ] && add "leave a blank line after the title (a body right below it becomes part of the title)"
 
 trailers=$(printf '%s\n' "$msg" | grep -i '^assisted-by' || true)
 if [ -n "$trailers" ]; then
