@@ -50,6 +50,9 @@ LIVE_FIELDS = ("Next", "Evidence", "Blocker", "Needs owner")
 # A formatter may join the block into one paragraph or wrap a value, so a field may start mid-line. The name
 # must be a known field at a word boundary, followed by an optional parenthetical and a colon.
 LIVE_MARKER = re.compile(r"(?<!\w)(Next|Evidence|Blocker|Needs owner|Worker)(?:\s*\([^)]*\))?:")
+# A line that starts another field of the task record (`Review by:`, `Reviewed:`, `Audit report:`) is not a
+# wrapped live value: it ends the open value. Such a label is capitalised and holds at most three words.
+OTHER_LABEL = re.compile(r"^[A-Z][\w'-]*(?:\s+[\w'-]+){0,2}:")
 NOT_SET = "not set"  # a live-block line the task does not carry yet; `?` reads as an error to a beginner
 # A `Needs owner:` line holding one of these words asks for nothing; `yok` is Turkish for "none" and older
 # task files use it.
@@ -167,7 +170,8 @@ def parse_live_block(lines):
     and an earlier inline mention stays in the value before it (for example "see Evidence: below").
     Where no line starts with a field, the last inline mention opens it, so an earlier mention stays
     text. A Worker entry that starts a line is likewise authoritative; where no Worker starts a line,
-    every joined Worker entry is kept. Lines without a marker continue the open value.
+    every joined Worker entry is kept. Lines without a label continue the open value, while a line that starts
+    another record field (`Review by:`, `Reviewed:`) ends it and stays out of the live block.
     """
     values = {name: None for name in (*LIVE_FIELDS, "Worker")}
     values["Worker"] = []
@@ -210,7 +214,8 @@ def parse_live_block(lines):
 
     for line in (*lines, ""):
         stripped = line.strip()
-        if stripped:
+        starts_other_field = OTHER_LABEL.match(stripped) and not LIVE_MARKER.match(stripped)
+        if stripped and not starts_other_field:
             paragraph.append(stripped)
         else:
             read_paragraph()

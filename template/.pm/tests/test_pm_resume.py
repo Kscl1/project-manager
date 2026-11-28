@@ -1146,6 +1146,84 @@ class LiveBlockParsingTest(unittest.TestCase):
         )
         self.assertEqual(live["Evidence"], "abc123")
 
+    def test_review_lines_after_the_block_stay_out_of_the_last_value(self):
+        lines = [
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Evidence"], "abc123 passed 4 tests")
+        self.assertEqual(live["Blocker"], "none")
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], [])
+
+        review = self.pm_resume.review_fields(lines)
+        self.assertEqual(review["review_by"], "2026-10-17 · owner · the replay passed")
+        self.assertEqual(review["reviewed"], "2026-10-12")
+
+    def test_review_lines_after_a_worker_line_stay_out_of_its_value(self):
+        lines = [
+            "Next: Run tests",
+            "Evidence: abc123 passed 4 tests",
+            "Blocker: none",
+            "Needs owner: nothing",
+            "Worker: GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Needs owner"], "nothing")
+        self.assertEqual(live["Worker"], ["GPT-6 Luna · .worktrees/b1-resume · .worktrees/b1-resume/.pm-report.md"])
+
+    def test_wrapped_value_joins_before_the_review_lines(self):
+        lines = [
+            "Next: Read the failing test and write down what it expects before changing the runner",
+            "so the next session starts from the same place",
+            "Review by: 2026-10-17 · owner · the replay passed",
+            "Reviewed: 2026-10-12",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(
+            live["Next"],
+            "Read the failing test and write down what it expects before changing the runner so the next session "
+            "starts from the same place",
+        )
+
+    def test_a_continuation_line_starting_lowercase_still_joins_the_value(self):
+        lines = [
+            "Next: Read the log",
+            "then note the time: the replay starts at 12:00",
+            "Review by: 2026-10-17 · owner · the replay passed",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Read the log then note the time: the replay starts at 12:00")
+
+    def test_any_capitalised_label_line_ends_the_open_value(self):
+        lines = [
+            "Next: Run tests",
+            "Needs owner: nothing",
+            "Audit report: .pm/local/audits/replay.md",
+            "Note: the replay is checked by hand",
+        ]
+
+        live = self.pm_resume.parse_live_block(lines)
+
+        self.assertEqual(live["Next"], "Run tests")
+        self.assertEqual(live["Needs owner"], "nothing")
+
 
 class FrontmatterTitleTest(unittest.TestCase):
     """Backlog writes long titles as folded YAML and escapes apostrophes by doubling them."""
